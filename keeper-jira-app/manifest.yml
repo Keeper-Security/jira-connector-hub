@@ -1,0 +1,47 @@
+modules:
+  jira:globalPage:
+    - key: keeper-global-page
+      resource: keeper-ui
+      resolver:
+        function: keeperResolver
+      title: Keeper
+      icon: https://keeper-email-images.s3.amazonaws.com/common/512x512_icon.png
+
+  jira:issuePanel:
+    - key: keeper-issue-panel
+      resource: keeper-issue-ui
+      resolver:
+        function: keeperIssueResolver
+      title: Keeper
+      icon: https://keeper-email-images.s3.amazonaws.com/common/512x512_icon.png
+
+  function:
+    - key: keeperResolver
+      handler: index.handler
+    - key: keeperIssueResolver
+      handler: index.issuePanelHandler
+      
+resources:
+  - key: keeper-ui
+    path: static/keeper-ui/build
+  - key: keeper-issue-ui
+    path: static/keeper-issue-ui/build
+
+permissions:
+  scopes:
+    - read:jira-work
+    - write:jira-work
+    - storage:app
+    - read:jira-user
+  external:
+    fetch:
+      backend:
+        - address: https://*.ngrok-free.app
+        - address: https://*.ngrok.io
+        - address: https://*.ngrok.app
+app:
+  runtime:
+    name: nodejs22.x
+    memoryMB: 256
+    architecture: arm64
+  id: ari:cloud:ecosystem::app/17f663b8-b04b-452d-8987-60baaa6d7ade
