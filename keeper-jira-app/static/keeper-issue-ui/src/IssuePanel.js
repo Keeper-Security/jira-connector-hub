@@ -359,6 +359,14 @@ const IssuePanel = () => {
       const result = await invoke("getKeeperRecords");
       setKeeperRecords(result.records || []);
     } catch (error) {
+      // Handle error
+      let errorMessage = error.message || "Failed to fetch Keeper records";
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setKeeperRecords([]);
     } finally {
       setLoadingRecords(false);
@@ -372,6 +380,14 @@ const IssuePanel = () => {
       const result = await invoke("getKeeperFolders");
       setKeeperFolders(result.folders || []);
     } catch (error) {
+      // Handle error
+      let errorMessage = error.message || "Failed to fetch Keeper folders";
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setKeeperFolders([]);
     } finally {
       setLoadingFolders(false);
@@ -393,6 +409,14 @@ const IssuePanel = () => {
       
       setPamResources(pamResources);
     } catch (error) {
+      // Handle error
+      let errorMessage = error.message || "Failed to fetch PAM resources";
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setPamResources([]);
     } finally {
       setLoadingPamResources(false);
@@ -644,6 +668,14 @@ const IssuePanel = () => {
       fetchRecordTypes();
       
     } catch (error) {
+      // Handle error
+      let errorMessage = error.message || "Failed to fetch record details";
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setRecordDetails({});
       setDynamicCustomFields([]);
     } finally {
@@ -668,6 +700,14 @@ const IssuePanel = () => {
         setRecordTypes([]);
       }
     } catch (error) {
+      // Handle error
+      let errorMessage = error.message || "Failed to fetch record types";
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setRecordTypes([]);
     } finally {
       setLoadingRecordTypes(false);
@@ -837,7 +877,10 @@ const IssuePanel = () => {
         alert("Request data saved successfully! An admin can now review and approve your request.");
       }
     } catch (error) {
-      alert("Failed to save request data. Please try again.");
+      // Handle error
+      let errorMessage = error.message || "Failed to save request data. Please try again.";
+      
+      alert(errorMessage);
     } finally {
       setIsUpdating(false);
     }
@@ -1031,7 +1074,7 @@ const IssuePanel = () => {
     if (addressUid.startsWith('addr_') && !addressUid.startsWith('temp_addr_')) {
       const addressDetails = resolvedAddresses[addressUid];
       if (addressDetails) {
-        // Handle error states
+        // Check error state
         if (addressDetails.hasError) {
           return `Error: ${addressDetails.error}`;
         }
@@ -1053,7 +1096,7 @@ const IssuePanel = () => {
     
     // Prioritize cached result over loading state
     if (addressDetails) {
-      // Handle error states
+      // Check error state
       if (addressDetails.hasError) {
         return `Error: ${addressDetails.error}`;
       }
@@ -1115,6 +1158,14 @@ const IssuePanel = () => {
       
       setAddressRecords(addressRecords);
     } catch (error) {
+      // Handle error
+      let errorMessage = error.message || "Failed to fetch address records";
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setAddressRecords([]);
     } finally {
       setLoadingAddressRecords(false);
@@ -1159,6 +1210,13 @@ const IssuePanel = () => {
         setNewAddressFormData(initialFormData);
       }
     } catch (error) {
+      // Handle error
+      let errorMessage = error.message || "Failed to fetch address template";
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
     } finally {
       setLoadingAddressTemplate(false);
     }
@@ -1761,6 +1819,14 @@ const IssuePanel = () => {
         setTemplateFields([]);
       }
     } catch (error) {
+      // Handle error
+      let errorMessage = error.message || "Failed to fetch record type template";
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setRecordTypeTemplate({});
       setTemplateFields([]);
     }
@@ -4335,7 +4401,6 @@ const IssuePanel = () => {
               }}
               onClick={() => {
                 if (!isFormDisabled) {
-                  // TODO: Implement file selection logic
                   alert('File selection functionality will be implemented soon');
                 }
               }}
@@ -4352,7 +4417,7 @@ const IssuePanel = () => {
                 {fileDisplayValue}
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                <span style={{ fontSize: '12px', color: '#6B778C' }}>📁</span>
+                <span style={{ fontSize: '12px', color: '#6B778C' }}>FOLDER</span>
               </div>
             </div>
           </div>
@@ -4376,7 +4441,6 @@ const IssuePanel = () => {
               }}
               onClick={() => {
                 if (!isFormDisabled) {
-                  // TODO: Implement card selection logic
                   alert('Payment card selection functionality will be implemented soon');
                 }
               }}
@@ -4393,7 +4457,7 @@ const IssuePanel = () => {
                 {cardDisplayValue}
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                <span style={{ fontSize: '12px', color: '#6B778C' }}>💳</span>
+                <span style={{ fontSize: '12px', color: '#6B778C' }}>CARD</span>
               </div>
             </div>
           </div>
@@ -4846,16 +4910,17 @@ const IssuePanel = () => {
 
     } catch (error) {
       
-      // Check for specific PAM Configuration error
+      // Handle error
       let errorMessage = error.message || "An unknown error occurred";
       
+      // PAM Configuration error check
       if (selectedAction.value === 'pam-action-rotate' && 
           (errorMessage.includes('PAM Configuration') && errorMessage.includes('is not available'))) {
         errorMessage = `PAM Configuration Error: No PAM Configuration is available. Please:\n\n` +
                       `1. Create a PAM Configuration in Keeper Vault:\n` +
-                      `   • Go to Secrets Manager > PAM Configurations\n` +
-                      `   • Click "New Configuration"\n` +
-                      `   • Configure Gateway and environment settings\n\n` +
+                      `   - Go to Secrets Manager > PAM Configurations\n` +
+                      `   - Click "New Configuration"\n` +
+                      `   - Configure Gateway and environment settings\n\n` +
                       `2. Enable Rotation feature in PAM Settings\n\n` +
                       `3. Create records with PAM types (pamMachine, pamUser, pamDatabase)\n\n` +
                       `4. Verify proper access permissions to the PAM Configuration\n\n` +
@@ -4912,9 +4977,12 @@ const IssuePanel = () => {
       setFormData({});
 
     } catch (error) {
+      // Handle error
+      let errorMessage = error.message || "An error occurred while rejecting the request.";
+      
       setRejectionResult({ 
         success: false, 
-        message: error.message || "An error occurred while rejecting the request." 
+        message: errorMessage
       });
     } finally {
       setIsRejecting(false);
@@ -6351,7 +6419,7 @@ const IssuePanel = () => {
                                       {folder.name || folder.title || `Folder ${folder.folder_uid}`}
                                     </div>
                                     <div style={{ fontSize: "11px", color: "#6B778C", marginTop: "2px" }}>
-                                      UID: {folder.folder_uid} • Shared Folder (flags: {folder.flags})
+                                      UID: {folder.folder_uid} - Shared Folder (flags: {folder.flags})
                                     </div>
                                   </div>
                                 ))}
@@ -6482,10 +6550,10 @@ const IssuePanel = () => {
                             }}
                           >
                             <strong>Prerequisites:</strong> Ensure you have a PAM Configuration set up in Keeper Vault with:
-                            <br />• Associated Gateway configured and running
-                            <br />• "Rotation" feature enabled in PAM Settings
-                            <br />• Proper access permissions to the PAM Configuration
-                            <br />• Records with PAM types (pamMachine, pamUser, pamDatabase) created
+                            <br />- Associated Gateway configured and running
+                            <br />- "Rotation" feature enabled in PAM Settings
+                            <br />- Proper access permissions to the PAM Configuration
+                            <br />- Records with PAM types (pamMachine, pamUser, pamDatabase) created
                           </div>
                         </div>
                       )}

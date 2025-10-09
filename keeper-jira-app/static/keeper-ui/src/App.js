@@ -300,18 +300,6 @@ const App = () => {
                 </div>
               )}
 
-              {hasExistingConfig && !saved && (
-                <SectionMessage appearance="information" title="Existing Configuration Loaded">
-                  Your previously saved settings are displayed below. You can modify them and click "Update Settings" to save changes.
-                </SectionMessage>
-              )}
-
-              {saved && (
-                <SectionMessage appearance="confirmation" title="Saved!">
-                  Keeper configuration {hasExistingConfig ? 'updated' : 'saved'} successfully.
-                </SectionMessage>
-              )}
-
               {isCheckingAdmin ? (
                 <div style={{ textAlign: "center", padding: "20px" }}>
                   <p>Checking admin permissions...</p>
@@ -325,7 +313,21 @@ const App = () => {
                     </p>
                   </SectionMessage>
                 </div>
-              ) : isLoading ? (
+              ) : (
+                <>
+                  {hasExistingConfig && !saved && (
+                    <SectionMessage appearance="information" title="Existing Configuration Loaded">
+                      Your previously saved settings are displayed below. You can modify them and click "Update Settings" to save changes.
+                    </SectionMessage>
+                  )}
+
+                  {saved && (
+                    <SectionMessage appearance="confirmation" title="Saved!">
+                      Keeper configuration {hasExistingConfig ? 'updated' : 'saved'} successfully.
+                    </SectionMessage>
+                  )}
+
+                  {isLoading ? (
                 <div style={{ textAlign: "center", padding: "20px" }}>
                   <p>Loading configuration...</p>
                 </div>
@@ -554,6 +556,8 @@ const App = () => {
                   </form>
                   )}
                 </Form>
+                  )}
+                </>
               )}
             </>
           )}
