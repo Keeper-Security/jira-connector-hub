@@ -129,7 +129,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
     case 'record-add':
       // Use the recordType parameter if provided, otherwise default to login
       const recordType = parameters.recordType || 'login';
-      command += ` --record-type=${recordType}`;
+      command += ` --record-type='${recordType}'`;
       
       // Title is required for all record types
       if (!parameters.title) {
@@ -270,16 +270,16 @@ function buildKeeperCommand(action, parameters, issueKey) {
         if (value) {
           // Handle custom fields (c.text.Department, c.secret.API_Key, etc.)
           if (key.startsWith('c.')) {
-            command += ` ${key}="${value}"`;
+              command += ` ${key}='${value}'`;
           }
           // Handle grouped fields that don't need JSON (like paymentCard_cardNumber)
           else if (key.includes('_')) {
             const [prefix, suffix] = key.split('_', 2);
-            command += ` ${suffix}="${value}"`;
+            command += ` ${suffix}='${value}'`;
           }
           // Single fields (login, password, url, email, etc.)
           else {
-            command += ` ${key}="${value}"`;
+            command += ` ${key}='${value}'`;
           }
         }
       });
@@ -301,30 +301,31 @@ function buildKeeperCommand(action, parameters, issueKey) {
           }
         }
       });
+      
       break;
       
     case 'record-update':
       // Required record parameter
       if (parameters.record) {
-        command += ` --record="${parameters.record}"`;
+        command += ` --record='${parameters.record}'`;
       }
       
       // Optional title update
       if (parameters.title) {
-        command += ` --title="${parameters.title}"`;
+        command += ` --title='${parameters.title}'`;
       }
       
       // Optional record type change
       if (parameters.recordType) {
-        command += ` --record-type="${parameters.recordType}"`;
+        command += ` --record-type='${parameters.recordType}'`;
       }
       
       // Notes handling (with + prefix to append, without to replace)
       if (parameters.notes) {
         if (parameters.appendNotes === true) {
-          command += ` --notes="+${parameters.notes}"`;
+          command += ` --notes='+${parameters.notes}'`;
         } else {
-          command += ` --notes="${parameters.notes}"`;
+          command += ` --notes='${parameters.notes}'`;
         }
       }
       
@@ -423,33 +424,33 @@ function buildKeeperCommand(action, parameters, issueKey) {
           
           switch (fieldGroup) {
             case 'login':
-              command += ` login="${value}"`;
+              command += ` login='${value}'`;
               break;
               
             case 'password':
               if (value === '$GEN' || value === 'generate') {
                 command += ` password=$GEN`;
               } else {
-                command += ` password="${value}"`;
+                command += ` password='${value}'`;
               }
               break;
               
             case 'url':
-              command += ` url="${value}"`;
+              command += ` url='${value}'`;
               break;
               
             case 'email':
-              command += ` email="${value}"`;
+              command += ` email='${value}'`;
               break;
               
             case 'date':
               // Handle different date formats
               if (value.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                command += ` date="${value}"`;
+                command += ` date='${value}'`;
               } else if (value.match(/^\d+$/)) {
                 command += ` date=${value}`;
               } else {
-                command += ` date="${value}"`;
+                command += ` date='${value}'`;
               }
               break;
               
@@ -457,12 +458,12 @@ function buildKeeperCommand(action, parameters, issueKey) {
             case 'multiline':
             case 'secret':
               // Handle as custom field with appropriate type
-              command += ` c.${fieldGroup}.${fieldGroup}="${value}"`;
+              command += ` c.${fieldGroup}.${fieldGroup}='${value}'`;
               break;
               
             default:
               // Any other single field as custom text field
-              command += ` c.text.${fieldGroup}="${value}"`;
+              command += ` c.text.${fieldGroup}='${value}'`;
               break;
           }
         }
@@ -483,13 +484,13 @@ function buildKeeperCommand(action, parameters, issueKey) {
           
           // Detect field type and format accordingly
           if (customFieldName.toLowerCase().includes('secret') || customFieldName.toLowerCase().includes('key')) {
-            command += ` c.secret.${customFieldName}="${customValue}"`;
+            command += ` c.secret.${customFieldName}='${customValue}'`;
           } else if (customFieldName.toLowerCase().includes('date') || customFieldName.toLowerCase().includes('expir')) {
-            command += ` c.date.${customFieldName}="${customValue}"`;
+            command += ` c.date.${customFieldName}='${customValue}'`;
           } else if (customValue.includes('\n') || customValue.length > 100) {
-            command += ` c.multiline.${customFieldName}="${customValue}"`;
+            command += ` c.multiline.${customFieldName}='${customValue}'`;
           } else {
-            command += ` c.text.${customFieldName}="${customValue}"`;
+            command += ` c.text.${customFieldName}='${customValue}'`;
           }
         }
       });
@@ -536,30 +537,31 @@ function buildKeeperCommand(action, parameters, issueKey) {
         command += ` --force`;
       }
       
+      
       break;
       
     case 'record-permissions':
       if (parameters.record) {
-        command += ` --record="${parameters.record}"`;
+        command += ` --record='${parameters.record}'`;
       }
       if (parameters.user) {
-        command += ` --user="${parameters.user}"`;
+        command += ` --user='${parameters.user}'`;
       }
       if (parameters.action) {
-        command += ` --action="${parameters.action}"`;
+        command += ` --action='${parameters.action}'`;
       }
       if (parameters.permissions) {
-        command += ` --permissions="${parameters.permissions}"`;
+        command += ` --permissions='${parameters.permissions}'`;
       }
       break;
       
     case 'share-record':
       // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R]
       if (parameters.record) {
-        command += ` "${parameters.record}"`;
+        command += ` '${parameters.record}'`;
       }
       if (parameters.user) {
-        command += ` -e "${parameters.user}"`;
+        command += ` -e '${parameters.user}'`;
       }
       if (parameters.action) {
         command += ` -a ${parameters.action}`;
@@ -579,10 +581,10 @@ function buildKeeperCommand(action, parameters, issueKey) {
     case 'share-folder':
       // Format: share-folder "FOLDER_UID" -e "EMAIL" -a "ACTION" [options]
       if (parameters.folder) {
-        command += ` "${parameters.folder}"`;
+        command += ` '${parameters.folder}'`;
       }
       if (parameters.user) {
-        command += ` -e "${parameters.user}"`;
+        command += ` -e '${parameters.user}'`;
       }
       if (parameters.action) {
         command += ` -a ${parameters.action}`;
@@ -604,76 +606,76 @@ function buildKeeperCommand(action, parameters, issueKey) {
       
     case 'pam-action-rotate':
       if (parameters.record) {
-        command += ` --record="${parameters.record}"`;
+        command += ` --record='${parameters.record}'`;
       }
       if (parameters.schedule) {
-        command += ` --schedule="${parameters.schedule}"`;
+        command += ` --schedule='${parameters.schedule}'`;
       }
       break;
       
     case 'audit-report':
       if (parameters.report_type) {
-        command += ` --report-type="${parameters.report_type}"`;
+        command += ` --report-type='${parameters.report_type}'`;
       }
       if (parameters.report_format) {
-        command += ` --report-format="${parameters.report_format}"`;
+        command += ` --report-format='${parameters.report_format}'`;
       }
       if (parameters.max_events) {
-        command += ` --max-events="${parameters.max_events}"`;
+          command += ` --max-events='${parameters.max_events}'`;
       }
       break;
       
     case 'compliance-report':
       if (parameters.report_format) {
-        command += ` --report-format="${parameters.report_format}"`;
+        command += ` --report-format='${parameters.report_format}'`;
       }
       if (parameters.node) {
-        command += ` --node="${parameters.node}"`;
+        command += ` --node='${parameters.node}'`;
       }
       break;
       
     case 'enterprise-user':
       if (parameters.action) {
-        command += ` --action="${parameters.action}"`;
+        command += ` --action='${parameters.action}'`;
       }
       if (parameters.email) {
-        command += ` --email="${parameters.email}"`;
+        command += ` --email='${parameters.email}'`;
       }
       if (parameters.name) {
-        command += ` --name="${parameters.name}"`;
+        command += ` --name='${parameters.name}'`;
       }
       if (parameters.node) {
-        command += ` --node="${parameters.node}"`;
+        command += ` --node='${parameters.node}'`;
       }
       break;
       
     case 'enterprise-team':
       if (parameters.action) {
-        command += ` --action="${parameters.action}"`;
+        command += ` --action='${parameters.action}'`;
       }
       if (parameters.team) {
-        command += ` --team="${parameters.team}"`;
+        command += ` --team='${parameters.team}'`;
       }
       if (parameters.user) {
-        command += ` --user="${parameters.user}"`;
+        command += ` --user='${parameters.user}'`;
       }
       if (parameters.node) {
-        command += ` --node="${parameters.node}"`;
+        command += ` --node='${parameters.node}'`;
       }
       break;
       
     case 'enterprise-role':
       if (parameters.action) {
-        command += ` --action="${parameters.action}"`;
+          command += ` --action='${parameters.action}'`;
       }
       if (parameters.role) {
-        command += ` --role="${parameters.role}"`;
+        command += ` --role='${parameters.role}'`;
       }
       if (parameters.node) {
-        command += ` --node="${parameters.node}"`;
+        command += ` --node='${parameters.node}'`;
       }
       if (parameters.permissions) {
-        command += ` --permissions="${parameters.permissions}"`;
+        command += ` --permissions='${parameters.permissions}'`;
       }
       break;
       
@@ -681,7 +683,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
       // For any other commands, add parameters as key=value pairs
       Object.keys(parameters).forEach(key => {
         if (parameters[key]) {
-          command += ` ${key}="${parameters[key]}"`;
+            command += ` ${key}='${parameters[key]}'`;
         }
       });
   }
@@ -918,7 +920,7 @@ resolver.define('getRecordTypeTemplate', async (req) => {
         'api-key': apiKey,
       },
       body: JSON.stringify({
-        command: `record-type-info -lr ${recordType} -e --format=json`,
+        command: `record-type-info -lr='${recordType}' -e --format=json`,
       }),
     });
 
@@ -1561,6 +1563,7 @@ resolver.define('getStoredRequestData', async (req) => {
     throw err;
   }
 });
+
 
 // Clear stored request data
 resolver.define('clearStoredRequestData', async (req) => {

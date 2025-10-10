@@ -25,7 +25,7 @@ const keeperActionOptions = [
   },
   { 
     value: 'record-update', 
-    label: 'Update Record', 
+    label: 'Update Record',
     description: 'Update existing record fields. Only fill in the fields you want to change.',
     fields: [
       { name: 'record', label: 'Record ID/Title', type: 'text', required: true, placeholder: 'Record ID or title to update' },

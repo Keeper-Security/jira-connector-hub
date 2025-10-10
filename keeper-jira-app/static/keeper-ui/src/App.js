@@ -30,6 +30,12 @@ const App = () => {
   const [connectionTestResult, setConnectionTestResult] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isCheckingAdmin, setIsCheckingAdmin] = useState(true);
+  const [showExistingConfigMessage, setShowExistingConfigMessage] = useState(false);
+  
+  // New states for connection testing workflow
+  const [originalFormValues, setOriginalFormValues] = useState({ apiUrl: "", apiKey: "" });
+  const [hasFormChanges, setHasFormChanges] = useState(false);
+  const [connectionTested, setConnectionTested] = useState(false);
 
   useEffect(() => {
     // Check admin status first
@@ -46,16 +52,25 @@ const App = () => {
     setIsLoading(true);
     invoke("getConfig").then((config) => {
       if (config && (config.apiUrl || config.apiKey)) {
-        setFormValues({
+        const loadedValues = {
           apiUrl: config.apiUrl || "",
           apiKey: config.apiKey || "",
-        });
+        };
+        setFormValues(loadedValues);
+        setOriginalFormValues(loadedValues);
         setHasExistingConfig(true);
+        setConnectionTested(false); // Require connection test even for existing config
+        // Show the existing configuration message for 3 seconds
+        setShowExistingConfigMessage(true);
+        setTimeout(() => setShowExistingConfigMessage(false), 3000);
       } else {
-        setFormValues({
+        const emptyValues = {
           apiUrl: "",
           apiKey: "",
-        });
+        };
+        setFormValues(emptyValues);
+        setOriginalFormValues(emptyValues);
+        setConnectionTested(false);
       }
       // Update form key to force re-render with loaded values
       setFormKey(prev => prev + 1);
@@ -65,6 +80,20 @@ const App = () => {
     });
   }, []);
 
+  // Track form changes
+  useEffect(() => {
+    // Check if form values have changed from original
+    const hasChanges = formValues.apiUrl !== originalFormValues.apiUrl || 
+                      formValues.apiKey !== originalFormValues.apiKey;
+    
+    setHasFormChanges(hasChanges);
+    
+    // If there are changes, reset connection test status
+    if (hasChanges) {
+      setConnectionTested(false);
+      setConnectionTestResult(null);
+    }
+  }, [formValues.apiUrl, formValues.apiKey, originalFormValues]);
 
   const handleSubmit = async (data) => {
     try {
@@ -75,12 +104,17 @@ const App = () => {
         apiUrl: data.apiUrl || "",
         apiKey: data.apiKey || "",
       });
+      setOriginalFormValues({
+        apiUrl: data.apiUrl || "",
+        apiKey: data.apiKey || "",
+      });
       
       // Force form to re-render with new values
       setFormKey(prev => prev + 1);
       
       setSaved(true);
       setHasExistingConfig(true);
+      setConnectionTested(true); // Mark as tested since we just saved successfully
       setTimeout(() => setSaved(false), 3000);
     } catch (error) {
       // Show user-friendly error
@@ -134,6 +168,7 @@ const App = () => {
         serviceStatus: result.serviceStatus,
         isServiceRunning: result.isServiceRunning
       });
+      setConnectionTested(true); // Mark connection as tested and successful
       
       // Clear the result after 5 seconds
       setTimeout(() => setConnectionTestResult(null), 5000);
@@ -170,6 +205,7 @@ const App = () => {
         success: false,
         message: errorMessage
       });
+      setConnectionTested(false); // Mark connection test as failed
       
       // Clear the result after 8 seconds for errors (longer than success messages)
       setTimeout(() => setConnectionTestResult(null), 8000);
@@ -315,7 +351,7 @@ const App = () => {
                 </div>
               ) : (
                 <>
-                  {hasExistingConfig && !saved && (
+                  {showExistingConfigMessage && (
                     <SectionMessage appearance="information" title="Existing Configuration Loaded">
                       Your previously saved settings are displayed below. You can modify them and click "Update Settings" to save changes.
                     </SectionMessage>
@@ -521,38 +557,91 @@ const App = () => {
                       </div>
                     )}
 
-                    <FormFooter>
-                      <div style={buttonWrapperStyle}>
-                        <Button
-                          appearance="primary"
-                          type="submit"
-                          isLoading={submitting}
-                          style={{
-                            width: "30%",
-                            padding: "14px",
-                            borderRadius: "8px",
-                            backgroundColor: submitting ? "#FFC700" : "#FFD700",
-                            color: "#1A1A1A",
-                            fontSize: "16px",
-                            fontWeight: "600",
-                            transition: "background-color 0.3s",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!submitting) e.target.style.backgroundColor = "#FFC700";
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!submitting) e.target.style.backgroundColor = "#FFD700";
-                          }}
-                        >
-                          {submitting 
-                            ? "Saving..." 
-                            : hasExistingConfig 
-                              ? "Update Settings" 
-                              : "Save Settings"
-                          }
-                        </Button>
+                    {/* Only show save/update button if connection is tested successfully */}
+                    {connectionTested && (
+                      <FormFooter>
+                        <div style={buttonWrapperStyle}>
+                          <Button
+                            appearance="primary"
+                            type="submit"
+                            isLoading={submitting}
+                            style={{
+                              width: "30%",
+                              padding: "14px",
+                              borderRadius: "8px",
+                              backgroundColor: submitting ? "#FFC700" : "#FFD700",
+                              color: "#1A1A1A",
+                              fontSize: "16px",
+                              fontWeight: "600",
+                              transition: "background-color 0.3s",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!submitting) e.target.style.backgroundColor = "#FFC700";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!submitting) e.target.style.backgroundColor = "#FFD700";
+                            }}
+                          >
+                            {submitting 
+                              ? "Saving..." 
+                              : hasExistingConfig 
+                                ? "Update Settings" 
+                                : "Save Settings"
+                            }
+                          </Button>
+                        </div>
+                      </FormFooter>
+                    )}
+                    
+                    {/* Show instructions when form is empty or connection test is required */}
+                    {(!formValues.apiUrl.trim() || !formValues.apiKey.trim()) && (
+                      <div style={{ 
+                        marginTop: "20px", 
+                        padding: "16px", 
+                        backgroundColor: "#E3F2FD", 
+                        border: "1px solid #2196F3", 
+                        borderRadius: "6px",
+                        textAlign: "center"
+                      }}>
+                        <div style={{ 
+                          fontSize: "14px", 
+                          color: "#1976D2",
+                          fontWeight: "500",
+                          marginBottom: "8px"
+                        }}>
+                          📋 Setup Instructions:
+                        </div>
+                        <div style={{ 
+                          fontSize: "13px", 
+                          color: "#1565C0",
+                          lineHeight: "1.4"
+                        }}>
+                          1. Fill in the API URL and API Key fields above<br/>
+                          2. Click "Test Connection" to verify your settings<br/>
+                          3. Once successful, the Save/Update button will appear
+                        </div>
                       </div>
-                    </FormFooter>
+                    )}
+                    
+                    {/* Show message when connection test is required */}
+                    {hasFormChanges && !connectionTested && formValues.apiUrl.trim() && formValues.apiKey.trim() && (
+                      <div style={{ 
+                        marginTop: "20px", 
+                        padding: "12px", 
+                        backgroundColor: "#FFF4E5", 
+                        border: "1px solid #FFD700", 
+                        borderRadius: "6px",
+                        textAlign: "center"
+                      }}>
+                        <span style={{ 
+                          fontSize: "14px", 
+                          color: "#B8860B",
+                          fontWeight: "500"
+                        }}>
+                          ⚠️ Please test the connection first before saving settings.
+                        </span>
+                      </div>
+                    )}
                   </form>
                   )}
                 </Form>
