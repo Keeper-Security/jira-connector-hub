@@ -637,10 +637,10 @@ const IssuePanel = () => {
         } else {
           // Show blank fields for different/new record
           
-          // Set blank form data for new record
+          // Set blank form data for new record with the original record type
           const blankFormData = {
             record: recordUid,
-            recordType: recordDetails?.recordType || 'login'
+            recordType: details.type || details.record_type || existingValues.recordType || ''
           };
           setFormData(blankFormData);
           

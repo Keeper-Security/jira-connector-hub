@@ -217,10 +217,11 @@ const App = () => {
   const renderLabel = (text) => (
     <span
       style={{
-        fontFamily: "Inter, Arial, sans-serif",
-        fontWeight: 500,
-        fontSize: "14px",
-        color: "#4B4B4B",
+        fontWeight: 600,
+        fontSize: "12px",
+        color: "#6B778C",
+        textTransform: "uppercase",
+        letterSpacing: "0.5px"
       }}
     >
       {text}
@@ -233,41 +234,20 @@ const App = () => {
     { key: "about", label: "About", icon: <InfoIcon size="medium" label="" /> },
   ];
 
-  const inputStyle = {
-    width: "60%",
-    padding: "12px",
-    marginTop: "6px",
-    marginBottom: "24px",
-    borderRadius: "8px",
-    border: "1px solid #E0E0E0",
-    outline: "none",
-    fontSize: "14px",
-    color: "#1A1A1A",
-    transition: "border-color 0.3s",
-  };
-
-    const buttonWrapperStyle = {
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      width: "100%",
-      marginTop: "20px",
-    };
-
   return (
     <div
       style={{
-        fontFamily: "Inter, Arial, sans-serif",
-        backgroundColor: "#F7F7FA",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif",
+        backgroundColor: "#F4F5F7",
         minHeight: "100vh",
-        padding: "40px",
+        padding: "24px",
       }}
     >
       <div
         style={{
-          borderRadius: "16px",
           backgroundColor: "#FFFFFF",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+          border: "1px solid #DFE1E6",
+          borderRadius: "3px",
           overflow: "hidden",
         }}
       >
@@ -275,8 +255,8 @@ const App = () => {
         <div
           style={{
             display: "flex",
-            borderBottom: "2px solid #E0E0E0",
-            backgroundColor: "#F9F9FB",
+            borderBottom: "2px solid #DFE1E6",
+            backgroundColor: "#FAFBFC",
           }}
         >
           {tabs.map((tab) => (
@@ -286,34 +266,35 @@ const App = () => {
               style={{
                 flex: 1,
                 textAlign: "center",
-                padding: "14px 0",
+                padding: "12px 16px",
                 cursor: "pointer",
                 fontWeight: activeTab === tab.key ? 600 : 400,
-                color: activeTab === tab.key ? "#FFD700" : "#4B4B4B",
+                fontSize: "14px",
+                color: activeTab === tab.key ? "#0052CC" : "#42526E",
                 borderBottom:
-                  activeTab === tab.key ? "3px solid #FFD700" : "3px solid transparent",
-                transition: "all 0.3s",
+                  activeTab === tab.key ? "2px solid #0052CC" : "2px solid transparent",
+                transition: "all 0.2s",
                 display: "flex",
                 justifyContent: "center",
                 alignItems: "center",
-                gap: "6px",
+                gap: "8px",
                 backgroundColor: activeTab === tab.key ? "#FFFFFF" : "transparent",
               }}
             >
-              {tab.icon}
+              <span style={{ color: activeTab === tab.key ? "#0052CC" : "#42526E" }}>{tab.icon}</span>
               <span>{tab.label}</span>
             </div>
           ))}
         </div>
 
         {/* Tab Panel */}
-        <div style={{ padding: "30px" }}>
+        <div style={{ padding: "24px" }}>
           {activeTab === "config" && (
             <>
-              <h2 style={{ fontWeight: "700", marginBottom: "12px", color: "#1A1A1A" }}>
+              <h2 style={{ fontWeight: "600", fontSize: "20px", marginBottom: "8px", color: "#172B4D" }}>
                 Configuration
               </h2>
-              <p style={{ color: "#4B4B4B", marginBottom: "24px" }}>
+              <p style={{ color: "#5E6C84", fontSize: "14px", marginBottom: "20px", lineHeight: "20px" }}>
                 Configure Keeper integration details. All fields are required. The integration will work with any Jira project.
               </p>
               
@@ -321,15 +302,15 @@ const App = () => {
               {!isCheckingAdmin && (
                 <div style={{ 
                   marginBottom: "16px", 
-                  padding: "8px 12px", 
-                  backgroundColor: isAdmin ? "#E3FCEF" : "#F0F8FF",
-                  borderRadius: "4px",
-                  border: isAdmin ? "1px solid #ABF5D1" : "1px solid #B3D8FF"
+                  padding: "12px 16px", 
+                  backgroundColor: isAdmin ? "#E3FCEF" : "#DEEBFF",
+                  borderRadius: "3px",
+                  border: isAdmin ? "1px solid #ABF5D1" : "1px solid #4C9AFF",
+                  fontSize: "14px"
                 }}>
                   <span style={{ 
-                    fontSize: "12px", 
                     fontWeight: "600",
-                    color: isAdmin ? "#006644" : "#0066CC"
+                    color: isAdmin ? "#006644" : "#0747A6"
                   }}>
                     {isAdmin ? "✓ Admin Access Granted" : "⚠ Limited Access"}
                   </span>
@@ -337,13 +318,13 @@ const App = () => {
               )}
 
               {isCheckingAdmin ? (
-                <div style={{ textAlign: "center", padding: "20px" }}>
+                <div style={{ textAlign: "center", padding: "20px", color: "#5E6C84" }}>
                   <p>Checking admin permissions...</p>
                 </div>
               ) : !isAdmin ? (
-                <div style={{ textAlign: "center", padding: "20px" }}>
+                <div style={{ padding: "16px 0" }}>
                   <SectionMessage appearance="warning" title="Access Restricted">
-                    <p style={{ margin: "8px 0", color: "#4B4B4B" }}>
+                    <p style={{ margin: "8px 0", color: "#42526E", fontSize: "14px", lineHeight: "20px" }}>
                       Only administrators can access the configuration page. 
                       Please contact your Jira administrator if you need to modify Keeper settings.
                     </p>
@@ -364,7 +345,7 @@ const App = () => {
                   )}
 
                   {isLoading ? (
-                <div style={{ textAlign: "center", padding: "20px" }}>
+                <div style={{ textAlign: "center", padding: "20px", color: "#5E6C84" }}>
                   <p>Loading configuration...</p>
                 </div>
               ) : (
@@ -489,33 +470,11 @@ const App = () => {
                     </Field>
 
                     {/* Test Connection Button */}
-                    <div style={{ marginTop: "20px", marginBottom: "20px" }}>
+                    <div style={{ marginTop: "16px", marginBottom: "16px" }}>
                       <Button
                         onClick={testConnection}
                         isLoading={isTestingConnection}
                         appearance="default"
-                        style={{
-                          padding: "12px 24px",
-                          borderRadius: "8px",
-                          backgroundColor: "#F4F5F7",
-                          color: "#1A1A1A",
-                          fontSize: "14px",
-                          fontWeight: "500",
-                          border: "1px solid #E0E0E0",
-                          transition: "all 0.3s",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!isTestingConnection) {
-                            e.target.style.backgroundColor = "#E8E9EB";
-                            e.target.style.borderColor = "#C1C7D0";
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!isTestingConnection) {
-                            e.target.style.backgroundColor = "#F4F5F7";
-                            e.target.style.borderColor = "#E0E0E0";
-                          }
-                        }}
                       >
                         {isTestingConnection ? "Testing..." : "Test Connection"}
                       </Button>
@@ -560,61 +519,42 @@ const App = () => {
                     {/* Only show save/update button if connection is tested successfully */}
                     {connectionTested && (
                       <FormFooter>
-                        <div style={buttonWrapperStyle}>
-                          <Button
-                            appearance="primary"
-                            type="submit"
-                            isLoading={submitting}
-                            style={{
-                              width: "30%",
-                              padding: "14px",
-                              borderRadius: "8px",
-                              backgroundColor: submitting ? "#FFC700" : "#FFD700",
-                              color: "#1A1A1A",
-                              fontSize: "16px",
-                              fontWeight: "600",
-                              transition: "background-color 0.3s",
-                            }}
-                            onMouseEnter={(e) => {
-                              if (!submitting) e.target.style.backgroundColor = "#FFC700";
-                            }}
-                            onMouseLeave={(e) => {
-                              if (!submitting) e.target.style.backgroundColor = "#FFD700";
-                            }}
-                          >
-                            {submitting 
-                              ? "Saving..." 
-                              : hasExistingConfig 
-                                ? "Update Settings" 
-                                : "Save Settings"
-                            }
-                          </Button>
-                        </div>
+                        <Button
+                          appearance="primary"
+                          type="submit"
+                          isLoading={submitting}
+                        >
+                          {submitting 
+                            ? "Saving..." 
+                            : hasExistingConfig 
+                              ? "Update Settings" 
+                              : "Save Settings"
+                          }
+                        </Button>
                       </FormFooter>
                     )}
                     
                     {/* Show instructions when form is empty or connection test is required */}
                     {(!formValues.apiUrl.trim() || !formValues.apiKey.trim()) && (
                       <div style={{ 
-                        marginTop: "20px", 
-                        padding: "16px", 
-                        backgroundColor: "#E3F2FD", 
-                        border: "1px solid #2196F3", 
-                        borderRadius: "6px",
-                        textAlign: "center"
+                        marginTop: "16px", 
+                        padding: "12px 16px", 
+                        backgroundColor: "#DEEBFF", 
+                        border: "1px solid #4C9AFF", 
+                        borderRadius: "3px"
                       }}>
                         <div style={{ 
                           fontSize: "14px", 
-                          color: "#1976D2",
-                          fontWeight: "500",
+                          color: "#0747A6",
+                          fontWeight: "600",
                           marginBottom: "8px"
                         }}>
                           📋 Setup Instructions:
                         </div>
                         <div style={{ 
-                          fontSize: "13px", 
-                          color: "#1565C0",
-                          lineHeight: "1.4"
+                          fontSize: "14px", 
+                          color: "#0747A6",
+                          lineHeight: "20px"
                         }}>
                           1. Fill in the API URL and API Key fields above<br/>
                           2. Click "Test Connection" to verify your settings<br/>
@@ -626,17 +566,16 @@ const App = () => {
                     {/* Show message when connection test is required */}
                     {hasFormChanges && !connectionTested && formValues.apiUrl.trim() && formValues.apiKey.trim() && (
                       <div style={{ 
-                        marginTop: "20px", 
-                        padding: "12px", 
-                        backgroundColor: "#FFF4E5", 
-                        border: "1px solid #FFD700", 
-                        borderRadius: "6px",
-                        textAlign: "center"
+                        marginTop: "16px", 
+                        padding: "12px 16px", 
+                        backgroundColor: "#FFFAE6", 
+                        border: "1px solid #FF991F", 
+                        borderRadius: "3px"
                       }}>
                         <span style={{ 
                           fontSize: "14px", 
-                          color: "#B8860B",
-                          fontWeight: "500"
+                          color: "#974F0C",
+                          fontWeight: "600"
                         }}>
                           ⚠️ Please test the connection first before saving settings.
                         </span>
@@ -653,18 +592,18 @@ const App = () => {
 
           {activeTab === "prereq" && (
             <>
-              <h2 style={{ fontWeight: "700", marginBottom: "16px", color: "#1A1A1A" }}>
+              <h2 style={{ fontWeight: "600", fontSize: "20px", marginBottom: "8px", color: "#172B4D" }}>
                 Prerequisites
               </h2>
-              <ul style={{ paddingLeft: "20px", color: "#4B4B4B" }}>
-                <li>
-                  • Ensure Keeper Commander REST API is running and accessible via your Ngrok tunnel.
+              <ul style={{ paddingLeft: "20px", color: "#42526E", fontSize: "14px", lineHeight: "20px", marginTop: "16px" }}>
+                <li style={{ marginBottom: "12px" }}>
+                  Ensure Keeper Commander REST API is running and accessible via your Ngrok tunnel.
                 </li>
-                <li>
-                  • Verify Jira workflow includes the transition "APPROVED".
+                <li style={{ marginBottom: "12px" }}>
+                  Verify Jira workflow includes the transition "APPROVED".
                 </li>
-                <li>
-                  <strong>API URL Format:</strong> Enter base URL only (e.g., <code>https://xxxxx.ngrok-free.app</code>). The endpoint <code>/api/v1/executecommand</code> will be automatically appended.
+                <li style={{ marginBottom: "12px" }}>
+                  <strong style={{ fontWeight: "600", color: "#172B4D" }}>API URL Format:</strong> Enter base URL only (e.g., <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>https://xxxxx.ngrok-free.app</code>). The endpoint <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>/api/v1/executecommand</code> will be automatically appended.
                 </li>
               </ul>
             </>
@@ -672,13 +611,13 @@ const App = () => {
 
           {activeTab === "about" && (
             <>
-              <h2 style={{ fontWeight: "700", marginBottom: "16px", color: "#1A1A1A" }}>
+              <h2 style={{ fontWeight: "600", fontSize: "20px", marginBottom: "8px", color: "#172B4D" }}>
                 About
               </h2>
-              <p style={{ color: "#4B4B4B", marginBottom: "8px" }}>
+              <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "20px", marginBottom: "12px", marginTop: "16px" }}>
                 This app integrates Jira with Keeper Security to automate record creation, credential rotation, and more.
               </p>
-              <p style={{ color: "#6B778C" }}>
+              <p style={{ color: "#5E6C84", fontSize: "14px", lineHeight: "20px" }}>
                 Built with Atlassian Forge Custom UI + Atlaskit components.
               </p>
             </>
