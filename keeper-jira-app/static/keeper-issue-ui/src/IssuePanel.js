@@ -12,6 +12,7 @@ import SuccessIcon from "@atlaskit/icon/glyph/check-circle";
 import ErrorIcon from "@atlaskit/icon/glyph/error";
 import InfoIcon from "@atlaskit/icon/glyph/info";
 import LockIcon from "@atlaskit/icon/glyph/lock";
+import CrossIcon from "@atlaskit/icon/glyph/cross";
 
 // Keeper action options with required fields based on CLI documentation
 const keeperActionOptions = [
@@ -197,6 +198,11 @@ const IssuePanel = () => {
   const [showRejectionForm, setShowRejectionForm] = useState(false);
   const [rejectionResult, setRejectionResult] = useState(null);
   const [selectedFolder, setSelectedFolder] = useState(null);
+  
+  // Save request message state
+  const [saveRequestMessage, setSaveRequestMessage] = useState(null); // { type: 'success' | 'error', message: 'text' }
+  const [showStoredRequestMessage, setShowStoredRequestMessage] = useState(true); // Control visibility of stored request dialog
+  const [showWorkflowInfo, setShowWorkflowInfo] = useState(true); // Control visibility of workflow info dialog
   const [folderSearchTerm, setFolderSearchTerm] = useState("");
   const [showFolderDropdown, setShowFolderDropdown] = useState(false);
   const [folderCurrentPage, setFolderCurrentPage] = useState(1);
@@ -835,12 +841,14 @@ const IssuePanel = () => {
   // Save/Update form data
   const updateFormData = async () => {
     if (!selectedAction) {
-      alert("Please select an action first");
+      setSaveRequestMessage({ type: 'error', message: 'Please select an action first' });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
       return;
     }
     
     if (!issueContext?.issueKey) {
-      alert("Issue context not loaded. Please refresh the page.");
+      setSaveRequestMessage({ type: 'error', message: 'Issue context not loaded. Please refresh the page.' });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
       return;
     }
     
@@ -874,13 +882,15 @@ const IssuePanel = () => {
       if (result.success) {
         setStoredRequestData(requestData);
         setHasStoredData(true);
-        alert("Request data saved successfully! An admin can now review and approve your request.");
+        // Don't show success message - the "Request Saved" dialog box already shows this info
       }
     } catch (error) {
       // Handle error
       let errorMessage = error.message || "Failed to save request data. Please try again.";
       
-      alert(errorMessage);
+      // Only show error messages - the "Request Saved" dialog handles success
+      setSaveRequestMessage({ type: 'error', message: errorMessage });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
     } finally {
       setIsUpdating(false);
     }
@@ -1122,7 +1132,17 @@ const IssuePanel = () => {
   // Clear stored data from backend
   const clearStoredData = async () => {
     try {
-      await invoke("clearStoredRequestData");
+      // Check if issueContext is available
+      if (!issueContext || !issueContext.issueKey) {
+        throw new Error('Issue context not available. Please refresh the page.');
+      }
+      
+      // Pass issueKey to the backend
+      const result = await invoke("clearStoredRequestData", { issueKey: issueContext.issueKey });
+      
+      if (!result || !result.success) {
+        throw new Error(result?.error || 'Failed to clear stored data');
+      }
       
       // Clear all form data and reset state
       setFormData({});
@@ -1137,9 +1157,33 @@ const IssuePanel = () => {
       setAddressTemplate(null);
       setLoadingAddressTemplate(false);
       setDynamicCustomFields([]);
-      setTempAddressData({});
+      
+      // Clear stored request data states
+      setStoredRequestData(null);
+      setHasStoredData(false);
+      setShowStoredRequestMessage(true); // Reset for next time data is saved
+      
+      // Reset record-update specific states
+      setRecordDetails({});
+      setRecordTypeTemplate({});
+      setTemplateFields([]);
+      setManualCustomFields([]);
+      
+      // Show success message
+      setSaveRequestMessage({ 
+        type: 'success', 
+        message: 'All stored data has been cleared. You can now start fresh with a new request.' 
+      });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
       
     } catch (error) {
+      const errorMessage = error.message || 'Failed to clear stored data. Please try again.';
+      
+      setSaveRequestMessage({ 
+        type: 'error', 
+        message: errorMessage
+      });
+      setTimeout(() => setSaveRequestMessage(null), 8000);
     }
   };
 
@@ -3640,6 +3684,17 @@ const IssuePanel = () => {
       fetchPamResources();
     }
   }, [selectedAction, isLoadingStoredData]);
+
+  // Auto-dismiss workflow info dialog after 5 seconds
+  useEffect(() => {
+    if (showWorkflowInfo && issueContext?.hasConfig && !isLoading && !isLoadingStoredData) {
+      const timer = setTimeout(() => {
+        setShowWorkflowInfo(false);
+      }, 5000); // 5 seconds
+      
+      return () => clearTimeout(timer);
+    }
+  }, [showWorkflowInfo, issueContext, isLoading, isLoadingStoredData]);
 
   // Handle form input changes
   const handleInputChange = (fieldName, value) => {
@@ -7587,6 +7642,21 @@ const IssuePanel = () => {
                       </div>
                     ))}
 
+                  {/* Checkbox fields for share-folder, share-record, and record-permission actions */}
+                  {(selectedAction.value === 'share-folder' || selectedAction.value === 'share-record' || selectedAction.value === 'record-permission') && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields
+                    .filter((field) => {
+                      // Only render checkbox fields
+                      return field.type === 'checkbox';
+                    })
+                    .map((field) => (
+                      <div
+                        key={field.name}
+                        style={{ marginBottom: "12px" }}
+                      >
+                        {renderFormInput(field)}
+                      </div>
+                    ))}
+
                   {/* Custom fields for record-update action handled on backend */}
                   
                   <div
@@ -7607,19 +7677,45 @@ const IssuePanel = () => {
             <div style={{ marginBottom: "16px" }}>
               
               {/* Show stored data status */}
-              {hasStoredData && storedRequestData && (
+              {hasStoredData && storedRequestData && showStoredRequestMessage && (
                 <div style={{
                   marginBottom: "12px",
                   padding: "12px",
                   backgroundColor: isAdmin ? "#E3FCEF" : "#F0F8FF",
                   borderRadius: "4px",
-                  border: isAdmin ? "1px solid #ABF5D1" : "1px solid #B3D8FF"
+                  border: isAdmin ? "1px solid #ABF5D1" : "1px solid #B3D8FF",
+                  position: "relative"
                 }}>
+                  {/* Close button */}
+                  <button
+                    onClick={() => setShowStoredRequestMessage(false)}
+                    style={{
+                      position: "absolute",
+                      top: "8px",
+                      right: "8px",
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "4px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: "3px",
+                      transition: "background-color 0.2s"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                    title="Dismiss"
+                  >
+                    <CrossIcon size="small" label="Close" primaryColor={isAdmin ? "#006644" : "#0066CC"} />
+                  </button>
+                  
                   <div style={{
                     fontWeight: "600",
                     fontSize: "12px",
                     color: isAdmin ? "#006644" : "#0066CC",
-                    marginBottom: "4px"
+                    marginBottom: "4px",
+                    paddingRight: "24px" // Make room for close button
                   }}>
                     {isAdmin ? "User Request Pending Review" : "Request Saved"}
                   </div>
@@ -7790,13 +7886,50 @@ const IssuePanel = () => {
                 
                 {/* Rejection Result Message for Admin */}
                 {rejectionResult && (
-                  <div style={{ marginTop: "16px" }}>
-                    <SectionMessage 
-                      appearance={rejectionResult.success ? "confirmation" : "error"}
-                      title={rejectionResult.success ? "Request Rejected" : "Rejection Failed"}
+                  <div style={{
+                    marginTop: "16px",
+                    padding: "12px",
+                    backgroundColor: rejectionResult.success ? "#E3FCEF" : "#FFEBE6",
+                    borderRadius: "4px",
+                    border: rejectionResult.success ? "1px solid #ABF5D1" : "1px solid #FF5630",
+                    position: "relative"
+                  }}>
+                    {/* Close button */}
+                    <button
+                      onClick={() => setRejectionResult(null)}
+                      style={{
+                        position: "absolute",
+                        top: "8px",
+                        right: "8px",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: "4px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: "3px",
+                        transition: "background-color 0.2s"
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                      title="Dismiss"
                     >
+                      <CrossIcon size="small" label="Close" primaryColor={rejectionResult.success ? "#006644" : "#BF2600"} />
+                    </button>
+                    
+                    <div style={{
+                      fontWeight: "600",
+                      fontSize: "12px",
+                      color: rejectionResult.success ? "#006644" : "#BF2600",
+                      marginBottom: "4px",
+                      paddingRight: "24px"
+                    }}>
+                      {rejectionResult.success ? "Request Rejected" : "Rejection Failed"}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#6B778C" }}>
                       {rejectionResult.message}
-                    </SectionMessage>
+                    </div>
                   </div>
                 )}
                 </>
@@ -7829,6 +7962,55 @@ const IssuePanel = () => {
                    hasStoredData ? "Update Request" : "Save Request"}
                 </Button>
               ) : null}
+              
+              {/* Save Request Message for Non-Admin Users */}
+              {!isAdmin && saveRequestMessage && (
+                <div style={{
+                  marginTop: "16px",
+                  padding: "12px",
+                  backgroundColor: saveRequestMessage.type === 'success' ? "#E3FCEF" : "#FFEBE6",
+                  borderRadius: "4px",
+                  border: saveRequestMessage.type === 'success' ? "1px solid #ABF5D1" : "1px solid #FF5630",
+                  position: "relative"
+                }}>
+                  {/* Close button */}
+                  <button
+                    onClick={() => setSaveRequestMessage(null)}
+                    style={{
+                      position: "absolute",
+                      top: "8px",
+                      right: "8px",
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: "4px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: "3px",
+                      transition: "background-color 0.2s"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                    title="Dismiss"
+                  >
+                    <CrossIcon size="small" label="Close" primaryColor={saveRequestMessage.type === 'success' ? "#006644" : "#BF2600"} />
+                  </button>
+                  
+                  <div style={{
+                    fontWeight: "600",
+                    fontSize: "12px",
+                    color: saveRequestMessage.type === 'success' ? "#006644" : "#BF2600",
+                    marginBottom: "4px",
+                    paddingRight: "24px"
+                  }}>
+                    {saveRequestMessage.type === 'success' ? "Success" : "Error"}
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#6B778C" }}>
+                    {saveRequestMessage.message}
+                  </div>
+                </div>
+              )}
               
               {/* Clear Stored Data Button for Non-Admin Users */}
               {!isAdmin && hasStoredData && !isLoading && !isLoadingStoredData && !loadingTemplate && !loadingRecordTypes && !loadingRecordDetails && (
@@ -7888,28 +8070,94 @@ const IssuePanel = () => {
 
         {/* Result Display */}
         {lastResult && (
-          <SectionMessage
-            appearance={lastResult.success ? "confirmation" : "error"}
-            title={lastResult.success ? "Success" : "Error"}
-          >
-            {lastResult.message}
-          </SectionMessage>
+          <div style={{
+            marginTop: "16px",
+            marginBottom: "16px",
+            padding: "12px",
+            backgroundColor: lastResult.success ? "#E3FCEF" : "#FFEBE6",
+            borderRadius: "4px",
+            border: lastResult.success ? "1px solid #ABF5D1" : "1px solid #FF5630",
+            position: "relative"
+          }}>
+            {/* Close button */}
+            <button
+              onClick={() => setLastResult(null)}
+              style={{
+                position: "absolute",
+                top: "8px",
+                right: "8px",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "3px",
+                transition: "background-color 0.2s"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+              title="Dismiss"
+            >
+              <CrossIcon size="small" label="Close" primaryColor={lastResult.success ? "#006644" : "#BF2600"} />
+            </button>
+            
+            <div style={{
+              fontWeight: "600",
+              fontSize: "12px",
+              color: lastResult.success ? "#006644" : "#BF2600",
+              marginBottom: "4px",
+              paddingRight: "24px"
+            }}>
+              {lastResult.success ? "Success" : "Error"}
+            </div>
+            <div style={{ fontSize: "11px", color: "#6B778C" }}>
+              {lastResult.message}
+            </div>
+          </div>
         )}
 
         {/* Workflow info */}
-        {issueContext.hasConfig && !isLoading && !isLoadingStoredData && (
+        {issueContext.hasConfig && !isLoading && !isLoadingStoredData && showWorkflowInfo && (
           <div style={{
             marginTop: "16px",
             padding: "12px",
             backgroundColor: isAdmin ? "#E3FCEF" : "#F0F8FF",
             borderRadius: "4px",
-            border: isAdmin ? "1px solid #ABF5D1" : "1px solid #B3D8FF"
+            border: isAdmin ? "1px solid #ABF5D1" : "1px solid #B3D8FF",
+            position: "relative"
           }}>
+            {/* Close button */}
+            <button
+              onClick={() => setShowWorkflowInfo(false)}
+              style={{
+                position: "absolute",
+                top: "8px",
+                right: "8px",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "3px",
+                transition: "background-color 0.2s"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+              title="Dismiss"
+            >
+              <CrossIcon size="small" label="Close" primaryColor={isAdmin ? "#006644" : "#0066CC"} />
+            </button>
+            
             <div style={{
               fontWeight: "600",
               fontSize: "12px",
               color: isAdmin ? "#006644" : "#0066CC",
-              marginBottom: "4px"
+              marginBottom: "4px",
+              paddingRight: "24px" // Make room for close button
             }}>
               <strong>{isAdmin ? "Admin Review Mode" : "Request Submission Mode"}</strong>
             </div>

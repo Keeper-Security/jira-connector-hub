@@ -298,25 +298,6 @@ const App = () => {
                 Configure Keeper integration details. All fields are required. The integration will work with any Jira project.
               </p>
               
-              {/* Admin Status Indicator */}
-              {!isCheckingAdmin && (
-                <div style={{ 
-                  marginBottom: "16px", 
-                  padding: "12px 16px", 
-                  backgroundColor: isAdmin ? "#E3FCEF" : "#DEEBFF",
-                  borderRadius: "3px",
-                  border: isAdmin ? "1px solid #ABF5D1" : "1px solid #4C9AFF",
-                  fontSize: "14px"
-                }}>
-                  <span style={{ 
-                    fontWeight: "600",
-                    color: isAdmin ? "#006644" : "#0747A6"
-                  }}>
-                    {isAdmin ? "✓ Admin Access Granted" : "⚠ Limited Access"}
-                  </span>
-                </div>
-              )}
-
               {isCheckingAdmin ? (
                 <div style={{ textAlign: "center", padding: "20px", color: "#5E6C84" }}>
                   <p>Checking admin permissions...</p>

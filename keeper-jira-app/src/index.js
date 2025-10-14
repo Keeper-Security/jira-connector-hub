@@ -1568,7 +1568,13 @@ resolver.define('getStoredRequestData', async (req) => {
 // Clear stored request data
 resolver.define('clearStoredRequestData', async (req) => {
   try {
-    const issueKey = req.context.extension.issue.key;
+    // Get issueKey from payload (preferred) or context (fallback)
+    const issueKey = req?.payload?.issueKey || req?.context?.extension?.issue?.key;
+    
+    if (!issueKey) {
+      throw new Error('Issue key is required to clear stored data');
+    }
+    
     const storageKey = `keeper_request_${issueKey}`;
     
     // Clear the stored data
@@ -1581,7 +1587,7 @@ resolver.define('clearStoredRequestData', async (req) => {
   } catch (error) {
     return {
       success: false,
-      error: error.message
+      error: error.message || 'Unknown error occurred'
     };
   }
 });
