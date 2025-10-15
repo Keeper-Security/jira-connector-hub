@@ -20,22 +20,65 @@ const App = () => {
     apiUrl: "",
     apiKey: "",
   });
-  const [saved, setSaved] = useState(false);
   const [hasExistingConfig, setHasExistingConfig] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [formKey, setFormKey] = useState(0);
   const [isApiKeyMasked, setIsApiKeyMasked] = useState(true);
   const [showCopiedMessage, setShowCopiedMessage] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
-  const [connectionTestResult, setConnectionTestResult] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isCheckingAdmin, setIsCheckingAdmin] = useState(true);
-  const [showExistingConfigMessage, setShowExistingConfigMessage] = useState(false);
   
   // New states for connection testing workflow
   const [originalFormValues, setOriginalFormValues] = useState({ apiUrl: "", apiKey: "" });
   const [hasFormChanges, setHasFormChanges] = useState(false);
   const [connectionTested, setConnectionTested] = useState(false);
+  
+  // Unified message state for all notifications
+  const [statusMessage, setStatusMessage] = useState(null); // { type: 'success' | 'error' | 'info' | 'warning', message: 'text', title: 'optional title' }
+
+  // Centralized error handler for API calls
+  const handleApiError = (error, defaultMessage = "An error occurred") => {
+    // Try to extract error message from various possible locations in the error object
+    let errorMessage = error.error || error.message || defaultMessage;
+    
+    // If we have an error message from the response, use it directly
+    if (errorMessage && errorMessage !== defaultMessage) {
+      return errorMessage;
+    }
+    
+    // Otherwise, check for HTTP error codes and provide ngrok-related guidance
+    let errorStatus = error.status || error.statusCode;
+    
+    if (!errorStatus && error.message) {
+      // Try to extract status code from error message
+      const statusMatch = error.message.match(/\b(401|403|400|500|502|503|504)\b/);
+      if (statusMatch) {
+        errorStatus = parseInt(statusMatch[1], 10);
+      }
+    }
+    
+    // Handle specific error codes with ngrok configuration messages
+    if (errorStatus === 401 || errorStatus === 403 || errorStatus === 400 || 
+        errorStatus === 500 || errorStatus === 502 || errorStatus === 503 || errorStatus === 504) {
+      const statusText = errorStatus === 401 ? 'Unauthorized (401)' :
+                        errorStatus === 403 ? 'Forbidden (403)' :
+                        errorStatus === 400 ? 'Bad Request (400)' :
+                        errorStatus === 500 ? 'Internal Server Error (500)' :
+                        errorStatus === 502 ? 'Bad Gateway (502)' :
+                        errorStatus === 503 ? 'Service Unavailable (503)' :
+                        errorStatus === 504 ? 'Gateway Timeout (504)' :
+                        `Error (${errorStatus})`;
+      
+      if (isAdmin) {
+        return `${statusText}: Please check your URL and ngrok configuration. Ensure the ngrok tunnel is active and the URL is correctly configured in the app settings.`;
+      } else {
+        return `${statusText}: Unable to connect to the server. Please ask your administrator to check the ngrok configuration and ensure the service is running properly.`;
+      }
+    }
+    
+    return errorMessage;
+  };
 
   useEffect(() => {
     // Check admin status first
@@ -44,6 +87,8 @@ const App = () => {
       setIsAdmin(userRole.isAdmin || false);
       setIsCheckingAdmin(false);
     }).catch((error) => {
+      // For this initial call, we can't use isAdmin state yet, so we'll default to false
+      console.error("Failed to check admin permissions:", error.message || error);
       setIsAdmin(false);
       setIsCheckingAdmin(false);
     });
@@ -60,9 +105,13 @@ const App = () => {
         setOriginalFormValues(loadedValues);
         setHasExistingConfig(true);
         setConnectionTested(false); // Require connection test even for existing config
-        // Show the existing configuration message for 3 seconds
-        setShowExistingConfigMessage(true);
-        setTimeout(() => setShowExistingConfigMessage(false), 3000);
+        // Show the existing configuration message for 5 seconds
+        setStatusMessage({
+          type: 'info',
+          title: 'Existing Configuration Loaded',
+          message: 'Your previously saved settings are displayed below. You can modify them and click "Update Settings" to save changes.'
+        });
+        setTimeout(() => setStatusMessage(null), 5000);
       } else {
         const emptyValues = {
           apiUrl: "",
@@ -76,6 +125,13 @@ const App = () => {
       setFormKey(prev => prev + 1);
       setIsLoading(false);
     }).catch((error) => {
+      const errorMessage = handleApiError(error, "Failed to load configuration");
+      console.error(errorMessage);
+      setStatusMessage({
+        type: 'error',
+        title: 'Failed to Load Configuration',
+        message: errorMessage
+      });
       setIsLoading(false);
     });
   }, []);
@@ -91,7 +147,7 @@ const App = () => {
     // If there are changes, reset connection test status
     if (hasChanges) {
       setConnectionTested(false);
-      setConnectionTestResult(null);
+      setStatusMessage(null); // Clear any previous status messages
     }
   }, [formValues.apiUrl, formValues.apiKey, originalFormValues]);
 
@@ -112,13 +168,25 @@ const App = () => {
       // Force form to re-render with new values
       setFormKey(prev => prev + 1);
       
-      setSaved(true);
       setHasExistingConfig(true);
       setConnectionTested(true); // Mark as tested since we just saved successfully
-      setTimeout(() => setSaved(false), 3000);
+      
+      // Show success message
+      setStatusMessage({
+        type: 'success',
+        title: 'Configuration Saved!',
+        message: `Keeper configuration ${hasExistingConfig ? 'updated' : 'saved'} successfully.`
+      });
+      setTimeout(() => setStatusMessage(null), 5000);
     } catch (error) {
-      // Show user-friendly error
-      alert("Failed to save configuration. Please try again.");
+      // Show user-friendly error with proper error handling
+      const errorMessage = handleApiError(error, "Failed to save configuration. Please try again.");
+      setStatusMessage({
+        type: 'error',
+        title: 'Save Failed',
+        message: errorMessage
+      });
+      setTimeout(() => setStatusMessage(null), 8000);
     }
   };
 
@@ -144,15 +212,17 @@ const App = () => {
     const currentApiKey = formValues.apiKey.trim();
 
     if (!currentApiUrl || !currentApiKey) {
-      setConnectionTestResult({
-        success: false,
+      setStatusMessage({
+        type: 'warning',
+        title: 'Missing Information',
         message: 'Please enter both API URL and API Key before testing connection'
       });
+      setTimeout(() => setStatusMessage(null), 5000);
       return;
     }
 
     setIsTestingConnection(true);
-    setConnectionTestResult(null);
+    setStatusMessage(null); // Clear any previous messages
 
     try {
       const result = await invoke("testConnection", { 
@@ -162,53 +232,58 @@ const App = () => {
         }
       });
       
-      setConnectionTestResult({
-        success: true,
-        message: result.message,
-        serviceStatus: result.serviceStatus,
-        isServiceRunning: result.isServiceRunning
+      // Build success message with service status details
+      let successMessage = '';
+      
+      if (result.isServiceRunning) {
+        successMessage = 'Connection test successful! Keeper Commander Service is running properly.';
+      } else if (result.serviceStatus) {
+        successMessage = `Connection test successful! Service status: ${result.serviceStatus}`;
+      } else {
+        successMessage = result.message || 'Connection test successful!';
+      }
+      
+      setStatusMessage({
+        type: 'success',
+        title: 'Connection Successful!',
+        message: successMessage
       });
       setConnectionTested(true); // Mark connection as tested and successful
       
       // Clear the result after 5 seconds
-      setTimeout(() => setConnectionTestResult(null), 5000);
+      setTimeout(() => setStatusMessage(null), 5000);
       
     } catch (error) {
       
-      // Extract more detailed error information
-      let errorMessage = 'Connection test failed';
+      // Use centralized error handler first
+      let errorMessage = handleApiError(error, 'Connection test failed');
       
-      if (error.message) {
-        errorMessage = error.message;
-      } else if (error.error) {
-        errorMessage = error.error;
-      } else if (typeof error === 'string') {
-        errorMessage = error;
+      // Add more context for specific error scenarios (if not already handled by handleApiError)
+      // These provide additional details beyond the HTTP status code messages
+      if (!error.status && !error.statusCode) {
+        // Only add detailed context if we don't have a status code (already handled by handleApiError)
+        if (errorMessage.includes('ERR_NGROK_3200') || errorMessage.includes('ngrok') || errorMessage.includes('offline')) {
+          errorMessage = `Ngrok tunnel is offline: ${errorMessage}. Please start your ngrok tunnel and ensure the Keeper Commander service is running.`;
+        } else if (errorMessage.includes('fetch')) {
+          errorMessage = `Network error: ${errorMessage}. Please check your API URL and ensure the Keeper Commander service is running.`;
+        } else if (errorMessage.includes('404')) {
+          errorMessage = `Service not found: ${errorMessage}. Please check your API URL and ensure the Keeper Commander service is accessible.`;
+        } else if (errorMessage.includes('timeout')) {
+          errorMessage = `Connection timeout: ${errorMessage}. The service may be slow to respond or unavailable.`;
+        } else if (errorMessage.includes('<!DOCTYPE html>') || errorMessage.includes('<html')) {
+          errorMessage = `Received HTML response instead of JSON. This usually means the service is not running or the URL is incorrect. Please check your API URL and ensure the Keeper Commander service is running.`;
+        }
       }
       
-      // Add more context for common error scenarios
-      if (errorMessage.includes('ERR_NGROK_3200') || errorMessage.includes('ngrok') || errorMessage.includes('offline')) {
-        errorMessage = `Ngrok tunnel is offline: ${errorMessage}. Please start your ngrok tunnel and ensure the Keeper Commander service is running.`;
-      } else if (errorMessage.includes('fetch')) {
-        errorMessage = `Network error: ${errorMessage}. Please check your API URL and ensure the Keeper Commander service is running.`;
-      } else if (errorMessage.includes('401') || errorMessage.includes('403')) {
-        errorMessage = `Authentication error: ${errorMessage}. Please verify your API key is correct.`;
-      } else if (errorMessage.includes('404')) {
-        errorMessage = `Service not found: ${errorMessage}. Please check your API URL and ensure the Keeper Commander service is accessible.`;
-      } else if (errorMessage.includes('timeout')) {
-        errorMessage = `Connection timeout: ${errorMessage}. The service may be slow to respond or unavailable.`;
-      } else if (errorMessage.includes('<!DOCTYPE html>') || errorMessage.includes('<html')) {
-        errorMessage = `Received HTML response instead of JSON. This usually means the service is not running or the URL is incorrect. Please check your API URL and ensure the Keeper Commander service is running.`;
-      }
-      
-      setConnectionTestResult({
-        success: false,
+      setStatusMessage({
+        type: 'error',
+        title: 'Connection Failed',
         message: errorMessage
       });
       setConnectionTested(false); // Mark connection test as failed
       
       // Clear the result after 8 seconds for errors (longer than success messages)
-      setTimeout(() => setConnectionTestResult(null), 8000);
+      setTimeout(() => setStatusMessage(null), 8000);
     } finally {
       setIsTestingConnection(false);
     }
@@ -313,17 +388,65 @@ const App = () => {
                 </div>
               ) : (
                 <>
-                  {showExistingConfigMessage && (
-                    <SectionMessage appearance="information" title="Existing Configuration Loaded">
-                      Your previously saved settings are displayed below. You can modify them and click "Update Settings" to save changes.
-                    </SectionMessage>
-                  )}
-
-                  {saved && (
-                    <SectionMessage appearance="confirmation" title="Saved!">
-                      Keeper configuration {hasExistingConfig ? 'updated' : 'saved'} successfully.
-                    </SectionMessage>
-                  )}
+                  {/* Unified Status Message Display */}
+                  {statusMessage && (() => {
+                    const messageStyles = {
+                      success: {
+                        background: "#F0FDF4",
+                        border: "2px solid #86EFAC",
+                        titleColor: "#166534",
+                        title: "Success Message"
+                      },
+                      error: {
+                        background: "#FEF2F2",
+                        border: "2px solid #FCA5A5",
+                        titleColor: "#991B1B",
+                        title: "Error Message"
+                      },
+                      warning: {
+                        background: "#FFFBEB",
+                        border: "2px solid #FCD34D",
+                        titleColor: "#92400E",
+                        title: "Warning Message"
+                      },
+                      info: {
+                        background: "#EFF6FF",
+                        border: "2px solid #93C5FD",
+                        titleColor: "#1E40AF",
+                        title: "Info Message"
+                      }
+                    };
+                    
+                    const style = messageStyles[statusMessage.type] || messageStyles.info;
+                    
+                    return (
+                      <div style={{ marginBottom: "20px" }}>
+                        <div style={{
+                          padding: "16px 20px",
+                          backgroundColor: style.background,
+                          borderRadius: "8px",
+                          border: style.border,
+                          position: "relative"
+                        }}>
+                          <div style={{
+                            fontWeight: "600",
+                            fontSize: "16px",
+                            color: style.titleColor,
+                            marginBottom: "8px"
+                          }}>
+                            {statusMessage.title || style.title}
+                          </div>
+                          <div style={{ 
+                            fontSize: "14px", 
+                            color: "#6B7280",
+                            lineHeight: "1.5"
+                          }}>
+                            {statusMessage.message}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {isLoading ? (
                 <div style={{ textAlign: "center", padding: "20px", color: "#5E6C84" }}>
@@ -456,46 +579,22 @@ const App = () => {
                         onClick={testConnection}
                         isLoading={isTestingConnection}
                         appearance="default"
+                        style={{
+                          backgroundColor: "#FFFFFF",
+                          color: "#4285F4",
+                          fontWeight: "600",
+                          fontSize: "14px",
+                          padding: "8px 16px",
+                          borderRadius: "8px",
+                          border: "2px solid #4285F4",
+                          cursor: "pointer",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                          transition: "all 0.2s ease"
+                        }}
                       >
                         {isTestingConnection ? "Testing..." : "Test Connection"}
                       </Button>
                     </div>
-
-                    {/* Connection Test Result */}
-                    {connectionTestResult && (
-                      <div style={{ marginBottom: "20px" }}>
-                        <SectionMessage 
-                          appearance={connectionTestResult.success ? "confirmation" : "error"}
-                          title={connectionTestResult.success ? "Connection Successful!" : "Connection Failed"}
-                        >
-                          <div>
-                            {/* Display the main message */}
-                            <p style={{ 
-                              fontSize: "14px", 
-                              color: connectionTestResult.success ? "#00875A" : "#DE350B", 
-                              margin: "4px 0",
-                              fontWeight: "500"
-                            }}>
-                              {connectionTestResult.message}
-                            </p>
-                            
-                            {/* Display additional service status for successful connections */}
-                            {connectionTestResult.success && connectionTestResult.isServiceRunning && (
-                              <p style={{ fontSize: "12px", color: "#00875A", margin: "4px 0" }}>
-                                ✓ Keeper Commander Service is running properly
-                              </p>
-                            )}
-                            
-                            {/* Display service status for successful connections that might have warnings */}
-                            {connectionTestResult.success && connectionTestResult.serviceStatus && !connectionTestResult.isServiceRunning && (
-                              <p style={{ fontSize: "12px", color: "#FF8B00", margin: "4px 0" }}>
-                                ⚠ {connectionTestResult.serviceStatus}
-                              </p>
-                            )}
-                          </div>
-                        </SectionMessage>
-                      </div>
-                    )}
 
                     {/* Only show save/update button if connection is tested successfully */}
                     {connectionTested && (
@@ -504,6 +603,18 @@ const App = () => {
                           appearance="primary"
                           type="submit"
                           isLoading={submitting}
+                          style={{
+                            backgroundColor: "#4285F4",
+                            color: "#FFFFFF",
+                            fontWeight: "600",
+                            fontSize: "14px",
+                            padding: "8px 16px",
+                            borderRadius: "8px",
+                            border: "none",
+                            cursor: "pointer",
+                            boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                            transition: "all 0.2s ease"
+                          }}
                         >
                           {submitting 
                             ? "Saving..." 
