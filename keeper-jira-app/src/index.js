@@ -1187,7 +1187,7 @@ resolver.define('executeKeeperAction', async (req) => {
  * Reject Keeper request (called from issue panel)
  */
 resolver.define('rejectKeeperRequest', async (req) => {
-  const { issueKey, rejectionReason } = req.payload;
+  const { issueKey, rejectionReason, formattedTimestamp } = req.payload;
   
   if (!issueKey) {
     throw new Error('Issue key is required');
@@ -1198,6 +1198,9 @@ resolver.define('rejectKeeperRequest', async (req) => {
   }
 
   try {
+    // Get current user info
+    const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
+    const currentUser = await currentUserResponse.json();
 
     // Create ADF (Atlassian Document Format) for the rejection comment
     const adfBody = {
@@ -1216,38 +1219,30 @@ resolver.define('rejectKeeperRequest', async (req) => {
                 {
                   type: 'text',
                   text: 'Keeper Request Rejected',
-                  marks: [
-                    {
-                      type: 'strong'
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              type: 'paragraph',
-              content: [
+                  marks: [{ type: 'strong' }]
+                },
                 {
-                  type: 'text',
-                  text: 'Reason: '
+                  type: 'hardBreak'
                 },
                 {
                   type: 'text',
-                  text: rejectionReason.trim()
-                }
-              ]
-            },
-            {
-              type: 'paragraph',
-              content: [
+                  text: `Reason: ${rejectionReason.trim()}`
+                },
+                {
+                  type: 'hardBreak'
+                },
                 {
                   type: 'text',
-                  text: `Rejected at: ${new Date().toLocaleString()}`,
-                  marks: [
-                    {
-                      type: 'em'
-                    }
-                  ]
+                  text: `Rejected by: ${currentUser.displayName}`,
+                  marks: [{ type: 'em' }]
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: `Rejected at: ${formattedTimestamp}`,
+                  marks: [{ type: 'em' }]
                 }
               ]
             }
@@ -1489,7 +1484,7 @@ resolver.define('getGlobalUserRole', async (req) => {
  * Store request data for admin approval
  */
 resolver.define('storeRequestData', async (req) => {
-  const { issueKey, requestData } = req.payload;
+  const { issueKey, requestData, formattedTimestamp } = req.payload;
   
   if (!issueKey) {
     throw new Error('Issue key is required');
@@ -1501,7 +1496,12 @@ resolver.define('storeRequestData', async (req) => {
   
   try {
     // Get current user info
-    const currentUser = await asUser().requestJira(route`/rest/api/3/myself`);
+    const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
+    const currentUser = await currentUserResponse.json();
+    
+    // Check if there's already stored data to determine if this is an update
+    const existingData = await storage.get(`keeper_request_${issueKey}`);
+    const isUpdate = !!existingData;
     
     // Store the request data with user info and issue key
     const dataToStore = {
@@ -1517,6 +1517,72 @@ resolver.define('storeRequestData', async (req) => {
     };
     
     await storage.set(`keeper_request_${issueKey}`, dataToStore);
+    
+    // Add comment to JIRA ticket
+    const actionLabel = requestData.selectedAction?.label || 'Keeper Action';
+    
+    // Use the timestamp formatted on frontend with user's local time
+    const timestamp = formattedTimestamp;
+    
+    const adfBody = {
+      version: 1,
+      type: 'doc',
+      content: [
+        {
+          type: 'panel',
+          attrs: {
+            panelType: 'info'
+          },
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: `Keeper Request ${isUpdate ? 'Updated' : 'Submitted'}`,
+                  marks: [{ type: 'strong' }]
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: `Action: ${actionLabel}`
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: `Submitted by: ${currentUser.displayName}`,
+                  marks: [{ type: 'em' }]
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: `${isUpdate ? 'Updated' : 'Submitted'} at: ${timestamp}`,
+                  marks: [{ type: 'em' }]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+
+    // Add comment to Jira using ADF format
+    await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}/comment`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          body: adfBody,
+        }),
+      }
+    );
     
     return { 
       success: true, 

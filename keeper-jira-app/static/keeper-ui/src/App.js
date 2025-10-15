@@ -422,7 +422,7 @@ const App = () => {
                     return (
                       <div style={{ marginBottom: "20px" }}>
                         <div style={{
-                          padding: "16px 20px",
+                          padding: "10px 14px",
                           backgroundColor: style.background,
                           borderRadius: "8px",
                           border: style.border,
@@ -432,14 +432,14 @@ const App = () => {
                             fontWeight: "600",
                             fontSize: "16px",
                             color: style.titleColor,
-                            marginBottom: "8px"
+                            marginBottom: "6px"
                           }}>
                             {statusMessage.title || style.title}
                           </div>
                           <div style={{ 
                             fontSize: "14px", 
                             color: "#6B7280",
-                            lineHeight: "1.5"
+                            lineHeight: "1.4"
                           }}>
                             {statusMessage.message}
                           </div>

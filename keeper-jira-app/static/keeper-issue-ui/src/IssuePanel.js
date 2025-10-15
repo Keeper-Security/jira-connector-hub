@@ -907,6 +907,7 @@ const IssuePanel = () => {
         }
       }
       
+      const now = new Date();
       const requestData = {
         selectedAction,
         formData,
@@ -914,12 +915,24 @@ const IssuePanel = () => {
         selectedRecordForUpdate,
         selectedFolder,
         tempAddressData, // Store temporary address data
-        timestamp: new Date().toISOString()
+        timestamp: now.toISOString()
       };
+      
+      // Format the same timestamp for the JIRA comment (same format used in UI)
+      const formattedTimestamp = now.toLocaleString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
       
       const result = await invoke("storeRequestData", { 
         issueKey: issueContext.issueKey,
-        requestData 
+        requestData,
+        formattedTimestamp
       });
       
       if (result.success) {
@@ -5069,10 +5082,22 @@ const IssuePanel = () => {
     setRejectionResult(null);
 
     try {
+      // Format timestamp with user's local time
+      const formattedTimestamp = new Date().toLocaleString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+      
       // Update the JIRA ticket with rejection comment
       const result = await invoke("rejectKeeperRequest", {
         issueKey: issueContext.issueKey,
-        rejectionReason: rejectionReason.trim()
+        rejectionReason: rejectionReason.trim(),
+        formattedTimestamp
       });
 
       setRejectionResult({ 
@@ -7741,7 +7766,7 @@ const IssuePanel = () => {
               {hasStoredData && storedRequestData && showStoredRequestMessage && (
                 <div style={{
                   marginBottom: "12px",
-                  padding: "16px 20px",
+                  padding: "10px 14px",
                   backgroundColor: isAdmin ? "#EFF6FF" : "#F0FDF4",
                   borderRadius: "8px",
                   border: isAdmin ? "2px solid #93C5FD" : "2px solid #86EFAC",
@@ -7752,8 +7777,8 @@ const IssuePanel = () => {
                     onClick={() => setShowStoredRequestMessage(false)}
                     style={{
                       position: "absolute",
-                      top: "12px",
-                      right: "12px",
+                      top: "8px",
+                      right: "8px",
                       background: "transparent",
                       border: "none",
                       cursor: "pointer",
@@ -7775,16 +7800,16 @@ const IssuePanel = () => {
                     fontWeight: "600",
                     fontSize: "16px",
                     color: isAdmin ? "#1E40AF" : "#166534",
-                    marginBottom: "8px",
-                    paddingRight: "32px"
+                    marginBottom: "6px",
+                    paddingRight: "28px"
                   }}>
                     {isAdmin ? "Info Message" : "Success Message"}
                   </div>
                   <div style={{ 
                     fontSize: "14px", 
                     color: "#6B7280",
-                    marginBottom: storedRequestData.timestamp ? "8px" : "0",
-                    lineHeight: "1.5"
+                    marginBottom: storedRequestData.timestamp ? "6px" : "0",
+                    lineHeight: "1.4"
                   }}>
                     {isAdmin 
                       ? `A user has submitted a '${storedRequestData.selectedAction?.label}' request for review.`
@@ -7795,9 +7820,9 @@ const IssuePanel = () => {
                     <div style={{ 
                       fontSize: "13px", 
                       color: "#9CA3AF",
-                      marginTop: "8px",
+                      marginTop: "6px",
                       borderTop: "1px solid #E5E7EB",
-                      paddingTop: "8px"
+                      paddingTop: "6px"
                     }}>
                       Saved: {new Date(storedRequestData.timestamp).toLocaleString('en-GB', {
                         day: '2-digit',
@@ -8032,37 +8057,61 @@ const IssuePanel = () => {
                 )}
                 </>
               ) : !isLoading && !isLoadingStoredData && !loadingTemplate && !loadingRecordTypes && !loadingRecordDetails ? (
-                // Regular User View - Show Update button only after form loads
-                <Button
-                  appearance="primary"
-                  onClick={updateFormData}
-                  isLoading={isUpdating}
-                  isDisabled={isUpdating || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
-                  style={{
-                    backgroundColor: isFormDisabled ? "#D0D0D0" : 
-                      (loadingTemplate || loadingRecordTypes) ? "#F0F0F0" :
-                      (selectedAction && validateForm() && !isUpdating ? "#4285F4" : isUpdating ? "#357AE8" : "#E0E0E0"),
-                    color: isFormDisabled ? "#777" : 
-                      (loadingTemplate || loadingRecordTypes) ? "#999" :
-                      ((selectedAction && validateForm()) || isUpdating ? "#FFFFFF" : "#999"),
-                    fontWeight: "600",
-                    fontSize: "14px",
-                    padding: "8px 16px",
-                    borderRadius: "8px",
-                    border: "none",
-                    cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isUpdating) ? "not-allowed" : "pointer",
-                    boxShadow: (selectedAction && validateForm() && !isUpdating) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
-                    transition: "all 0.2s ease"
-                  }}
-                >
-                  {isFormDisabled ? "Form Disabled (Re-enabling...)" :
-                   isUpdating ? "Saving..." :
-                   loadingTemplate ? "Loading Template Fields..." :
-                   loadingRecordTypes ? "Loading Record Types..." :
-                   !selectedAction ? "Select Action to Enable" :
-                   !validateForm() ? "Complete Required Fields" :
-                   hasStoredData ? "Update Request" : "Save Request"}
-                </Button>
+                // Regular User View - Show buttons with flex layout
+                <div style={{ display: "flex", gap: "12px" }}>
+                  <Button
+                    appearance="primary"
+                    onClick={updateFormData}
+                    isLoading={isUpdating}
+                    isDisabled={isUpdating || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
+                    style={{
+                      backgroundColor: isFormDisabled ? "#D0D0D0" : 
+                        (loadingTemplate || loadingRecordTypes) ? "#F0F0F0" :
+                        (selectedAction && validateForm() && !isUpdating ? "#4285F4" : isUpdating ? "#357AE8" : "#E0E0E0"),
+                      color: isFormDisabled ? "#777" : 
+                        (loadingTemplate || loadingRecordTypes) ? "#999" :
+                        ((selectedAction && validateForm()) || isUpdating ? "#FFFFFF" : "#999"),
+                      fontWeight: "600",
+                      fontSize: "14px",
+                      padding: "8px 16px",
+                      borderRadius: "8px",
+                      border: "none",
+                      cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isUpdating) ? "not-allowed" : "pointer",
+                      boxShadow: (selectedAction && validateForm() && !isUpdating) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
+                      transition: "all 0.2s ease"
+                    }}
+                  >
+                    {isFormDisabled ? "Form Disabled (Re-enabling...)" :
+                     isUpdating ? "Saving..." :
+                     loadingTemplate ? "Loading Template Fields..." :
+                     loadingRecordTypes ? "Loading Record Types..." :
+                     !selectedAction ? "Select Action to Enable" :
+                     !validateForm() ? "Complete Required Fields" :
+                     hasStoredData ? "Update Request" : "Save Request"}
+                  </Button>
+                  
+                  {/* Clear Stored Data Button for Non-Admin Users */}
+                  {hasStoredData && (
+                    <Button
+                      appearance="subtle"
+                      onClick={clearStoredData}
+                      style={{
+                        backgroundColor: "#FFFFFF",
+                        color: "#4285F4",
+                        fontWeight: "600",
+                        fontSize: "14px",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        border: "2px solid #4285F4",
+                        cursor: "pointer",
+                        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                        transition: "all 0.2s ease"
+                      }}
+                    >
+                      Clear Data
+                    </Button>
+                  )}
+                </div>
               ) : null}
               
               {/* Save Request Message for Non-Admin Users */}
@@ -8103,7 +8152,7 @@ const IssuePanel = () => {
                 return (
                   <div style={{
                     marginTop: "16px",
-                    padding: "16px 20px",
+                    padding: "10px 14px",
                     backgroundColor: style.background,
                     borderRadius: "8px",
                     border: style.border,
@@ -8114,8 +8163,8 @@ const IssuePanel = () => {
                       onClick={() => setSaveRequestMessage(null)}
                       style={{
                         position: "absolute",
-                        top: "12px",
-                        right: "12px",
+                        top: "8px",
+                        right: "8px",
                         background: "transparent",
                         border: "none",
                         cursor: "pointer",
@@ -8137,16 +8186,16 @@ const IssuePanel = () => {
                       fontWeight: "600",
                       fontSize: "16px",
                       color: style.titleColor,
-                      marginBottom: "8px",
-                      paddingRight: "32px"
+                      marginBottom: "6px",
+                      paddingRight: "28px"
                     }}>
                       {style.title}
                     </div>
                     <div style={{ 
                       fontSize: "14px", 
                       color: "#6B7280",
-                      marginBottom: saveRequestMessage.showTimestamp ? "8px" : "0",
-                      lineHeight: "1.5"
+                      marginBottom: saveRequestMessage.showTimestamp ? "6px" : "0",
+                      lineHeight: "1.4"
                     }}>
                       {saveRequestMessage.message}
                     </div>
@@ -8154,9 +8203,9 @@ const IssuePanel = () => {
                       <div style={{ 
                         fontSize: "13px", 
                         color: "#9CA3AF",
-                        marginTop: "8px",
+                        marginTop: "6px",
                         borderTop: "1px solid #E5E7EB",
-                        paddingTop: "8px"
+                        paddingTop: "6px"
                       }}>
                         Saved: {new Date(saveRequestMessage.timestamp).toLocaleString('en-GB', {
                           day: '2-digit',
@@ -8172,29 +8221,6 @@ const IssuePanel = () => {
                   </div>
                 );
               })()}
-              
-              {/* Clear Stored Data Button for Non-Admin Users */}
-              {!isAdmin && hasStoredData && !isLoading && !isLoadingStoredData && !loadingTemplate && !loadingRecordTypes && !loadingRecordDetails && (
-                <Button
-                  appearance="subtle"
-                  onClick={clearStoredData}
-                  style={{
-                    backgroundColor: "#FFFFFF",
-                    color: "#4285F4",
-                    fontWeight: "600",
-                    fontSize: "14px",
-                    padding: "8px 16px",
-                    borderRadius: "8px",
-                    border: "2px solid #4285F4",
-                    cursor: "pointer",
-                    marginTop: "16px",
-                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-                    transition: "all 0.2s ease"
-                  }}
-                >
-                  Clear Data
-                </Button>
-              )}
               
             </div>
           </>
@@ -8254,7 +8280,7 @@ const IssuePanel = () => {
         {issueContext.hasConfig && !isLoading && !isLoadingStoredData && showWorkflowInfo && (
           <div style={{
             marginTop: "16px",
-            padding: "16px 20px",
+            padding: "10px 14px",
             backgroundColor: "#EFF6FF",
             borderRadius: "8px",
             border: "2px solid #93C5FD",
@@ -8265,8 +8291,8 @@ const IssuePanel = () => {
               onClick={() => setShowWorkflowInfo(false)}
               style={{
                 position: "absolute",
-                top: "12px",
-                right: "12px",
+                top: "8px",
+                right: "8px",
                 background: "transparent",
                 border: "none",
                 cursor: "pointer",
@@ -8288,15 +8314,15 @@ const IssuePanel = () => {
               fontWeight: "600",
               fontSize: "16px",
               color: "#1E40AF",
-              marginBottom: "8px",
-              paddingRight: "32px"
+              marginBottom: "6px",
+              paddingRight: "28px"
             }}>
               {isAdmin ? "Admin Review Mode" : "Request Submission Mode"}
             </div>
             <div style={{ 
               fontSize: "14px", 
               color: "#6B7280",
-              lineHeight: "1.5"
+              lineHeight: "1.4"
             }}>
               {isAdmin 
                 ? "Review user requests and use 'Approve & Execute' to run approved actions via ngrok API, or 'Reject Request' to decline with feedback."
