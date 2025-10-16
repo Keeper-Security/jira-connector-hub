@@ -556,7 +556,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'share-record':
-      // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R]
+      // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R] -f
       if (parameters.record) {
         command += ` '${parameters.record}'`;
       }
@@ -576,10 +576,12 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (parameters.recursive === true) {
         command += ` -R`;
       }
+      // Add force flag at the end
+      command += ` -f`;
       break;
       
     case 'share-folder':
-      // Format: share-folder "FOLDER_UID" -e "EMAIL" -a "ACTION" [options]
+      // Format: share-folder "FOLDER_UID" -e "EMAIL" -a "ACTION" [options] -f
       if (parameters.folder) {
         command += ` '${parameters.folder}'`;
       }
@@ -602,6 +604,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (parameters.can_edit === true) {
         command += ` -d`;
       }
+      // Add force flag at the end
+      command += ` -f`;
       break;
       
     case 'pam-action-rotate':
@@ -1103,8 +1107,24 @@ resolver.define('executeKeeperAction', async (req) => {
     const isMainRecordCreation = !parameters.skipComment;
     
     if (isMainRecordCreation) {
-      // Create simplified comment with command-specific messages and record_uid
-      let commentText = '';
+      // Get current user info for the comment
+      const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
+      const currentUser = await currentUserResponse.json();
+      
+      // Format timestamp in the same format as save/reject requests
+      const now = new Date();
+      const timestamp = now.toLocaleString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+      
+      // Create comment with command-specific messages and record_uid
+      let actionMessage = '';
       let recordUid = '';
       
       // Check for record_uid in different possible locations in the response
@@ -1115,36 +1135,90 @@ resolver.define('executeKeeperAction', async (req) => {
       // Set command-specific messages
       switch (command) {
         case 'record-add':
-          commentText = 'Record created successfully.';
-          if (recordUid) {
-            commentText += `\n\nRecord UID: ${recordUid}`;
-          }
+          actionMessage = 'Record created successfully';
           break;
         case 'record-update':
-          commentText = 'Record updated successfully.';
+          actionMessage = 'Record updated successfully';
+          break;
+        case 'record-permission':
+          actionMessage = 'Record permissions updated successfully';
           break;
         case 'share-record':
         case 'share-folder':
-          commentText = 'Record UID shared successfully.';
+          actionMessage = 'Record/Folder shared successfully';
+          break;
+        case 'pam-action-rotate':
+          actionMessage = 'PAM rotation executed successfully';
           break;
         default:
-          commentText = data.message || 'Keeper action executed successfully.';
-          if (recordUid) {
-            commentText += `\n\nRecord UID: ${recordUid}`;
-          }
+          actionMessage = data.message || 'Keeper action executed successfully';
       }
+      
+      // Build ADF content with panel (matching save/reject request format)
+      const contentArray = [
+        {
+          type: 'text',
+          text: 'Keeper Request Approved and Executed',
+          marks: [{ type: 'strong' }]
+        },
+        {
+          type: 'hardBreak'
+        },
+        {
+          type: 'text',
+          text: `Action: ${commandDescription || command}`
+        },
+        {
+          type: 'hardBreak'
+        },
+        {
+          type: 'text',
+          text: `Result: ${actionMessage}`
+        }
+      ];
+      
+      // Add record UID if available
+      if (recordUid) {
+        contentArray.push({
+          type: 'hardBreak'
+        });
+        contentArray.push({
+          type: 'text',
+          text: `Record UID: ${recordUid}`
+        });
+      }
+      
+      // Add executed by and timestamp
+      contentArray.push({
+        type: 'hardBreak'
+      });
+      contentArray.push({
+        type: 'text',
+        text: `Executed by: ${currentUser.displayName}`,
+        marks: [{ type: 'em' }]
+      });
+      contentArray.push({
+        type: 'hardBreak'
+      });
+      contentArray.push({
+        type: 'text',
+        text: `Executed at: ${timestamp}`,
+        marks: [{ type: 'em' }]
+      });
       
       const adfBody = {
         version: 1,
-        type: "doc",
+        type: 'doc',
         content: [
           {
-            type: "paragraph",
+            type: 'panel',
+            attrs: {
+              panelType: 'success'
+            },
             content: [
               {
-                type: "text",
-                text: commentText,
-                marks: [{ type: "strong" }]
+                type: 'paragraph',
+                content: contentArray
               }
             ]
           }
@@ -1481,10 +1555,132 @@ resolver.define('getGlobalUserRole', async (req) => {
 });
 
 /**
+ * Get project admin users - fetch all users who have admin permissions for a project
+ */
+resolver.define('getProjectAdmins', async (req) => {
+  const { issueKey } = req.payload;
+  
+  if (!issueKey) {
+    throw new Error('Issue key is required');
+  }
+  
+  try {
+    // Extract project key from issue key (e.g., "DM-5" -> "DM")
+    const projectKey = issueKey.split('-')[0];
+    
+    if (!projectKey) {
+      throw new Error('Unable to extract project key from issue key');
+    }
+    
+    // Get project details
+    const projectResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}`);
+    const project = await projectResponse.json();
+    
+    if (!project || !project.id) {
+      throw new Error('Unable to fetch project details');
+    }
+    
+    // Get all roles for the project
+    const rolesResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role`);
+    const roles = await rolesResponse.json();
+    
+    // Find the admin role URL - try multiple common names
+    let adminRoleUrl = null;
+    const possibleAdminRoleNames = ['Administrators', 'Administrator', 'Admins', 'Project Administrators', 'administrators'];
+    
+    for (const roleName of possibleAdminRoleNames) {
+      if (roles && roles[roleName]) {
+        adminRoleUrl = roles[roleName];
+        break;
+      }
+    }
+    
+    if (!adminRoleUrl) {
+      throw new Error('Unable to find administrator role for this project. Available roles: ' + Object.keys(roles).join(', '));
+    }
+    
+    // Extract the role ID from the URL
+    const roleIdMatch = adminRoleUrl.match(/role\/(\d+)/);
+    if (!roleIdMatch) {
+      throw new Error('Unable to extract role ID from admin role URL: ' + adminRoleUrl);
+    }
+    const roleId = roleIdMatch[1];
+    
+    // Get role details with actors (users)
+    const roleDetailsResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role/${roleId}`);
+    const roleDetails = await roleDetailsResponse.json();
+    
+    if (!roleDetails) {
+      throw new Error('Unable to fetch admin role details');
+    }
+    
+    if (!roleDetails.actors || roleDetails.actors.length === 0) {
+      throw new Error('No administrators found in this role');
+    }
+    
+    // Extract admin users from actors
+    const adminUsers = [];
+    
+    for (const actor of roleDetails.actors) {
+      try {
+        let accountId = null;
+        
+        // Try to extract accountId from different possible structures
+        if (actor.actorUser && actor.actorUser.accountId) {
+          accountId = actor.actorUser.accountId;
+        } else if (actor.id) {
+          accountId = actor.id;
+        } else if (actor.accountId) {
+          accountId = actor.accountId;
+        }
+        
+        if (!accountId) {
+          continue;
+        }
+        
+        // Fetch fresh user details from Jira API
+        const userResponse = await asApp().requestJira(route`/rest/api/3/user?accountId=${accountId}`);
+        
+        if (!userResponse.ok) {
+          continue;
+        }
+        
+        const userData = await userResponse.json();
+        
+        if (userData && userData.accountId) {
+          adminUsers.push({
+            accountId: userData.accountId,
+            displayName: userData.displayName || userData.name || `User (${userData.accountId.substring(0, 8)})`,
+            emailAddress: userData.emailAddress || null,
+            avatarUrl: userData.avatarUrls ? 
+              (userData.avatarUrls['48x48'] || userData.avatarUrls['32x32'] || userData.avatarUrls['24x24'] || userData.avatarUrls['16x16']) : 
+              null
+          });
+        }
+      } catch (userErr) {
+        // Continue with next actor if error occurs
+      }
+    }
+    
+    if (adminUsers.length === 0) {
+      throw new Error('No admin users could be extracted from the role. The role might only contain groups.');
+    }
+    
+    return {
+      success: true,
+      admins: adminUsers,
+      projectKey: projectKey
+    };
+  } catch (err) {
+    throw new Error(`Failed to fetch project admins: ${err.message}`);
+  }
+});
+
+/**
  * Store request data for admin approval
  */
 resolver.define('storeRequestData', async (req) => {
-  const { issueKey, requestData, formattedTimestamp } = req.payload;
+  const { issueKey, requestData, formattedTimestamp, assigneeAccountId } = req.payload;
   
   if (!issueKey) {
     throw new Error('Issue key is required');
@@ -1517,6 +1713,28 @@ resolver.define('storeRequestData', async (req) => {
     };
     
     await storage.set(`keeper_request_${issueKey}`, dataToStore);
+    
+    // If assigneeAccountId is provided, assign the ticket to that admin
+    if (assigneeAccountId) {
+      try {
+        await asApp().requestJira(
+          route`/rest/api/3/issue/${issueKey}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fields: {
+                assignee: {
+                  accountId: assigneeAccountId
+                }
+              }
+            }),
+          }
+        );
+      } catch (assignError) {
+        // Don't fail the entire operation if assignment fails
+      }
+    }
     
     // Add comment to JIRA ticket
     const actionLabel = requestData.selectedAction?.label || 'Keeper Action';
@@ -1646,6 +1864,83 @@ resolver.define('clearStoredRequestData', async (req) => {
     // Clear the stored data
     await storage.delete(storageKey);
     
+    // Get current user info for the comment
+    const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
+    const currentUser = await currentUserResponse.json();
+    
+    // Format timestamp
+    const now = new Date();
+    const timestamp = now.toLocaleString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+    
+    // Create ADF (Atlassian Document Format) comment
+    const adfBody = {
+      version: 1,
+      type: 'doc',
+      content: [
+        {
+          type: 'panel',
+          attrs: {
+            panelType: 'note'
+          },
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Keeper Request Cleared',
+                  marks: [{ type: 'strong' }]
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: 'The existing request has been cleared by the user.'
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: `Cleared by: ${currentUser.displayName}`,
+                  marks: [{ type: 'em' }]
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: `Cleared at: ${timestamp}`,
+                  marks: [{ type: 'em' }]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    
+    // Add comment to Jira using ADF format
+    await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}/comment`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          body: adfBody,
+        }),
+      }
+    );
+    
     return {
       success: true,
       message: "Stored request data cleared successfully"
@@ -1659,7 +1954,7 @@ resolver.define('clearStoredRequestData', async (req) => {
 });
 
 
-// Export resolver for frontend calls (getConfig, setConfig, testConnection, getIssueContext, executeKeeperAction, getKeeperRecords, getKeeperFolders, getRecordTypes, getRecordTypeTemplate, getKeeperRecordDetails, rejectKeeperRequest, getUserRole, getGlobalUserRole, storeRequestData, getStoredRequestData, activateKeeperPanel, clearStoredRequestData)
+// Export resolver for frontend calls (getConfig, setConfig, testConnection, getIssueContext, executeKeeperAction, getKeeperRecords, getKeeperFolders, getRecordTypes, getRecordTypeTemplate, getKeeperRecordDetails, rejectKeeperRequest, getUserRole, getGlobalUserRole, getProjectAdmins, storeRequestData, getStoredRequestData, activateKeeperPanel, clearStoredRequestData)
 export const handler = resolver.getDefinitions();
 
 // Export same resolver for issue panel - they can share the same functions

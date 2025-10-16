@@ -5,7 +5,6 @@ import Button from "@atlaskit/button";
 import SectionMessage from "@atlaskit/section-message";
 import Spinner from "@atlaskit/spinner";
 import Badge from "@atlaskit/badge";
-import Select from "@atlaskit/select";
 
 // Icons
 import SuccessIcon from "@atlaskit/icon/glyph/check-circle";
@@ -71,8 +70,9 @@ const keeperActionOptions = [
     value: 'share-folder', 
     label: 'Share Folder', 
     description: 'Grant or remove user/team access to folder with specific permissions.',
+    requiresSharedFolderSelection: true,
     fields: [
-      { name: 'folder', label: 'Folder UID', type: 'text', required: true, placeholder: 'Folder UID to share' },
+      { name: 'folder', label: 'Shared Folder', type: 'folder-select', required: true, placeholder: 'Select shared folder' },
       { name: 'user', label: 'Email/Team', type: 'text', required: true, placeholder: 'Email, team name, or * for all' },
       { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'remove'], placeholder: 'Select action' },
       { name: 'manage_records', label: 'Can Manage Records', type: 'checkbox', required: false, description: 'Allow user to manage records in folder' },
@@ -244,10 +244,20 @@ const IssuePanel = () => {
   const [hasStoredData, setHasStoredData] = useState(false); // Track if data has been stored
   const [isUpdating, setIsUpdating] = useState(false); // Track update operation
   
+  // Admin selection modal and dropdown states
+  const [showAdminModal, setShowAdminModal] = useState(false);
+  const [showAdminDropdown, setShowAdminDropdown] = useState(false);
+  const [projectAdmins, setProjectAdmins] = useState([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(false);
+  const [selectedAdmin, setSelectedAdmin] = useState(null);
+  const [adminSearchTerm, setAdminSearchTerm] = useState("");
+  const [adminCurrentPage, setAdminCurrentPage] = useState(1);
+  
   
   const itemsPerPage = 5;
   const recordsPerPage = 3;
   const foldersPerPage = 3;
+  const adminsPerPage = 3;
 
   // Centralized error handler for API calls
   const handleApiError = (error, defaultMessage = "An error occurred") => {
@@ -347,8 +357,8 @@ const IssuePanel = () => {
   const getFilteredFolders = () => {
     let foldersToFilter = keeperFolders;
     
-    // For record-permission, only show shared folders (flags contains "S")
-    if (selectedAction?.value === 'record-permission') {
+    // For record-permission and share-folder, only show shared folders (flags contains "S")
+    if (selectedAction?.value === 'record-permission' || selectedAction?.value === 'share-folder') {
       foldersToFilter = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
     }
     
@@ -642,6 +652,7 @@ const IssuePanel = () => {
         const blankCustomFields = customFields.map(field => ({
           ...field,
           value: '', // Keep field definition but clear the value
+          required: false, // For update, no fields are required - only fill what you want to change
           placeholder: `Enter new ${field.displayName.toLowerCase()} (leave blank to keep current)`
         }));
         
@@ -881,20 +892,46 @@ const IssuePanel = () => {
     }
   };
 
-  // Save/Update form data
-  const updateFormData = async () => {
-    if (!selectedAction) {
-      setSaveRequestMessage({ type: 'error', message: 'Please select an action first' });
-      setTimeout(() => setSaveRequestMessage(null), 5000);
-      return;
-    }
-    
+  // Fetch project admins
+  const fetchProjectAdmins = async () => {
     if (!issueContext?.issueKey) {
       setSaveRequestMessage({ type: 'error', message: 'Issue context not loaded. Please refresh the page.' });
       setTimeout(() => setSaveRequestMessage(null), 5000);
       return;
     }
     
+    setLoadingAdmins(true);
+    try {
+      const result = await invoke("getProjectAdmins", { 
+        issueKey: issueContext.issueKey
+      });
+      
+      if (result.success && result.admins && result.admins.length > 0) {
+        setProjectAdmins(result.admins);
+        setShowAdminModal(true);
+      } else {
+        setSaveRequestMessage({ 
+          type: 'error', 
+          message: 'No project administrators found. Please contact your system administrator.',
+          showTimestamp: false
+        });
+        setTimeout(() => setSaveRequestMessage(null), 5000);
+      }
+    } catch (error) {
+      const errorMessage = handleApiError(error, "Failed to fetch project administrators. Please try again.");
+      setSaveRequestMessage({ 
+        type: 'error', 
+        message: errorMessage,
+        showTimestamp: false
+      });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
+    } finally {
+      setLoadingAdmins(false);
+    }
+  };
+  
+  // Save/Update form data (after admin selection)
+  const saveRequestDataWithAdmin = async (adminAccountId) => {
     setIsUpdating(true);
     try {
       // Include temporary address data if present
@@ -932,12 +969,18 @@ const IssuePanel = () => {
       const result = await invoke("storeRequestData", { 
         issueKey: issueContext.issueKey,
         requestData,
-        formattedTimestamp
+        formattedTimestamp,
+        assigneeAccountId: adminAccountId
       });
       
       if (result.success) {
         setStoredRequestData(requestData);
         setHasStoredData(true);
+        setShowAdminModal(false);
+        setShowAdminDropdown(false);
+        setSelectedAdmin(null);
+        setAdminSearchTerm("");
+        setAdminCurrentPage(1);
         // Don't show success message - the "Request Saved" dialog box already shows this info
       }
     } catch (error) {
@@ -953,6 +996,88 @@ const IssuePanel = () => {
       setTimeout(() => setSaveRequestMessage(null), 5000);
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  // Save/Update form data
+  const updateFormData = async () => {
+    if (!selectedAction) {
+      setSaveRequestMessage({ type: 'error', message: 'Please select an action first' });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
+      return;
+    }
+    
+    if (!issueContext?.issueKey) {
+      setSaveRequestMessage({ type: 'error', message: 'Issue context not loaded. Please refresh the page.' });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
+      return;
+    }
+    
+    // For non-admin users saving for the FIRST TIME, show admin selection modal
+    // For UPDATE requests (hasStoredData is true), skip admin selection as it's already assigned
+    if (!isAdmin && !hasStoredData) {
+      await fetchProjectAdmins();
+    } else {
+      // For admin users OR updating existing request, save directly without admin selection
+      setIsUpdating(true);
+      try {
+        // Include temporary address data if present
+        const tempAddressData = {};
+        if (formData.addressRef && formData.addressRef.startsWith('temp_addr_')) {
+          const tempAddressUid = formData.addressRef;
+          const addressDetails = resolvedAddresses[tempAddressUid];
+          if (addressDetails && addressDetails.isTemporary) {
+            tempAddressData[tempAddressUid] = addressDetails;
+          }
+        }
+        
+        const now = new Date();
+        const requestData = {
+          selectedAction,
+          formData,
+          selectedRecord,
+          selectedRecordForUpdate,
+          selectedFolder,
+          tempAddressData, // Store temporary address data
+          timestamp: now.toISOString()
+        };
+        
+        // Format the same timestamp for the JIRA comment (same format used in UI)
+        const formattedTimestamp = now.toLocaleString('en-GB', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        });
+        
+        const result = await invoke("storeRequestData", { 
+          issueKey: issueContext.issueKey,
+          requestData,
+          formattedTimestamp
+        });
+        
+        if (result.success) {
+          setStoredRequestData(requestData);
+          setHasStoredData(true);
+          // Don't show success message - the "Request Saved" dialog box already shows this info
+        }
+      } catch (error) {
+        // Handle error
+        const errorMessage = handleApiError(error, "Failed to save request data. Please try again.");
+        
+        // Only show error messages - the "Request Saved" dialog handles success
+        setSaveRequestMessage({ 
+          type: 'error', 
+          message: errorMessage,
+          showTimestamp: false
+        });
+        setTimeout(() => setSaveRequestMessage(null), 5000);
+      } finally {
+        setIsUpdating(false);
+      }
     }
   };
 
@@ -3437,7 +3562,7 @@ const IssuePanel = () => {
                     fontWeight: "500", 
                     color: "#1A1A1A" 
                   }}>
-                    {firstField.label} {firstField.required && <span style={{ color: '#FF5630' }}>*</span>}
+                    {firstField.label} {firstField.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
                   </label>
                   {renderFormInput(firstField)}
                 </div>
@@ -3468,7 +3593,7 @@ const IssuePanel = () => {
                   fontWeight: "500", 
                   color: "#1A1A1A" 
                 }}>
-                  {lastField.label} {lastField.required && <span style={{ color: '#FF5630' }}>*</span>}
+                  {lastField.label} {lastField.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
                 </label>
                 {renderFormInput(lastField)}
               </div>
@@ -3502,7 +3627,7 @@ const IssuePanel = () => {
                   fontWeight: "500", 
                   color: "#1A1A1A" 
                 }}>
-                  {numberField.label} {numberField.required && <span style={{ color: '#FF5630' }}>*</span>}
+                  {numberField.label} {numberField.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
                 </label>
                 {renderFormInput(numberField)}
               </div>
@@ -3573,7 +3698,7 @@ const IssuePanel = () => {
                   fontWeight: "500", 
                   color: "#1A1A1A" 
                 }}>
-                  {accountNumberField.label} {accountNumberField.required && <span style={{ color: '#FF5630' }}>*</span>}
+                  {accountNumberField.label} {accountNumberField.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
                 </label>
                 {renderFormInput(accountNumberField)}
               </div>
@@ -3655,7 +3780,7 @@ const IssuePanel = () => {
                     fontWeight: "500", 
                     color: "#1A1A1A" 
                   }}>
-                    {field.label} {field.required && <span style={{ color: '#FF5630' }}>*</span>}
+                    {field.label} {field.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
                   </label>
                 {renderFormInput(field)}
               </div>
@@ -3677,7 +3802,7 @@ const IssuePanel = () => {
             fontWeight: "500", 
             color: "#1A1A1A" 
           }}>
-            {field.label} {field.required && <span style={{ color: '#FF5630' }}>*</span>} {field.templateField && <span style={{ color: '#666', fontSize: '11px' }}>(Template)</span>}
+            {field.label} {field.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>} {field.templateField && <span style={{ color: '#666', fontSize: '11px' }}>(Template)</span>}
           </label>
           {renderFormInput(field)}
         </div>
@@ -6121,8 +6246,8 @@ const IssuePanel = () => {
                     </div>
                   )}
 
-                  {/* Folders Selector for share-folder action only */}
-                  {selectedAction.value === 'share-folder' && (
+                  {/* Folders Selector for pam-action-rotate only (all folders) */}
+                  {selectedAction.value === 'pam-action-rotate' && (
                     <div style={{ marginBottom: "16px" }}>
                       <label
                         style={{
@@ -6150,7 +6275,7 @@ const IssuePanel = () => {
                             fontStyle: "italic"
                           }}
                         >
-                          Folder Path field is hidden for Share Folder action. Select a folder, enter an email, and choose permission level to enable the Execute button.
+                          Select a folder for PAM rotation. You can choose any folder (shared or private).
                         </div>
                       )}
                       
@@ -6426,8 +6551,8 @@ const IssuePanel = () => {
                     </div>
                   )}
 
-                  {/* Folders Selector for record-permission action only */}
-                  {selectedAction.value === 'record-permission' && (
+                  {/* Folders Selector for record-permission and share-folder actions */}
+                  {(selectedAction.value === 'record-permission' || selectedAction.value === 'share-folder') && (
                     <div style={{ marginBottom: "16px" }}>
                       <label
                         style={{
@@ -6441,7 +6566,7 @@ const IssuePanel = () => {
                         Select Shared Folder: <span style={{ color: "#FF5630" }}>*</span>
                       </label>
                       
-                      {/* Info about record-permission workflow */}
+                      {/* Info about workflow */}
                       {!selectedFolder && (
                         <div
                           style={{
@@ -6455,7 +6580,9 @@ const IssuePanel = () => {
                             fontStyle: "italic"
                           }}
                         >
-                          Shared Folder field is hidden for Record Permission action. Select a shared folder and configure permissions to enable the Execute button. Changes apply to all users in the folder.
+                          {selectedAction.value === 'record-permission' 
+                            ? "Shared Folder field is hidden for Record Permission action. Select a shared folder and configure permissions to enable the Execute button. Changes apply to all users in the folder."
+                            : "Select a shared folder to share with users or teams. Configure permissions and specify the recipient email to enable the Execute button."}
                         </div>
                       )}
                       
@@ -6540,7 +6667,9 @@ const IssuePanel = () => {
                                     key={folder.folder_uid}
                                     onClick={() => {
                                       setSelectedFolder(folder);
-                                      setFormData(prev => ({ ...prev, sharedFolder: folder.folder_uid }));
+                                      // Set different field name based on action type
+                                      const fieldName = selectedAction.value === 'record-permission' ? 'sharedFolder' : 'folder';
+                                      setFormData(prev => ({ ...prev, [fieldName]: folder.folder_uid }));
                                       setFolderSearchTerm(folder.name || folder.title || `Folder ${folder.folder_uid}`);
                                       setShowFolderDropdown(false);
                                     }}
@@ -7698,7 +7827,7 @@ const IssuePanel = () => {
                           }}
                         >
                           {field.label}
-                          {field.required && (
+                          {field.required && selectedAction.value !== 'record-update' && (
                             <span style={{ color: "#FF5630", marginLeft: "4px" }}>*</span>
                           )}
                         </label>
@@ -7745,16 +7874,18 @@ const IssuePanel = () => {
 
                   {/* Custom fields for record-update action handled on backend */}
                   
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "#6B778C",
-                      fontStyle: "italic",
-                      marginTop: "8px"
-                    }}
-                  >
-                    * Required fields must be completed before approval
-                  </div>
+                  {selectedAction.value !== 'record-update' && (
+                    <div
+                      style={{
+                        fontSize: "11px",
+                        color: "#6B778C",
+                        fontStyle: "italic",
+                        marginTop: "8px"
+                      }}
+                    >
+                      * Required fields must be completed before approval
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -8062,27 +8193,28 @@ const IssuePanel = () => {
                   <Button
                     appearance="primary"
                     onClick={updateFormData}
-                    isLoading={isUpdating}
-                    isDisabled={isUpdating || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
+                    isLoading={isUpdating || loadingAdmins}
+                    isDisabled={isUpdating || loadingAdmins || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
                     style={{
                       backgroundColor: isFormDisabled ? "#D0D0D0" : 
-                        (loadingTemplate || loadingRecordTypes) ? "#F0F0F0" :
+                        (loadingTemplate || loadingRecordTypes || loadingAdmins) ? "#F0F0F0" :
                         (selectedAction && validateForm() && !isUpdating ? "#4285F4" : isUpdating ? "#357AE8" : "#E0E0E0"),
                       color: isFormDisabled ? "#777" : 
-                        (loadingTemplate || loadingRecordTypes) ? "#999" :
+                        (loadingTemplate || loadingRecordTypes || loadingAdmins) ? "#999" :
                         ((selectedAction && validateForm()) || isUpdating ? "#FFFFFF" : "#999"),
                       fontWeight: "600",
                       fontSize: "14px",
                       padding: "8px 16px",
                       borderRadius: "8px",
                       border: "none",
-                      cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isUpdating) ? "not-allowed" : "pointer",
-                      boxShadow: (selectedAction && validateForm() && !isUpdating) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
+                      cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || loadingAdmins || (!selectedAction || !validateForm() || isUpdating) ? "not-allowed" : "pointer",
+                      boxShadow: (selectedAction && validateForm() && !isUpdating && !loadingAdmins) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
                       transition: "all 0.2s ease"
                     }}
                   >
                     {isFormDisabled ? "Form Disabled (Re-enabling...)" :
                      isUpdating ? "Saving..." :
+                     loadingAdmins ? "Loading Administrators..." :
                      loadingTemplate ? "Loading Template Fields..." :
                      loadingRecordTypes ? "Loading Record Types..." :
                      !selectedAction ? "Select Action to Enable" :
@@ -8633,6 +8765,393 @@ const IssuePanel = () => {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Admin Selection Modal */}
+        {showAdminModal && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000
+          }}>
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '8px',
+              padding: '24px',
+              maxWidth: '500px',
+              width: '90%',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '20px'
+              }}>
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '18px',
+                  fontWeight: '600',
+                  color: '#1A1A1A'
+                }}>
+                  Select Administrator
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowAdminModal(false);
+                    setShowAdminDropdown(false);
+                    setSelectedAdmin(null);
+                    setAdminSearchTerm("");
+                    setAdminCurrentPage(1);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '20px',
+                    cursor: 'pointer',
+                    color: '#6B778C',
+                    padding: '4px'
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <p style={{
+                fontSize: '14px',
+                color: '#6B778C',
+                marginBottom: '20px',
+                lineHeight: '1.5'
+              }}>
+                Please select an administrator to assign this request to. The ticket will be assigned to the selected admin for review and approval.
+              </p>
+
+              {loadingAdmins ? (
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  padding: '40px'
+                }}>
+                  <Spinner size="large" />
+                </div>
+              ) : (
+                <>
+                  {projectAdmins.length === 0 ? (
+                    <div style={{
+                      padding: '20px',
+                      textAlign: 'center',
+                      color: '#6B778C',
+                      fontSize: '14px'
+                    }}>
+                      No administrators found for this project.
+                    </div>
+                  ) : (
+                    <>
+                      {/* Custom Admin Dropdown */}
+                      <div style={{ position: 'relative', marginBottom: '20px' }}>
+                        {/* Search/Display Input */}
+                        <input
+                          type="text"
+                          placeholder={selectedAdmin ? (selectedAdmin.displayName || selectedAdmin.name || 'Administrator') : "Click to select administrator..."}
+                          value={adminSearchTerm}
+                          onChange={(e) => {
+                            setAdminSearchTerm(e.target.value);
+                            setAdminCurrentPage(1);
+                          }}
+                          onFocus={() => setShowAdminDropdown(true)}
+                          onClick={() => setShowAdminDropdown(!showAdminDropdown)}
+                          style={{
+                            width: '100%',
+                            padding: '10px 40px 10px 12px',
+                            borderRadius: '4px',
+                            border: showAdminDropdown ? '2px solid #0066CC' : '2px solid #DFE1E6',
+                            fontSize: '14px',
+                            backgroundColor: 'white',
+                            outline: 'none',
+                            cursor: 'pointer',
+                            boxSizing: 'border-box',
+                            transition: 'border-color 0.2s ease'
+                          }}
+                        />
+                        
+                        {/* Dropdown Arrow */}
+                        <div
+                          onClick={() => setShowAdminDropdown(!showAdminDropdown)}
+                          style={{
+                            position: 'absolute',
+                            right: '12px',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            color: '#666',
+                            userSelect: 'none'
+                          }}
+                        >
+                          ▼
+                        </div>
+
+                        {/* Dropdown Menu */}
+                        {showAdminDropdown && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '100%',
+                              left: '0',
+                              right: '0',
+                              backgroundColor: 'white',
+                              border: '2px solid #DFE1E6',
+                              borderTop: 'none',
+                              borderRadius: '0 0 6px 6px',
+                              maxHeight: '300px',
+                              overflowY: 'auto',
+                              zIndex: 1000,
+                              boxShadow: '0 8px 16px rgba(0,0,0,0.15)',
+                              marginTop: '-2px'
+                            }}
+                          >
+                            {(() => {
+                              // Filter admins based on search
+                              const filteredAdmins = projectAdmins.filter(admin => {
+                                const displayName = (admin.displayName || admin.name || '').toLowerCase();
+                                return displayName.includes(adminSearchTerm.toLowerCase());
+                              });
+
+                              // Calculate pagination
+                              const totalPages = Math.ceil(filteredAdmins.length / adminsPerPage);
+                              const startIndex = (adminCurrentPage - 1) * adminsPerPage;
+                              const endIndex = startIndex + adminsPerPage;
+                              const paginatedAdmins = filteredAdmins.slice(startIndex, endIndex);
+
+                              return (
+                                <>
+                                  {filteredAdmins.length === 0 ? (
+                                    <div style={{
+                                      padding: '16px',
+                                      textAlign: 'center',
+                                      color: '#6B778C',
+                                      fontSize: '13px'
+                                    }}>
+                                      No administrators match your search.
+                                    </div>
+                                  ) : (
+                                    <>
+                                      {/* Admin List */}
+                                      {paginatedAdmins.map((admin) => {
+                                        const displayName = admin.displayName || admin.name || 'Administrator';
+                                        const isSelected = selectedAdmin?.accountId === admin.accountId;
+                                        
+                                        return (
+                                          <div
+                                            key={admin.accountId}
+                                            onClick={() => {
+                                              setSelectedAdmin(admin);
+                                              setShowAdminDropdown(false);
+                                              setAdminSearchTerm('');
+                                            }}
+                                            style={{
+                                              padding: '10px 12px',
+                                              cursor: 'pointer',
+                                              borderBottom: '1px solid #F0F0F0',
+                                              backgroundColor: isSelected ? '#E6F7FF' : 'transparent',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              gap: '12px',
+                                              transition: 'background-color 0.15s ease'
+                                            }}
+                                            onMouseEnter={(e) => {
+                                              if (!isSelected) {
+                                                e.currentTarget.style.backgroundColor = '#F8F9FA';
+                                              }
+                                            }}
+                                            onMouseLeave={(e) => {
+                                              if (!isSelected) {
+                                                e.currentTarget.style.backgroundColor = 'transparent';
+                                              }
+                                            }}
+                                          >
+                                            {/* Avatar */}
+                                            {admin.avatarUrl ? (
+                                              <img
+                                                src={admin.avatarUrl}
+                                                alt={displayName}
+                                                style={{
+                                                  width: '32px',
+                                                  height: '32px',
+                                                  borderRadius: '50%',
+                                                  flexShrink: 0
+                                                }}
+                                              />
+                                            ) : (
+                                              <div style={{
+                                                width: '32px',
+                                                height: '32px',
+                                                borderRadius: '50%',
+                                                backgroundColor: '#0066CC',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                color: 'white',
+                                                fontSize: '14px',
+                                                fontWeight: '600',
+                                                flexShrink: 0
+                                              }}>
+                                                {displayName.charAt(0).toUpperCase()}
+                                              </div>
+                                            )}
+                                            
+                                            {/* Name */}
+                                            <div style={{
+                                              fontSize: '14px',
+                                              fontWeight: '500',
+                                              color: '#1A1A1A',
+                                              flex: 1
+                                            }}>
+                                              {displayName}
+                                            </div>
+                                            
+                                            {/* Check Icon */}
+                                            {isSelected && (
+                                              <div style={{
+                                                fontSize: '16px',
+                                                color: '#0066CC'
+                                              }}>
+                                                ✓
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                      
+                                      {/* Pagination */}
+                                      {totalPages > 1 && (
+                                        <div style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          padding: '8px 12px',
+                                          borderTop: '1px solid #E0E0E0',
+                                          backgroundColor: '#F9F9F9'
+                                        }}>
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setAdminCurrentPage(Math.max(1, adminCurrentPage - 1));
+                                            }}
+                                            disabled={adminCurrentPage === 1}
+                                            style={{
+                                              padding: '4px 8px',
+                                              fontSize: '12px',
+                                              border: '1px solid #DFE1E6',
+                                              borderRadius: '3px',
+                                              backgroundColor: adminCurrentPage === 1 ? '#F4F5F7' : 'white',
+                                              color: adminCurrentPage === 1 ? '#9CA3AF' : '#172B4D',
+                                              cursor: adminCurrentPage === 1 ? 'not-allowed' : 'pointer'
+                                            }}
+                                          >
+                                            ← Prev
+                                          </button>
+                                          
+                                          <span style={{
+                                            fontSize: '12px',
+                                            color: '#6B778C'
+                                          }}>
+                                            {adminCurrentPage} / {totalPages}
+                                          </span>
+                                          
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setAdminCurrentPage(Math.min(totalPages, adminCurrentPage + 1));
+                                            }}
+                                            disabled={adminCurrentPage === totalPages}
+                                            style={{
+                                              padding: '4px 8px',
+                                              fontSize: '12px',
+                                              border: '1px solid #DFE1E6',
+                                              borderRadius: '3px',
+                                              backgroundColor: adminCurrentPage === totalPages ? '#F4F5F7' : 'white',
+                                              color: adminCurrentPage === totalPages ? '#9CA3AF' : '#172B4D',
+                                              cursor: adminCurrentPage === totalPages ? 'not-allowed' : 'pointer'
+                                            }}
+                                          >
+                                            Next →
+                                          </button>
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  <div style={{
+                    display: 'flex',
+                    gap: '12px',
+                    justifyContent: 'flex-end',
+                    marginTop: '20px'
+                  }}>
+                    <button
+                      onClick={() => {
+                        setShowAdminModal(false);
+                        setShowAdminDropdown(false);
+                        setSelectedAdmin(null);
+                        setAdminSearchTerm("");
+                        setAdminCurrentPage(1);
+                      }}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '4px',
+                        border: '1px solid #DFE1E6',
+                        backgroundColor: 'white',
+                        color: '#6B778C',
+                        cursor: 'pointer',
+                        fontSize: '14px'
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (selectedAdmin) {
+                          saveRequestDataWithAdmin(selectedAdmin.accountId);
+                        }
+                      }}
+                      disabled={!selectedAdmin || isUpdating}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        backgroundColor: selectedAdmin && !isUpdating ? '#0066CC' : '#E0E0E0',
+                        color: selectedAdmin && !isUpdating ? 'white' : '#999',
+                        cursor: selectedAdmin && !isUpdating ? 'pointer' : 'not-allowed',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      {isUpdating && <Spinner size="small" />}
+                      {isUpdating ? 'Assigning...' : 'Assign & Submit Request'}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
