@@ -10,9 +10,6 @@ import SectionMessage from "@atlaskit/section-message";
 import SettingsIcon from "@atlaskit/icon/glyph/settings";
 import InfoIcon from "@atlaskit/icon/glyph/info";
 import BookIcon from "@atlaskit/icon/glyph/book";
-import UnlockIcon from "@atlaskit/icon/glyph/unlock";
-import LockIcon from "@atlaskit/icon/glyph/lock";
-import CopyIcon from "@atlaskit/icon/glyph/copy";
 
 const App = () => {
   const [activeTab, setActiveTab] = useState("config");
@@ -39,11 +36,37 @@ const App = () => {
 
   // Centralized error handler for API calls
   const handleApiError = (error, defaultMessage = "An error occurred") => {
-    // Try to extract error message from various possible locations in the error object
-    let errorMessage = error.error || error.message || defaultMessage;
+    // Helper function to check if content contains HTML
+    const containsHtml = (text) => {
+      if (typeof text !== 'string') return false;
+      return /<\/?[a-z][\s\S]*>/i.test(text);
+    };
     
-    // If we have an error message from the response, use it directly
-    if (errorMessage && errorMessage !== defaultMessage) {
+    // Try to extract error message from various possible locations
+    let errorMessage = '';
+    
+    // Check error.error - skip if it contains HTML
+    if (error.error && !containsHtml(error.error)) {
+      errorMessage = error.error;
+    }
+    
+    // Check error.message - skip if it contains HTML
+    if (!errorMessage && error.message && !containsHtml(error.message)) {
+      errorMessage = error.message;
+    }
+    
+    // If no valid message found (or all contained HTML), use default
+    if (!errorMessage || errorMessage.trim().length === 0) {
+      errorMessage = defaultMessage;
+    }
+    
+    // If message is too long (likely an error dump), use default message
+    if (errorMessage.length > 500) {
+      errorMessage = defaultMessage;
+    }
+    
+    // If we have a valid error message, use it
+    if (errorMessage && errorMessage !== defaultMessage && errorMessage.trim().length > 0) {
       return errorMessage;
     }
     
@@ -88,7 +111,7 @@ const App = () => {
       setIsCheckingAdmin(false);
     }).catch((error) => {
       // For this initial call, we can't use isAdmin state yet, so we'll default to false
-      console.error("Failed to check admin permissions:", error.message || error);
+      // Silently handle error as this is not critical for page load
       setIsAdmin(false);
       setIsCheckingAdmin(false);
     });
@@ -126,7 +149,6 @@ const App = () => {
       setIsLoading(false);
     }).catch((error) => {
       const errorMessage = handleApiError(error, "Failed to load configuration");
-      console.error(errorMessage);
       setStatusMessage({
         type: 'error',
         title: 'Failed to Load Configuration',
@@ -669,7 +691,7 @@ const App = () => {
                           color: "#974F0C",
                           fontWeight: "600"
                         }}>
-                          ⚠️ Please test the connection first before saving settings.
+                          ⚠️ Please test the connection before saving settings.
                         </span>
                       </div>
                     )}
@@ -684,20 +706,219 @@ const App = () => {
 
           {activeTab === "prereq" && (
             <>
-              <h2 style={{ fontWeight: "600", fontSize: "20px", marginBottom: "8px", color: "#172B4D" }}>
-                Prerequisites
+              <h2 style={{ fontWeight: "600", fontSize: "20px", marginBottom: "16px", color: "#172B4D" }}>
+                Prerequisites Setup Guide
               </h2>
-              <ul style={{ paddingLeft: "20px", color: "#42526E", fontSize: "14px", lineHeight: "20px", marginTop: "16px" }}>
-                <li style={{ marginBottom: "12px" }}>
-                  Ensure Keeper Commander REST API is running and accessible via your Ngrok tunnel.
-                </li>
-                <li style={{ marginBottom: "12px" }}>
-                  Verify Jira workflow includes the transition "APPROVED".
-                </li>
-                <li style={{ marginBottom: "12px" }}>
-                  <strong style={{ fontWeight: "600", color: "#172B4D" }}>API URL Format:</strong> Enter base URL only (e.g., <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>https://xxxxx.ngrok-free.app</code>). The endpoint <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>/api/v1/executecommand</code> will be automatically appended.
-                </li>
-              </ul>
+              
+              <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "20px" }}>
+                This Jira integration leverages <a href="https://docs.keeper.io/en/keeperpam/commander-cli/overview" target="_blank" rel="noopener noreferrer" style={{ color: "#0052CC", textDecoration: "none", fontWeight: "500" }}>Keeper Commander CLI</a> running in Service Mode to provide a REST API interface for vault operations. The following guide covers both Jira-side and Keeper-side requirements to enable seamless communication between Jira Cloud and your Keeper vault.
+              </p>
+
+              <div style={{ marginBottom: "32px", paddingBottom: "24px", borderBottom: "1px solid #DFE1E6" }}>
+                <h3 style={{ fontWeight: "600", fontSize: "16px", marginTop: "0", marginBottom: "12px", color: "#172B4D" }}>
+                  1. Jira Cloud Requirements
+                </h3>
+                
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px", fontWeight: "600" }}>
+                  Administrator Setup
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  To install and configure this Forge app, Jira administrators must have appropriate permissions within their Atlassian organization. The administrator responsible for installation needs <strong style={{ fontWeight: "600", color: "#172B4D" }}>Manage apps</strong> permission in Jira settings, which allows them to install, configure, and manage Forge applications. Additionally, they should have access to organization settings for billing and app approval workflows if organizational policies require app approval before installation.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "16px" }}>
+                  Once installed, administrators must configure the app through the global configuration page (accessed via Jira Settings → Apps → Keeper Integration). This includes providing the Keeper Commander REST API URL, API key, and testing the connection to ensure proper communication between Jira and Keeper services. Administrators can also manage request approvals and assign specific users as approvers for Keeper requests within issues.
+                </p>
+
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px", fontWeight: "600" }}>
+                  End User Permissions
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  For end users to access and utilize the Keeper integration panel within Jira issues, specific issue-level permissions are required. Users must have <strong style={{ fontWeight: "600", color: "#172B4D" }}>Edit Issues</strong> permission for the projects where they want to use Keeper functionality. This permission is essential because the Forge app's issue panel only appears to users who can modify issues, ensuring that only authorized team members can request or execute vault operations.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  Additionally, users should have <strong style={{ fontWeight: "600", color: "#172B4D" }}>Add Comments</strong> permission, as the app automatically adds structured comments to issues when Keeper actions are requested, approved, or executed. These comments provide an audit trail and keep all stakeholders informed of vault operation status. Users without this permission may encounter issues with the request approval workflow.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "16px" }}>
+                  Users submitting requests that require admin approval should also have <strong style={{ fontWeight: "600", color: "#172B4D" }}>Assign Issues</strong> permission if the workflow involves automatic assignment to designated approvers. While not strictly required for basic functionality, this permission enables a smoother approval process where issues are automatically routed to the appropriate administrator for review.
+                </p>
+
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px", fontWeight: "600" }}>
+                  Project Configuration
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "0" }}>
+                  The integration works across all Jira Cloud projects where users have appropriate permissions. No special project configuration or custom fields are required. However, administrators may want to consider creating dedicated issue types for Keeper requests (such as "Access Request" or "Credential Request") to better organize and track vault operations within their project workflows. The app integrates seamlessly with existing issue workflows, priorities, and custom fields without requiring modifications to your current Jira configuration.
+                </p>
+                
+                <p style={{ color: "#5E6C84", fontSize: "13px", lineHeight: "20px", fontStyle: "italic", marginTop: "12px", marginBottom: "0" }}>
+                  Reference: <a href="https://support.atlassian.com/jira-cloud-administration/docs/manage-project-permissions/" target="_blank" rel="noopener noreferrer" style={{ color: "#5E6C84", textDecoration: "underline" }}>Jira Cloud Project Permissions</a> | <a href="https://developer.atlassian.com/platform/forge/manifest-reference/permissions/" target="_blank" rel="noopener noreferrer" style={{ color: "#5E6C84", textDecoration: "underline" }}>Forge App Permissions</a>
+                </p>
+              </div>
+
+              <div style={{ marginBottom: "32px", paddingBottom: "24px", borderBottom: "1px solid #DFE1E6" }}>
+                <h3 style={{ fontWeight: "600", fontSize: "16px", marginTop: "0", marginBottom: "12px", color: "#172B4D" }}>
+                  2. Keeper Commander CLI Installation
+                </h3>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  Keeper Commander is a powerful command-line and SDK interface to the Keeper Security platform. It provides comprehensive access to your vault, administrative functions, and privileged access management capabilities. Before proceeding, ensure you have a valid Keeper account with appropriate permissions to create, modify, and share records and folders within your vault.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  The recommended installation method is via Docker, which provides a containerized environment with all necessary dependencies pre-configured. Alternatively, you can install Commander CLI using Python for environments where Docker is not available. Visit the <a href="https://docs.keeper.io/en/keeperpam/commander-cli/installation-and-setup" target="_blank" rel="noopener noreferrer" style={{ color: "#0052CC", textDecoration: "none", fontWeight: "500" }}>Installation and Setup documentation</a> for detailed installation instructions for your platform.
+                </p>
+                <p style={{ color: "#5E6C84", fontSize: "13px", lineHeight: "20px", fontStyle: "italic", margin: "0" }}>
+                  Reference: <a href="https://docs.keeper.io/en/keeperpam/commander-cli/overview" target="_blank" rel="noopener noreferrer" style={{ color: "#5E6C84", textDecoration: "underline" }}>Keeper Commander Overview</a>
+                </p>
+              </div>
+
+              <div style={{ marginBottom: "32px", paddingBottom: "24px", borderBottom: "1px solid #DFE1E6" }}>
+                <h3 style={{ fontWeight: "600", fontSize: "16px", marginTop: "0", marginBottom: "12px", color: "#172B4D" }}>
+                  3. Service Mode REST API Configuration
+                </h3>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  Service Mode transforms Keeper Commander into a REST API server that can process commands via HTTP endpoints. This mode is specifically designed for integration scenarios where external applications need programmatic access to vault operations. The service automatically generates a secure API key upon startup and exposes the <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>/api/v1/executecommand</code> endpoint for command execution.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "16px" }}>
+                  For this integration to function correctly, your Service Mode instance must be configured with specific parameters. The commands list defines which CLI operations are permitted via the API, the run mode determines whether the service operates in the foreground or background, and the queue system setting controls asynchronous request handling. Additionally, enabling persistent login ensures uninterrupted authentication without repeated login prompts, which is critical for continuous operation.
+                </p>
+
+                <div style={{ marginTop: "16px", marginBottom: "16px", padding: "14px 16px", backgroundColor: "#F4F5F7", borderLeft: "4px solid #0052CC", borderRadius: "3px" }}>
+                  <p style={{ margin: 0, marginBottom: "12px", fontSize: "14px", color: "#172B4D", fontWeight: "600" }}>
+                    Required Service Configuration
+                  </p>
+                  <table style={{ width: "100%", fontSize: "13px", lineHeight: "20px", borderCollapse: "collapse" }}>
+                    <tbody>
+                      <tr>
+                        <td style={{ padding: "6px 0", color: "#5E6C84", verticalAlign: "top", width: "140px" }}>Commands List:</td>
+                        <td style={{ padding: "6px 0", color: "#172B4D" }}>
+                          <code style={{ backgroundColor: "#FFFFFF", padding: "2px 6px", borderRadius: "3px", fontSize: "12px", wordBreak: "break-all" }}>record-add, list, ls, get, record-type-info, record-update, share-record, share-folder, rti, record-permission, pam, service-status</code>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "6px 0", color: "#5E6C84", verticalAlign: "top" }}>Run Mode:</td>
+                        <td style={{ padding: "6px 0", color: "#172B4D" }}>
+                          <code style={{ backgroundColor: "#FFFFFF", padding: "2px 6px", borderRadius: "3px", fontSize: "12px" }}>-rm foreground</code> <span style={{ color: "#5E6C84" }}>(Default)</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "6px 0", color: "#5E6C84", verticalAlign: "top" }}>Queue System:</td>
+                        <td style={{ padding: "6px 0", color: "#172B4D" }}>
+                          <code style={{ backgroundColor: "#FFFFFF", padding: "2px 6px", borderRadius: "3px", fontSize: "12px" }}>-q n</code> <span style={{ color: "#5E6C84" }}>(Disabled for synchronous execution)</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "6px 0", color: "#5E6C84", verticalAlign: "top" }}>Authentication:</td>
+                        <td style={{ padding: "6px 0", color: "#172B4D" }}>KSM Token, User/Password, or Config File</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: "6px 0", color: "#5E6C84", verticalAlign: "top" }}>Persistent Login:</td>
+                        <td style={{ padding: "6px 0", color: "#172B4D" }}>
+                          <code style={{ backgroundColor: "#FFFFFF", padding: "2px 6px", borderRadius: "3px", fontSize: "12px" }}>this-device persistent-login on</code>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={{ marginTop: "16px", padding: "14px 16px", backgroundColor: "#FFF7E6", borderLeft: "4px solid #FF991F", borderRadius: "3px" }}>
+                  <p style={{ margin: 0, marginBottom: "8px", fontSize: "13px", color: "#974F0C", fontWeight: "600" }}>
+                    Example Docker Deployment Command
+                  </p>
+                  <code style={{ display: "block", marginTop: "10px", padding: "10px 12px", backgroundColor: "#FFFFFF", borderRadius: "3px", fontSize: "12px", color: "#172B4D", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: "18px" }}>
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status' -f json -rm foreground -q n --user your@email.com --password yourpassword
+                  </code>
+                </div>
+
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginTop: "16px", marginBottom: "0" }}>
+                  After successful deployment, the service will generate a unique API key displayed in the container logs. This API key must be securely stored and configured in the Jira integration settings. All configuration files are automatically encrypted using your private key to protect sensitive data including API keys, tokens, and security settings.
+                </p>
+                <p style={{ color: "#5E6C84", fontSize: "13px", lineHeight: "20px", fontStyle: "italic", marginTop: "12px", marginBottom: "0" }}>
+                  Reference: <a href="https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api" target="_blank" rel="noopener noreferrer" style={{ color: "#5E6C84", textDecoration: "underline" }}>Service Mode REST API Documentation</a>
+                </p>
+              </div>
+
+              <div style={{ marginBottom: "32px", paddingBottom: "24px", borderBottom: "1px solid #DFE1E6" }}>
+                <h3 style={{ fontWeight: "600", fontSize: "16px", marginTop: "0", marginBottom: "12px", color: "#172B4D" }}>
+                  4. Tunneling & Network Configuration
+                </h3>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  Since Keeper Commander Service Mode runs in your local environment, you need a tunneling solution to expose the REST API endpoints to Jira Cloud. A tunnel creates a secure bridge between your local service and the public internet, enabling Jira to communicate with your Keeper Commander instance without complex firewall or network configuration.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  <strong style={{ fontWeight: "600", color: "#172B4D" }}>Ngrok</strong> is a popular tunneling solution offering both free and paid plans. It provides instant public URLs with automatic HTTPS encryption. The free tier is suitable for development and testing, while paid plans offer additional features like custom domains and increased bandwidth. Visit <a href="https://ngrok.com/" target="_blank" rel="noopener noreferrer" style={{ color: "#0052CC", textDecoration: "none", fontWeight: "500" }}>ngrok.com</a> to get started.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  <strong style={{ fontWeight: "600", color: "#172B4D" }}>Cloudflare Tunnel</strong> is an enterprise-grade alternative that provides secure, reliable tunneling through Cloudflare's global network. It offers enhanced security features and is particularly well-suited for production deployments. Learn more at <a href="https://www.cloudflare.com/products/tunnel/" target="_blank" rel="noopener noreferrer" style={{ color: "#0052CC", textDecoration: "none", fontWeight: "500" }}>Cloudflare Tunnel documentation</a>.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "0" }}>
+                  Once your tunnel is established, you'll receive a public URL (e.g., <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>https://xxxxx.ngrok-free.app</code>). Enter only the base tunnel URL in the Configuration tab—the integration will automatically append the required <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>/api/v1/executecommand</code> endpoint path.
+                </p>
+                <p style={{ color: "#5E6C84", fontSize: "13px", lineHeight: "20px", fontStyle: "italic", marginTop: "12px", marginBottom: "0" }}>
+                  Reference: <a href="https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api#create-service-mode-using-tunneling" target="_blank" rel="noopener noreferrer" style={{ color: "#5E6C84", textDecoration: "underline" }}>Creating Service Mode with Tunneling</a>
+                </p>
+              </div>
+
+              <div style={{ marginBottom: "24px" }}>
+                <h3 style={{ fontWeight: "600", fontSize: "16px", marginTop: "0", marginBottom: "12px", color: "#172B4D" }}>
+                  5. Integration Capabilities
+                </h3>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "16px" }}>
+                  Once configured, this integration provides five core capabilities for managing Keeper vault operations directly from Jira issues. Each action corresponds to specific Commander CLI commands and enables different vault management scenarios.
+                </p>
+
+                <div style={{ marginBottom: "16px", padding: "12px 14px", backgroundColor: "#F4F5F7", borderRadius: "3px" }}>
+                  <p style={{ margin: 0, marginBottom: "6px", fontSize: "14px", color: "#172B4D", fontWeight: "600" }}>
+                    Create New Secret
+                  </p>
+                  <p style={{ margin: 0, fontSize: "13px", color: "#42526E", lineHeight: "20px" }}>
+                    Add new records to your Keeper vault with customizable fields and record types. Uses the <code style={{ backgroundColor: "#FFFFFF", padding: "2px 4px", borderRadius: "3px", fontSize: "12px" }}>record-add</code> command to create login credentials, secure notes, payment cards, and other record types. Ideal for onboarding workflows where new accounts need to be provisioned and credentials stored securely.
+                  </p>
+                </div>
+
+                <div style={{ marginBottom: "16px", padding: "12px 14px", backgroundColor: "#F4F5F7", borderRadius: "3px" }}>
+                  <p style={{ margin: 0, marginBottom: "6px", fontSize: "14px", color: "#172B4D", fontWeight: "600" }}>
+                    Update Record
+                  </p>
+                  <p style={{ margin: 0, fontSize: "13px", color: "#42526E", lineHeight: "20px" }}>
+                    Modify existing record fields including passwords, usernames, URLs, and custom fields. Leverages the <code style={{ backgroundColor: "#FFFFFF", padding: "2px 4px", borderRadius: "3px", fontSize: "12px" }}>record-update</code> command to keep credentials current and accurate. Perfect for password rotation workflows and credential lifecycle management.
+                  </p>
+                </div>
+
+                <div style={{ marginBottom: "16px", padding: "12px 14px", backgroundColor: "#F4F5F7", borderRadius: "3px" }}>
+                  <p style={{ margin: 0, marginBottom: "6px", fontSize: "14px", color: "#172B4D", fontWeight: "600" }}>
+                    Record Permission
+                  </p>
+                  <p style={{ margin: 0, fontSize: "13px", color: "#42526E", lineHeight: "20px" }}>
+                    Manage granular permissions for records within shared folders using the <code style={{ backgroundColor: "#FFFFFF", padding: "2px 4px", borderRadius: "3px", fontSize: "12px" }}>record-permission</code> command. Control which users or teams can view, edit, or reshare specific records. Essential for implementing least-privilege access controls and compliance requirements.
+                  </p>
+                </div>
+
+                <div style={{ marginBottom: "16px", padding: "12px 14px", backgroundColor: "#F4F5F7", borderRadius: "3px" }}>
+                  <p style={{ margin: 0, marginBottom: "6px", fontSize: "14px", color: "#172B4D", fontWeight: "600" }}>
+                    Share Record
+                  </p>
+                  <p style={{ margin: 0, fontSize: "13px", color: "#42526E", lineHeight: "20px" }}>
+                    Grant or revoke user access to individual records with configurable permissions and optional expiration dates. Utilizes the <code style={{ backgroundColor: "#FFFFFF", padding: "2px 4px", borderRadius: "3px", fontSize: "12px" }}>share-record</code> command to enable time-bound access for contractors, temporary access for incident response, or permanent sharing with team members.
+                  </p>
+                </div>
+
+                <div style={{ marginBottom: "0", padding: "12px 14px", backgroundColor: "#F4F5F7", borderRadius: "3px" }}>
+                  <p style={{ margin: 0, marginBottom: "6px", fontSize: "14px", color: "#172B4D", fontWeight: "600" }}>
+                    Share Folder
+                  </p>
+                  <p style={{ margin: 0, fontSize: "13px", color: "#42526E", lineHeight: "20px" }}>
+                    Manage folder-level access and permissions for users or teams using the <code style={{ backgroundColor: "#FFFFFF", padding: "2px 4px", borderRadius: "3px", fontSize: "12px" }}>share-folder</code> command. Control permissions for managing records, managing users, sharing capabilities, and editing rights. Supports expiration settings for temporary project access or contractor engagements.
+                  </p>
+                </div>
+
+                <p style={{ color: "#5E6C84", fontSize: "13px", lineHeight: "20px", fontStyle: "italic", marginTop: "16px", marginBottom: "0" }}>
+                  Reference: <a href="https://docs.keeper.io/en/keeperpam/commander-cli/command-reference" target="_blank" rel="noopener noreferrer" style={{ color: "#5E6C84", textDecoration: "underline" }}>Commander CLI Command Reference</a>
+                </p>
+              </div>
+
+              <div style={{ marginTop: "32px", padding: "14px 16px", backgroundColor: "#E3FCEF", borderLeft: "4px solid #00875A", borderRadius: "3px" }}>
+                <p style={{ margin: 0, fontSize: "14px", color: "#006644", lineHeight: "22px" }}>
+                  <strong style={{ fontWeight: "600" }}>Need Additional Help?</strong> For comprehensive setup instructions, troubleshooting guides, and advanced configuration options, visit the official Keeper documentation at <a href="https://docs.keeper.io/en/keeperpam/commander-cli/overview" target="_blank" rel="noopener noreferrer" style={{ color: "#006644", textDecoration: "underline", fontWeight: "500" }}>docs.keeper.io</a>. For technical support, contact <a href="mailto:commander@keepersecurity.com" style={{ color: "#006644", textDecoration: "underline", fontWeight: "500" }}>commander@keepersecurity.com</a>.
+                </p>
+              </div>
             </>
           )}
 

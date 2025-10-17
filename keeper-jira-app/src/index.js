@@ -556,7 +556,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'share-record':
-      // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R] -f
+      // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R] [--expire-at|--expire-in] --force
       if (parameters.record) {
         command += ` '${parameters.record}'`;
       }
@@ -576,12 +576,20 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (parameters.recursive === true) {
         command += ` -R`;
       }
+      // Add expiration options
+      if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
+        // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
+        const expireAtFormatted = parameters.expire_at.replace('T', ' ');
+        command += ` --expire-at "${expireAtFormatted}"`;
+      } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
+        command += ` --expire-in ${parameters.expire_in}`;
+      }
       // Add force flag at the end
       command += ` -f`;
       break;
       
     case 'share-folder':
-      // Format: share-folder "FOLDER_UID" -e "EMAIL" -a "ACTION" [options] -f
+      // Format: share-folder "FOLDER_UID" -e "EMAIL" -a "ACTION" [options] [--expire-at|--expire-in] --force
       if (parameters.folder) {
         command += ` '${parameters.folder}'`;
       }
@@ -591,96 +599,30 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (parameters.action) {
         command += ` -a ${parameters.action}`;
       }
-      // Add optional permission flags based on parameters
+      // Add optional permission flags only when set to 'on'
+      // Only include permissions that are explicitly granted
       if (parameters.manage_records === true) {
-        command += ` -p`;
+        command += ` -p on`;
       }
       if (parameters.manage_users === true) {
-        command += ` -o`;
+        command += ` -o on`;
       }
       if (parameters.can_share === true) {
-        command += ` -s`;
+        command += ` -s on`;
       }
       if (parameters.can_edit === true) {
-        command += ` -d`;
+        command += ` -d on`;
+      }
+      // Add expiration options
+      if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
+        // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
+        const expireAtFormatted = parameters.expire_at.replace('T', ' ');
+        command += ` --expire-at "${expireAtFormatted}"`;
+      } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
+        command += ` --expire-in ${parameters.expire_in}`;
       }
       // Add force flag at the end
-      command += ` -f`;
-      break;
-      
-    case 'pam-action-rotate':
-      if (parameters.record) {
-        command += ` --record='${parameters.record}'`;
-      }
-      if (parameters.schedule) {
-        command += ` --schedule='${parameters.schedule}'`;
-      }
-      break;
-      
-    case 'audit-report':
-      if (parameters.report_type) {
-        command += ` --report-type='${parameters.report_type}'`;
-      }
-      if (parameters.report_format) {
-        command += ` --report-format='${parameters.report_format}'`;
-      }
-      if (parameters.max_events) {
-          command += ` --max-events='${parameters.max_events}'`;
-      }
-      break;
-      
-    case 'compliance-report':
-      if (parameters.report_format) {
-        command += ` --report-format='${parameters.report_format}'`;
-      }
-      if (parameters.node) {
-        command += ` --node='${parameters.node}'`;
-      }
-      break;
-      
-    case 'enterprise-user':
-      if (parameters.action) {
-        command += ` --action='${parameters.action}'`;
-      }
-      if (parameters.email) {
-        command += ` --email='${parameters.email}'`;
-      }
-      if (parameters.name) {
-        command += ` --name='${parameters.name}'`;
-      }
-      if (parameters.node) {
-        command += ` --node='${parameters.node}'`;
-      }
-      break;
-      
-    case 'enterprise-team':
-      if (parameters.action) {
-        command += ` --action='${parameters.action}'`;
-      }
-      if (parameters.team) {
-        command += ` --team='${parameters.team}'`;
-      }
-      if (parameters.user) {
-        command += ` --user='${parameters.user}'`;
-      }
-      if (parameters.node) {
-        command += ` --node='${parameters.node}'`;
-      }
-      break;
-      
-    case 'enterprise-role':
-      if (parameters.action) {
-          command += ` --action='${parameters.action}'`;
-      }
-      if (parameters.role) {
-        command += ` --role='${parameters.role}'`;
-      }
-      if (parameters.node) {
-        command += ` --node='${parameters.node}'`;
-      }
-      if (parameters.permissions) {
-        command += ` --permissions='${parameters.permissions}'`;
-      }
+      command += ` --force`;
       break;
       
     default:
@@ -1030,7 +972,7 @@ resolver.define('getKeeperRecordDetails', async (req) => {
  * Manual Keeper action trigger (called from issue panel)
  */
 resolver.define('executeKeeperAction', async (req) => {
-  const { issueKey, command, commandDescription, parameters } = req.payload;
+  const { issueKey, command, commandDescription, parameters, formattedTimestamp } = req.payload;
   
   if (!issueKey) {
     throw new Error('Issue key is required');
@@ -1111,20 +1053,12 @@ resolver.define('executeKeeperAction', async (req) => {
       const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
       const currentUser = await currentUserResponse.json();
       
-      // Format timestamp in the same format as save/reject requests
-      const now = new Date();
-      const timestamp = now.toLocaleString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      });
+      // Use the timestamp formatted on frontend with user's local time
+      const timestamp = formattedTimestamp;
       
       // Create comment with command-specific messages and record_uid
       let actionMessage = '';
+      let actionDescription = commandDescription || command;
       let recordUid = '';
       
       // Check for record_uid in different possible locations in the response
@@ -1144,12 +1078,62 @@ resolver.define('executeKeeperAction', async (req) => {
           actionMessage = 'Record permissions updated successfully';
           break;
         case 'share-record':
+          // Build detailed action description
+          actionDescription = `Share Record - ${parameters.action ? parameters.action.charAt(0).toUpperCase() + parameters.action.slice(1) : 'Grant'} access to ${parameters.user}`;
+          
+          // Build detailed message for share-record
+          actionMessage = `Shared record with ${parameters.user}`;
+          if (parameters.action) {
+            actionMessage += ` (Action: ${parameters.action})`;
+          }
+          
+          // Add permissions details
+          const recordPerms = [];
+          if (parameters.can_share === true) recordPerms.push('Can Share');
+          if (parameters.can_write === true) recordPerms.push('Can Write');
+          if (parameters.recursive === true) recordPerms.push('Recursive');
+          
+          if (recordPerms.length > 0) {
+            actionMessage += ` - Permissions: ${recordPerms.join(', ')}`;
+          }
+          
+          // Add expiration info
+          if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
+            actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
+          } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
+            actionMessage += ` - Expires in: ${parameters.expire_in}`;
+          }
+          break;
+          
         case 'share-folder':
-          actionMessage = 'Record/Folder shared successfully';
+          // Build detailed action description
+          actionDescription = `Share Folder - ${parameters.action ? parameters.action.charAt(0).toUpperCase() + parameters.action.slice(1) : 'Grant'} access to ${parameters.user}`;
+          
+          // Build detailed message for share-folder
+          actionMessage = `Shared folder with ${parameters.user}`;
+          if (parameters.action) {
+            actionMessage += ` (Action: ${parameters.action})`;
+          }
+          
+          // Add permissions details
+          const folderPerms = [];
+          if (parameters.manage_records === true) folderPerms.push('Manage Records');
+          if (parameters.manage_users === true) folderPerms.push('Manage Users');
+          if (parameters.can_share === true) folderPerms.push('Can Share');
+          if (parameters.can_edit === true) folderPerms.push('Can Edit');
+          
+          if (folderPerms.length > 0) {
+            actionMessage += ` - Permissions: ${folderPerms.join(', ')}`;
+          }
+          
+          // Add expiration info
+          if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
+            actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
+          } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
+            actionMessage += ` - Expires in: ${parameters.expire_in}`;
+          }
           break;
-        case 'pam-action-rotate':
-          actionMessage = 'PAM rotation executed successfully';
-          break;
+          
         default:
           actionMessage = data.message || 'Keeper action executed successfully';
       }
@@ -1166,7 +1150,7 @@ resolver.define('executeKeeperAction', async (req) => {
         },
         {
           type: 'text',
-          text: `Action: ${commandDescription || command}`
+          text: `Action: ${actionDescription}`
         },
         {
           type: 'hardBreak'
@@ -1868,7 +1852,7 @@ resolver.define('clearStoredRequestData', async (req) => {
     const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
     const currentUser = await currentUserResponse.json();
     
-    // Format timestamp
+    // Format timestamp with user's local time (consistent with save/reject requests)
     const now = new Date();
     const timestamp = now.toLocaleString('en-GB', {
       day: '2-digit',

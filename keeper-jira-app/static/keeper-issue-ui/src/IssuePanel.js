@@ -4,12 +4,10 @@ import { invoke } from "@forge/bridge";
 import Button from "@atlaskit/button";
 import SectionMessage from "@atlaskit/section-message";
 import Spinner from "@atlaskit/spinner";
-import Badge from "@atlaskit/badge";
 
 // Icons
 import SuccessIcon from "@atlaskit/icon/glyph/check-circle";
 import ErrorIcon from "@atlaskit/icon/glyph/error";
-import InfoIcon from "@atlaskit/icon/glyph/info";
 import LockIcon from "@atlaskit/icon/glyph/lock";
 import CrossIcon from "@atlaskit/icon/glyph/cross";
 
@@ -63,7 +61,10 @@ const keeperActionOptions = [
       { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'revoke', 'owner', 'cancel'], placeholder: 'Select action' },
       { name: 'can_share', label: 'Allow Sharing', type: 'checkbox', required: false, description: 'Allow user to share record' },
       { name: 'can_write', label: 'Allow Writing', type: 'checkbox', required: false, description: 'Allow user to modify record' },
-      { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply to shared folder hierarchy' }
+      { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply to shared folder hierarchy' },
+      { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
+      { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
+      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 1d, 2h, 30mi', description: 'Period until expiration (e.g., 1d=1 day, 2h=2 hours, 30mi=30 minutes)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
     ]
   },
   { 
@@ -78,71 +79,10 @@ const keeperActionOptions = [
       { name: 'manage_records', label: 'Can Manage Records', type: 'checkbox', required: false, description: 'Allow user to manage records in folder' },
       { name: 'manage_users', label: 'Can Manage Users', type: 'checkbox', required: false, description: 'Allow user to manage other users access' },
       { name: 'can_share', label: 'Can Share Records', type: 'checkbox', required: false, description: 'Allow user to share records (records only)' },
-      { name: 'can_edit', label: 'Can Edit Records', type: 'checkbox', required: false, description: 'Allow user to modify records (records only)' }
-    ]
-  },
-  { 
-    value: 'pam-action-rotate', 
-    label: 'PAM Action Rotate', 
-    description: 'Rotate passwords for PAM resources based on record UID or folder.',
-    requiresFolderOrRecordSelection: true,
-    fields: [
-      { name: 'target_type', label: 'Target Type', type: 'select', required: true, options: ['record', 'folder'], placeholder: 'Select target type' },
-      { name: 'recordUid', label: 'Record UID', type: 'record-select', required: false, placeholder: 'Select PAM record' },
-      { name: 'folder', label: 'Folder', type: 'folder-select', required: false, placeholder: 'Select folder' },
-      { name: 'dry_run', label: 'Dry Run', type: 'checkbox', required: false, description: 'Enable dry-run mode to test without actually rotating' }
-    ]
-  },
-  { 
-    value: 'audit-report', 
-    label: 'Audit Report', 
-    description: 'Generate audit logs for tracking Keeper activity.',
-    fields: [
-      { name: 'report_type', label: 'Report Type', type: 'select', required: true, options: ['raw', 'dim', 'hour', 'day', 'week', 'month'], placeholder: 'Select report type' },
-      { name: 'report_format', label: 'Format', type: 'select', required: true, options: ['table', 'csv', 'json'], placeholder: 'Output format' },
-      { name: 'max_events', label: 'Max Events', type: 'number', required: false, placeholder: 'Maximum number of events (default: 1000)' }
-    ]
-  },
-  { 
-    value: 'compliance-report', 
-    label: 'Compliance Report', 
-    description: 'Provide compliance-related reporting for audits.',
-    fields: [
-      { name: 'report_format', label: 'Format', type: 'select', required: true, options: ['table', 'csv', 'json'], placeholder: 'Output format' },
-      { name: 'node', label: 'Node', type: 'text', required: false, placeholder: 'Specific node (optional)' }
-    ]
-  },
-  { 
-    value: 'enterprise-user', 
-    label: 'Enterprise User', 
-    description: 'Manage enterprise users (add, update, delete).',
-    fields: [
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['add', 'update', 'delete'], placeholder: 'Select action' },
-      { name: 'email', label: 'User Email', type: 'email', required: true, placeholder: 'User email address' },
-      { name: 'name', label: 'Display Name', type: 'text', required: false, placeholder: 'User display name' },
-      { name: 'node', label: 'Node', type: 'text', required: false, placeholder: 'Organization node' }
-    ]
-  },
-  { 
-    value: 'enterprise-team', 
-    label: 'Enterprise Team', 
-    description: 'Manage teams (add, delete, add/remove users).',
-    fields: [
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['add', 'delete', 'add-user', 'remove-user'], placeholder: 'Select action' },
-      { name: 'team', label: 'Team Name', type: 'text', required: true, placeholder: 'Team name' },
-      { name: 'user', label: 'User Email', type: 'email', required: false, placeholder: 'User email (for add/remove user actions)' },
-      { name: 'node', label: 'Node', type: 'text', required: false, placeholder: 'Organization node' }
-    ]
-  },
-  { 
-    value: 'enterprise-role', 
-    label: 'Enterprise Role', 
-    description: 'Manage roles (add, delete, update permissions).',
-    fields: [
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['add', 'delete', 'update'], placeholder: 'Select action' },
-      { name: 'role', label: 'Role Name', type: 'text', required: true, placeholder: 'Role name' },
-      { name: 'node', label: 'Node', type: 'text', required: false, placeholder: 'Organization node' },
-      { name: 'permissions', label: 'Permissions', type: 'text', required: false, placeholder: 'Role permissions (comma-separated)' }
+      { name: 'can_edit', label: 'Can Edit Records', type: 'checkbox', required: false, description: 'Allow user to modify records (records only)' },
+      { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
+      { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
+      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 1d, 2h, 30mi', description: 'Period until expiration (e.g., 1d=1 day, 2h=2 hours, 30mi=30 minutes)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
     ]
   }
 ];
@@ -159,11 +99,6 @@ const IssuePanel = () => {
     if (selectedAction?.value === 'record-permission') {
       // Fetch shared folders for record-permission command
       fetchKeeperFolders();
-    }
-    if (selectedAction?.value === 'pam-action-rotate') {
-      // Fetch PAM resources for pam-action-rotate command
-      fetchPamResources();
-      fetchKeeperFolders(); // Still need folders for folder-based rotation
     }
     if (selectedAction?.value === 'record-update') {
       // Fetch records for the update record dropdown
@@ -183,14 +118,6 @@ const IssuePanel = () => {
   const [recordCurrentPage, setRecordCurrentPage] = useState(1);
   const [keeperFolders, setKeeperFolders] = useState([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
-  
-  // PAM-specific resources
-  const [pamResources, setPamResources] = useState([]);
-  const [loadingPamResources, setLoadingPamResources] = useState(false);
-  const [selectedPamResource, setSelectedPamResource] = useState(null);
-  const [pamResourceSearchTerm, setPamResourceSearchTerm] = useState("");
-  const [showPamResourceDropdown, setShowPamResourceDropdown] = useState(false);
-  const [pamResourceCurrentPage, setPamResourceCurrentPage] = useState(1);
   
   // Rejection functionality
   const [isRejecting, setIsRejecting] = useState(false);
@@ -261,11 +188,40 @@ const IssuePanel = () => {
 
   // Centralized error handler for API calls
   const handleApiError = (error, defaultMessage = "An error occurred") => {
-    // Try to extract error message from various possible locations in the error object
-    let errorMessage = error.error || error.message || (typeof error === 'string' ? error : defaultMessage);
+    // Helper function to check if content contains HTML
+    const containsHtml = (text) => {
+      if (typeof text !== 'string') return false;
+      return /<\/?[a-z][\s\S]*>/i.test(text);
+    };
     
-    // If we have an error message from the response, use it directly
-    if (errorMessage && errorMessage !== defaultMessage) {
+    // Try to extract error message from various possible locations
+    let errorMessage = '';
+    
+    // Check if error is a string - skip if it contains HTML
+    if (typeof error === 'string' && !containsHtml(error)) {
+      errorMessage = error;
+    } 
+    // Check error.error - skip if it contains HTML
+    else if (error.error && !containsHtml(error.error)) {
+      errorMessage = error.error;
+    }
+    // Check error.message - skip if it contains HTML
+    else if (error.message && !containsHtml(error.message)) {
+      errorMessage = error.message;
+    }
+    
+    // If no valid message found (or all contained HTML), use default
+    if (!errorMessage || errorMessage.trim().length === 0) {
+      errorMessage = defaultMessage;
+    }
+    
+    // If message is too long (likely an error dump), use default message
+    if (errorMessage.length > 500) {
+      errorMessage = defaultMessage;
+    }
+    
+    // If we have a valid error message, use it
+    if (errorMessage && errorMessage !== defaultMessage && errorMessage.trim().length > 0) {
       return errorMessage;
     }
     
@@ -344,15 +300,6 @@ const IssuePanel = () => {
   const recordStartIndex = (recordCurrentPage - 1) * recordsPerPage;
   const paginatedRecords = filteredRecords.slice(recordStartIndex, recordStartIndex + recordsPerPage);
 
-  // Filter and paginate PAM resources
-  const filteredPamResources = pamResources.filter(resource =>
-    (resource.title || resource.record_uid)?.toLowerCase().includes(pamResourceSearchTerm.toLowerCase()) ||
-    (resource.record_type || resource.type || '')?.toLowerCase().includes(pamResourceSearchTerm.toLowerCase())
-  );
-  const totalPamResourcePages = Math.ceil(filteredPamResources.length / recordsPerPage);
-  const pamResourceStartIndex = (pamResourceCurrentPage - 1) * recordsPerPage;
-  const paginatedPamResources = filteredPamResources.slice(pamResourceStartIndex, pamResourceStartIndex + recordsPerPage);
-
   // Filter and paginate folders
   const getFilteredFolders = () => {
     let foldersToFilter = keeperFolders;
@@ -360,11 +307,6 @@ const IssuePanel = () => {
     // For record-permission and share-folder, only show shared folders (flags contains "S")
     if (selectedAction?.value === 'record-permission' || selectedAction?.value === 'share-folder') {
       foldersToFilter = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
-    }
-    
-    // For pam-action-rotate, show all folders (no filtering)
-    if (selectedAction?.value === 'pam-action-rotate') {
-      foldersToFilter = keeperFolders;
     }
     
     // Apply search filter
@@ -405,11 +347,6 @@ const IssuePanel = () => {
   useEffect(() => {
     setRecordForUpdateCurrentPage(1);
   }, [recordForUpdateSearchTerm]);
-
-  // Reset PAM resource pagination when PAM resource search changes
-  useEffect(() => {
-    setPamResourceCurrentPage(1);
-  }, [pamResourceSearchTerm]);
 
   // Fetch Keeper records when needed
   const fetchKeeperRecords = async () => {
@@ -452,36 +389,6 @@ const IssuePanel = () => {
       setLoadingFolders(false);
     }
   };
-
-  // Fetch PAM resources by filtering Keeper records for PAM types
-  const fetchPamResources = async () => {
-    setLoadingPamResources(true);
-    try {
-      const result = await invoke("getKeeperRecords");
-      
-      // Filter for PAM-specific record types
-      const pamRecordTypes = ['pamMachine', 'pamUser', 'pamDatabase', 'pamDirectory', 'pamRemoteBrowser'];
-      const pamResources = (result.records || []).filter(record => {
-        const recordType = record.record_type || record.type || '';
-        return pamRecordTypes.includes(recordType);
-      });
-      
-      setPamResources(pamResources);
-    } catch (error) {
-      // Handle error
-      const errorMessage = handleApiError(error, "Failed to fetch PAM resources");
-      
-      setLastResult({ 
-        success: false, 
-        message: errorMessage
-      });
-      
-      setPamResources([]);
-    } finally {
-      setLoadingPamResources(false);
-    }
-  };
-
   // Flag to track if we're preserving stored data
   const [isPreservingStoredData, setIsPreservingStoredData] = useState(false);
   const isPreservingStoredDataRef = useRef(false);
@@ -2742,6 +2649,8 @@ const IssuePanel = () => {
       case 'expirationDate':
       case 'date':
         return 'date';
+      case 'datetime-local':
+        return 'datetime-local';
       case 'login':
       case 'username':
       case 'title':
@@ -3863,14 +3772,9 @@ const IssuePanel = () => {
       fetchRecordTypes();
     }
     
-    // Fetch folders when share-folder, record-permission, or pam-action-rotate is selected
-    if (selectedAction && (selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission' || selectedAction.value === 'pam-action-rotate')) {
+    // Fetch folders when share-folder or record-permission is selected
+    if (selectedAction && (selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) {
       fetchKeeperFolders();
-    }
-    
-    // Fetch PAM resources when pam-action-rotate is selected
-    if (selectedAction && selectedAction.value === 'pam-action-rotate') {
-      fetchPamResources();
     }
   }, [selectedAction, isLoadingStoredData]);
 
@@ -4006,27 +3910,6 @@ const IssuePanel = () => {
       const hasPermissionFlags = formData.can_share || formData.can_edit;
       if (!hasPermissionFlags) {
         return false;
-      }
-      
-      return true;
-    }
-    
-    // Special handling for pam-action-rotate action
-    if (selectedAction.value === 'pam-action-rotate') {
-      // Target type is required
-      if (!formData.target_type || formData.target_type === '') {
-        return false;
-      }
-      
-      // Based on target type, either PAM resource or folder must be selected
-      if (formData.target_type === 'record') {
-        if (!selectedPamResource) {
-          return false;
-        }
-      } else if (formData.target_type === 'folder') {
-        if (!selectedFolder) {
-          return false;
-        }
       }
       
       return true;
@@ -4807,7 +4690,6 @@ const IssuePanel = () => {
             .catch((error) => {
               // Log error but don't show to user as this is not critical
               const errorMessage = handleApiError(error, "Failed to activate Keeper panel");
-              console.error(errorMessage);
             });
         }
         
@@ -4861,6 +4743,16 @@ const IssuePanel = () => {
     setLastResult(null);
 
     try {
+      // Format timestamp with user's local time (same as save/reject requests)
+      const formattedTimestamp = new Date().toLocaleString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
       
       // Prepare final parameters for special actions
       let finalParameters = { ...formData };
@@ -4915,30 +4807,6 @@ const IssuePanel = () => {
         
         // Always add --force flag for API execution (no interactive prompts possible)
         commandParts.push('--force');
-        
-        // Replace parameters with the properly formatted CLI command
-        finalParameters = {
-          cliCommand: commandParts.join(' ')
-        };
-      }
-      
-      if (selectedAction.value === 'pam-action-rotate') {
-        // For pam action rotate command, format follows CLI pattern:
-        // pam action rotate --record-uid <record_uid> [--dry-run] OR
-        // pam action rotate --folder <folder_uid> [--dry-run]
-        
-        // Build the CLI command format
-        let commandParts = ['pam', 'action', 'rotate'];
-        
-        // Add target based on selection type
-        if (finalParameters.target_type === 'record' && selectedPamResource) {
-          commandParts.push('--record-uid', selectedPamResource.record_uid);
-        } else if (finalParameters.target_type === 'folder' && selectedFolder) {
-          commandParts.push('--folder', selectedFolder.folder_uid || selectedFolder.uid || selectedFolder.path || selectedFolder.name);
-        }
-        
-        // Add optional flags
-        if (finalParameters.dry_run) commandParts.push('--dry-run');
         
         // Replace parameters with the properly formatted CLI command
         finalParameters = {
@@ -5134,7 +5002,8 @@ const IssuePanel = () => {
         issueKey: issueContext.issueKey,
         command: selectedAction.value,
         commandDescription: selectedAction.description,
-        parameters: finalParameters
+        parameters: finalParameters,
+        formattedTimestamp: formattedTimestamp
       });
       
       
@@ -5166,21 +5035,6 @@ const IssuePanel = () => {
       
       // Handle error
       let errorMessage = handleApiError(error, "An unknown error occurred");
-      
-      // PAM Configuration error check
-      if (selectedAction.value === 'pam-action-rotate' && 
-          (errorMessage.includes('PAM Configuration') && errorMessage.includes('is not available'))) {
-        errorMessage = `PAM Configuration Error: No PAM Configuration is available. Please:\n\n` +
-                      `1. Create a PAM Configuration in Keeper Vault:\n` +
-                      `   - Go to Secrets Manager > PAM Configurations\n` +
-                      `   - Click "New Configuration"\n` +
-                      `   - Configure Gateway and environment settings\n\n` +
-                      `2. Enable Rotation feature in PAM Settings\n\n` +
-                      `3. Create records with PAM types (pamMachine, pamUser, pamDatabase)\n\n` +
-                      `4. Verify proper access permissions to the PAM Configuration\n\n` +
-                      `Note: PAM resources are regular Keeper records with specific types (pamMachine, pamUser, etc.).\n\n` +
-                      `For detailed setup instructions, see: https://docs.keeper.io/en/keeperpam/privileged-access-manager/getting-started/pam-configuration`;
-      }
       
       setLastResult({ 
         success: false, 
@@ -5298,7 +5152,7 @@ const IssuePanel = () => {
         fontFamily: "Inter, Arial, sans-serif",
         padding: "16px",
         backgroundColor: "#F7F7FA",
-        minHeight: (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown || showPamResourceDropdown) 
+        minHeight: (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown) 
           ? "max(100vh, 700px)" 
           : selectedAction 
             ? "100vh" 
@@ -5313,7 +5167,7 @@ const IssuePanel = () => {
           borderRadius: "8px",
           padding: "16px",
           boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-          minHeight: (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown || showPamResourceDropdown) 
+          minHeight: (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown) 
             ? "600px" 
             : selectedAction 
               ? "400px" 
@@ -6246,310 +6100,6 @@ const IssuePanel = () => {
                     </div>
                   )}
 
-                  {/* Folders Selector for pam-action-rotate only (all folders) */}
-                  {selectedAction.value === 'pam-action-rotate' && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <label
-                        style={{
-                          display: "block",
-                          marginBottom: "8px",
-                          fontWeight: "600",
-                          fontSize: "14px",
-                          color: "#1A1A1A",
-                        }}
-                      >
-                        Select Folder: <span style={{ color: "#FF5630" }}>*</span>
-                      </label>
-                      
-                      {/* Info about hidden fields */}
-                      {!selectedFolder && (
-                        <div
-                          style={{
-                            marginBottom: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "11px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1",
-                            fontStyle: "italic"
-                          }}
-                        >
-                          Select a folder for PAM rotation. You can choose any folder (shared or private).
-                        </div>
-                      )}
-                      
-                      {/* Folders Dropdown Container */}
-                      <div style={{ position: "relative", zIndex: 999 }}>
-                        {loadingFolders ? (
-                          <div style={{
-                            width: "100%",
-                            padding: "8px 12px",
-                            borderRadius: "6px",
-                            border: "2px solid #DFE1E6",
-                            fontSize: "14px",
-                            backgroundColor: "#F5F5F5",
-                            color: "#666",
-                            boxSizing: "border-box"
-                          }}>
-                            Loading folders...
-                          </div>
-                        ) : (
-                          <>
-                            {/* Folders Search Input */}
-                            <input
-                              id="keeper-folders-input"
-                              type="text"
-                              disabled={isFormDisabled}
-                              placeholder={
-                                isFormDisabled ? "Form disabled..." :
-                                showFolderDropdown ? "Type to search folders..." : 
-                                (selectedFolder ? (selectedFolder.name || selectedFolder.title) : "Click to select folder...")
-                              }
-                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? (selectedFolder.name || selectedFolder.title) : "")}
-                              onChange={(e) => {
-                                if (!isFormDisabled) {
-                                  setFolderSearchTerm(e.target.value);
-                                  setShowFolderDropdown(true);
-                                }
-                              }}
-                              onClick={() => {
-                                if (!isFormDisabled) {
-                                  setShowFolderDropdown(!showFolderDropdown);
-                                }
-                              }}
-                              onFocus={(e) => {
-                                if (!isFormDisabled) {
-                                  setFolderSearchTerm("");
-                                  setShowFolderDropdown(true);
-                                }
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 40px 8px 12px",
-                                borderRadius: "6px",
-                                border: isFormDisabled ? "2px solid #E0E0E0" : (showFolderDropdown ? "2px solid #0066CC" : "2px solid #DFE1E6"),
-                                fontSize: "14px",
-                                backgroundColor: isFormDisabled ? "#F5F5F5" : "white",
-                                color: isFormDisabled ? "#999" : "#000",
-                                outline: "none",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                boxSizing: "border-box",
-                                transition: "border-color 0.2s ease, background-color 0.2s ease"
-                              }}
-                            />
-                            
-                            {/* Folders Dropdown Arrow */}
-                            <div
-                              onClick={() => {
-                                if (!isFormDisabled) {
-                                  setShowFolderDropdown(!showFolderDropdown);
-                                }
-                              }}
-                              style={{
-                                position: "absolute",
-                                right: "12px",
-                                top: "50%",
-                                transform: "translateY(-50%)",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                fontSize: "16px",
-                                color: isFormDisabled ? "#CCC" : "#666",
-                                userSelect: "none"
-                              }}
-                            >
-                              ▼
-                            </div>
-
-                            {/* Folders Dropdown Menu */}
-                            {showFolderDropdown && !isFormDisabled && (
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: "100%",
-                                  left: "0",
-                                  right: "0",
-                                  backgroundColor: "white",
-                                  border: "2px solid #DFE1E6",
-                                  borderTop: "none",
-                                  borderRadius: "0 0 6px 6px",
-                                  maxHeight: "300px",
-                                  overflowY: "auto",
-                                  zIndex: 998,
-                                  boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                                  boxSizing: "border-box"
-                                }}
-                              >
-                                {/* Folders Search Hint */}
-                                {!folderSearchTerm && (
-                                  <div
-                                    style={{
-                                      padding: "8px 12px",
-                                      fontSize: "11px",
-                                      color: "#666",
-                                      fontStyle: "italic",
-                                      borderBottom: "1px solid #F0F0F0",
-                                      backgroundColor: "#FAFAFA"
-                                    }}
-                                  >
-                                    Tip: Type in the field above to search folders
-                                  </div>
-                                )}
-
-                                {/* Folders Options */}
-                                {paginatedFolders.length > 0 ? (
-                                  <>
-                                    {paginatedFolders.map((folder, index) => (
-                                      <div
-                                        key={folder.uid || folder.path || index}
-                                        onClick={() => {
-                                          setSelectedFolder(folder);
-                                          setShowFolderDropdown(false);
-                                          setFolderSearchTerm("");
-                                          // Auto-populate the Folder Path field with folder UID
-                                          handleInputChange('folder', folder.uid || folder.path || folder.name);
-                                          // Auto-populate the Email field with issue creator's email
-                                          if (issueContext?.issueCreatorEmail) {
-                                            handleInputChange('user', issueContext.issueCreatorEmail);
-                                          }
-                                        }}
-                                        style={{
-                                          padding: "8px 12px",
-                                          cursor: "pointer",
-                                          borderBottom: "1px solid #F0F0F0",
-                                          backgroundColor: selectedFolder?.uid === folder.uid ? "#FFF8CC" : "transparent",
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F8F9FA"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = selectedFolder?.uid === folder.uid ? "#FFF8CC" : "transparent"}
-                                      >
-                                        <div style={{ fontWeight: "600", fontSize: "13px", color: "#1A1A1A" }}>
-                                          {folder.name || folder.title}
-                                        </div>
-                                        {folder.uid && (
-                                          <div style={{ fontSize: "11px", color: "#6B778C", marginTop: "2px" }}>
-                                            UID: {folder.uid}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-                                    
-                                    {/* Folders Pagination */}
-                                    {totalFolderPages > 1 && (
-                                      <div
-                                        style={{
-                                          padding: "8px 12px",
-                                          borderTop: "1px solid #DFE1E6",
-                                          backgroundColor: "#F8F9FA",
-                                          display: "flex",
-                                          justifyContent: "space-between",
-                                          alignItems: "center",
-                                          fontSize: "12px"
-                                        }}
-                                      >
-                                        <button
-                                          disabled={folderCurrentPage === 1}
-                                          onClick={() => setFolderCurrentPage(prev => prev - 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: folderCurrentPage === 1 ? "#F0F0F0" : "white",
-                                            color: folderCurrentPage === 1 ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: folderCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
-                                        >
-                                          Previous
-                                        </button>
-                                        
-                                        <span style={{ color: "#6B778C" }}>
-                                          Page {folderCurrentPage} of {totalFolderPages} ({filteredFolders.length} folders)
-                                        </span>
-                                        
-                                        <button
-                                          disabled={folderCurrentPage === totalFolderPages}
-                                          onClick={() => setFolderCurrentPage(prev => prev + 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: folderCurrentPage === totalFolderPages ? "#F0F0F0" : "white",
-                                            color: folderCurrentPage === totalFolderPages ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: folderCurrentPage === totalFolderPages ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
-                                        >
-                                          Next
-                                        </button>
-                                      </div>
-                                    )}
-                                  </>
-                                ) : (
-                                  <div
-                                    style={{
-                                      padding: "12px",
-                                      textAlign: "center",
-                                      color: "#6B778C",
-                                      fontSize: "14px"
-                                    }}
-                                  >
-                                    No folders found matching "{folderSearchTerm}"
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* Click outside to close folders dropdown */}
-                            {showFolderDropdown && (
-                              <div
-                                style={{
-                                  position: "fixed",
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  zIndex: 997
-                                }}
-                                onClick={() => setShowFolderDropdown(false)}
-                              />
-                            )}
-                          </>
-                        )}
-                      </div>
-                      
-                      {/* Selected folder info */}
-                      {selectedFolder && (
-                        <div
-                          style={{
-                            marginTop: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1"
-                          }}
-                        >
-                          <div>Selected: <strong>{selectedFolder.name || selectedFolder.title}</strong></div>
-                          {selectedFolder.uid && (
-                            <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                              Folder UID will be sent automatically: {selectedFolder.uid}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {keeperFolders.length > 0 && (
-                        <div style={{ 
-                          fontSize: '11px', 
-                          color: '#6B778C', 
-                          marginTop: '4px',
-                          fontStyle: 'italic'
-                        }}>
-                          {keeperFolders.length} total folders available
-                        </div>
-                      )}
-                    </div>
-                  )}
 
                   {/* Folders Selector for record-permission and share-folder actions */}
                   {(selectedAction.value === 'record-permission' || selectedAction.value === 'share-folder') && (
@@ -6786,449 +6336,6 @@ const IssuePanel = () => {
                     </div>
                   )}
 
-                  {/* Folders and Records Selector for pam-action-rotate action */}
-                  {selectedAction.value === 'pam-action-rotate' && (  
-                    <div>
-                      {/* Info about pam-action-rotate workflow */}
-                      {!selectedPamResource && !selectedFolder && (
-                        <div style={{ marginBottom: "16px" }}>
-                          <div
-                            style={{
-                              padding: "8px 12px",
-                              backgroundColor: "#E3FCEF",
-                              borderRadius: "4px",
-                              fontSize: "11px",
-                              color: "#006644",
-                              border: "1px solid #ABF5D1",
-                              fontStyle: "italic",
-                              marginBottom: "8px"
-                            }}
-                          >
-                            PAM Action Rotate shows available PAM resources - Keeper records with types like 'pamMachine', 'pamUser', 'pamDatabase'. Choose target type and select the appropriate PAM resource or folder for password rotation.
-                          </div>
-                          
-                          {/* PAM Configuration Warning */}
-                          <div
-                            style={{
-                              padding: "8px 12px",
-                              backgroundColor: "#FFF3CD",
-                              borderRadius: "4px",
-                              fontSize: "11px",
-                              color: "#856404",
-                              border: "1px solid #FFEAA7",
-                              fontStyle: "italic"
-                            }}
-                          >
-                            <strong>Prerequisites:</strong> Ensure you have a PAM Configuration set up in Keeper Vault with:
-                            <br />- Associated Gateway configured and running
-                            <br />- "Rotation" feature enabled in PAM Settings
-                            <br />- Proper access permissions to the PAM Configuration
-                            <br />- Records with PAM types (pamMachine, pamUser, pamDatabase) created
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Show record or folder selector based on target_type */}
-                      {formData.target_type === 'record' && (
-                        <div style={{ marginBottom: "16px" }}>
-                          <label
-                            style={{
-                              display: "block",
-                              marginBottom: "8px", 
-                              fontSize: "13px",
-                              fontWeight: "500",
-                              color: "#1A1A1A",
-                            }}
-                          >
-                            Select PAM Resource: <span style={{ color: "#FF5630" }}>*</span>
-                          </label>
-
-                          {/* PAM Resources Dropdown Container */}
-                          <div style={{ position: "relative", zIndex: 997 }}>
-                            {loadingPamResources ? (
-                              <div style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                borderRadius: "6px",
-                                border: "2px solid #DFE1E6",
-                                fontSize: "14px",
-                                backgroundColor: "#F5F5F5",
-                                color: "#666",
-                                boxSizing: "border-box"
-                              }}>
-                                Loading PAM resources...
-                              </div>
-                            ) : (
-                              <>
-                                {/* PAM Resources Search Input */}
-                                <input
-                                  type="text"
-                                  placeholder="Search PAM resources..."
-                                  value={pamResourceSearchTerm}
-                                  onChange={(e) => {
-                                    setPamResourceSearchTerm(e.target.value);
-                                    setPamResourceCurrentPage(1);
-                                  }}
-                                  onClick={() => setShowPamResourceDropdown(true)}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 12px",
-                                    borderRadius: "6px",
-                                    border: "2px solid #DFE1E6",
-                                    fontSize: "14px",
-                                    backgroundColor: "#FAFBFC",
-                                    cursor: "pointer",
-                                    boxSizing: "border-box"
-                                  }}
-                                />
-
-                                {/* PAM Resources Dropdown */}
-                                {showPamResourceDropdown && paginatedPamResources.length > 0 && (
-                                  <div
-                                    style={{
-                                      position: "absolute",
-                                      top: "100%",
-                                      left: "0",
-                                      right: "0",
-                                      backgroundColor: "#fff",
-                                      border: "2px solid #DFE1E6",
-                                      borderRadius: "6px",
-                                      boxShadow: "0 4px 8px rgba(9,30,66,0.25)",
-                                      zIndex: 997,
-                                      maxHeight: "200px",
-                                      overflowY: "auto"
-                                    }}
-                                  >
-                                    {paginatedPamResources.map((resource, index) => (
-                                      <div
-                                        key={resource.record_uid || resource.uid || index}
-                                        onClick={() => {
-                                          setSelectedPamResource(resource);
-                                          setShowPamResourceDropdown(false);
-                                          setPamResourceSearchTerm(resource.title || 'Untitled PAM Resource');
-                                        }}
-                                        style={{
-                                          padding: "12px 16px",
-                                          cursor: "pointer",
-                                          borderBottom: index < paginatedPamResources.length - 1 ? "1px solid #F4F5F7" : "none",
-                                          backgroundColor: "#fff",
-                                          fontSize: "14px",
-                                          transition: "background-color 0.2s"
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F4F5F7"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = "#fff"}
-                                      >
-                                        <div style={{ fontWeight: "500", marginBottom: "2px" }}>
-                                          {resource.title || 'Untitled PAM Resource'}
-                                        </div>
-                                        <div style={{ fontSize: "11px", color: "#6B778C", fontFamily: "monospace" }}>
-                                          UID: {resource.record_uid}
-                                        </div>
-                                        {(resource.record_type || resource.type) && (
-                                          <div style={{ fontSize: "11px", color: "#0066CC", marginTop: "2px" }}>
-                                            Type: {resource.record_type || resource.type}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-
-                                    {/* PAM Resources Pagination */}
-                                    {totalPamResourcePages > 1 && (
-                                      <div style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                        padding: "8px 16px",
-                                        borderTop: "1px solid #F4F5F7",
-                                        backgroundColor: "#FAFBFC",
-                                        fontSize: "12px",
-                                        color: "#6B778C"
-                                      }}>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (pamResourceCurrentPage > 1) {
-                                              setPamResourceCurrentPage(pamResourceCurrentPage - 1);
-                                            }
-                                          }}
-                                          disabled={pamResourceCurrentPage === 1}
-                                          style={{
-                                            padding: "4px 8px",
-                                            fontSize: "11px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: pamResourceCurrentPage === 1 ? "#F4F5F7" : "#fff",
-                                            cursor: pamResourceCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            borderRadius: "3px"
-                                          }}
-                                        >
-                                          Previous
-                                        </button>
-                                        <span>Page {pamResourceCurrentPage} of {totalPamResourcePages}</span>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (pamResourceCurrentPage < totalPamResourcePages) {
-                                              setPamResourceCurrentPage(pamResourceCurrentPage + 1);
-                                            }
-                                          }}
-                                          disabled={pamResourceCurrentPage === totalPamResourcePages}
-                                          style={{
-                                            padding: "4px 8px",
-                                            fontSize: "11px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: pamResourceCurrentPage === totalPamResourcePages ? "#F4F5F7" : "#fff",
-                                            cursor: pamResourceCurrentPage === totalPamResourcePages ? "not-allowed" : "pointer",
-                                            borderRadius: "3px"
-                                          }}
-                                        >
-                                          Next
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </>
-                            )}
-
-                              {pamResources.length === 0 && !loadingPamResources && (
-                              <div style={{
-                                fontSize: '12px',
-                                color: '#FF5630',
-                                marginTop: '4px'
-                              }}>
-                                No PAM resources found. Create records with types 'pamMachine', 'pamUser', or 'pamDatabase' to enable rotation.
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Selected PAM Resource Indicator */}
-                          {selectedPamResource && (
-                            <div
-                              style={{
-                                marginTop: "8px",
-                                padding: "8px 12px",
-                                backgroundColor: "#E3FCEF",
-                                borderRadius: "4px",
-                                fontSize: "12px",
-                                color: "#006644",
-                                border: "1px solid #ABF5D1"
-                              }}
-                            >
-                              <div>Selected: <strong>{selectedPamResource.title || 'Untitled PAM Resource'}</strong></div>
-                              <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                                Record UID: {selectedPamResource.record_uid}
-                              </div>
-                              {(selectedPamResource.record_type || selectedPamResource.type) && (
-                                <div style={{ marginTop: "2px", fontSize: "11px", fontStyle: "italic" }}>
-                                  Type: {selectedPamResource.record_type || selectedPamResource.type}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {formData.target_type === 'folder' && (
-                        <div style={{ marginBottom: "16px" }}>
-                          <label
-                            style={{
-                              display: "block",
-                              marginBottom: "8px",
-                              fontSize: "13px",
-                              fontWeight: "500",
-                              color: "#1A1A1A",
-                            }}
-                          >
-                            Select Folder: <span style={{ color: "#FF5630" }}>*</span>
-                          </label>
-
-                          {/* Folders Dropdown Container */}
-                          <div style={{ position: "relative", zIndex: 998 }}>
-                            {loadingFolders ? (
-                              <div style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                borderRadius: "6px",
-                                border: "2px solid #DFE1E6",
-                                fontSize: "14px",
-                                backgroundColor: "#F5F5F5",
-                                color: "#666",
-                                boxSizing: "border-box"
-                              }}>
-                                Loading folders...
-                              </div>
-                            ) : (
-                              <>
-                                {/* Folders Search Input */}
-                                <input
-                                  type="text"
-                                  placeholder="Search folders..."
-                                  value={folderSearchTerm}
-                                  onChange={(e) => {
-                                    setFolderSearchTerm(e.target.value);
-                                    setFolderCurrentPage(1);
-                                  }}
-                                  onClick={() => setShowFolderDropdown(true)}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 12px",
-                                    borderRadius: "6px",
-                                    border: "2px solid #DFE1E6",
-                                    fontSize: "14px",
-                                    backgroundColor: "#FAFBFC",
-                                    cursor: "pointer",
-                                    boxSizing: "border-box"
-                                  }}
-                                />
-
-                                {/* Folders Dropdown */}
-                                {showFolderDropdown && paginatedFolders.length > 0 && (
-                                  <div
-                                    style={{
-                                      position: "absolute",
-                                      top: "100%",
-                                      left: "0",
-                                      right: "0",
-                                      backgroundColor: "#fff",
-                                      border: "2px solid #DFE1E6",
-                                      borderRadius: "6px",
-                                      boxShadow: "0 4px 8px rgba(9,30,66,0.25)",
-                                      zIndex: 998,
-                                      maxHeight: "200px",
-                                      overflowY: "auto"
-                                    }}
-                                  >
-                                    {paginatedFolders.map((folder, index) => (
-                                      <div
-                                        key={folder.folder_uid || folder.uid || index}
-                                        onClick={() => {
-                                          setSelectedFolder(folder);
-                                          setShowFolderDropdown(false);
-                                          setFolderSearchTerm(folder.name || folder.title || 'Untitled Folder');
-                                        }}
-                                        style={{
-                                          padding: "12px 16px",
-                                          cursor: "pointer",
-                                          borderBottom: index < paginatedFolders.length - 1 ? "1px solid #F4F5F7" : "none",
-                                          backgroundColor: "#fff",
-                                          fontSize: "14px",
-                                          transition: "background-color 0.2s"
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F4F5F7"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = "#fff"}
-                                      >
-                                        <div style={{ fontWeight: "500", marginBottom: "2px" }}>
-                                          {folder.name || folder.title || 'Untitled Folder'}
-                                        </div>
-                                        <div style={{ fontSize: "11px", color: "#6B778C", fontFamily: "monospace" }}>
-                                          UID: {folder.folder_uid || folder.uid}
-                                        </div>
-                                      </div>
-                                    ))}
-
-                                    {/* Folders Pagination */}
-                                    {totalFolderPages > 1 && (
-                                      <div style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                        padding: "8px 16px",
-                                        borderTop: "1px solid #F4F5F7",
-                                        backgroundColor: "#FAFBFC",
-                                        fontSize: "12px",
-                                        color: "#6B778C"
-                                      }}>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (folderCurrentPage > 1) {
-                                              setFolderCurrentPage(folderCurrentPage - 1);
-                                            }
-                                          }}
-                                          disabled={folderCurrentPage === 1}
-                                          style={{
-                                            padding: "4px 8px",
-                                            fontSize: "11px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: folderCurrentPage === 1 ? "#F4F5F7" : "#fff",
-                                            cursor: folderCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            borderRadius: "3px"
-                                          }}
-                                        >
-                                          Previous
-                                        </button>
-                                        <span>Page {folderCurrentPage} of {totalFolderPages}</span>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (folderCurrentPage < totalFolderPages) {
-                                              setFolderCurrentPage(folderCurrentPage + 1);
-                                            }
-                                          }}
-                                          disabled={folderCurrentPage === totalFolderPages}
-                                          style={{
-                                            padding: "4px 8px",
-                                            fontSize: "11px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: folderCurrentPage === totalFolderPages ? "#F4F5F7" : "#fff",
-                                            cursor: folderCurrentPage === totalFolderPages ? "not-allowed" : "pointer",
-                                            borderRadius: "3px"
-                                          }}
-                                        >
-                                          Next
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </>
-                            )}
-
-                            {getFilteredFolders().length === 0 && !loadingFolders && (
-                              <div style={{
-                                fontSize: '12px',
-                                color: '#FF5630',
-                                marginTop: '4px'
-                              }}>
-                                No folders found.
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Selected Folder Indicator */}
-                          {selectedFolder && (
-                            <div
-                              style={{
-                                marginTop: "8px",
-                                padding: "8px 12px",
-                                backgroundColor: "#E3FCEF",
-                                borderRadius: "4px",
-                                fontSize: "12px",
-                                color: "#006644",
-                                border: "1px solid #ABF5D1"
-                              }}
-                            >
-                              <div>Selected: <strong>{selectedFolder.name || selectedFolder.title}</strong></div>
-                              <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                                Folder UID will be used for pam action rotate: {selectedFolder.folder_uid || selectedFolder.uid}
-                              </div>
-                            </div>
-                          )}
-
-                          {getFilteredFolders().length > 0 && (
-                            <div style={{ 
-                              fontSize: '11px', 
-                              color: '#6B778C', 
-                              marginTop: '4px',
-                              fontStyle: 'italic'
-                            }}>
-                              {getFilteredFolders().length} folders available for folder-based PAM rotation
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
                   
                   {/* Loading state for record types */}
                   {selectedAction.value === 'record-update' && selectedRecordForUpdate && Object.keys(recordDetails).length > 0 && !loadingRecordDetails && loadingRecordTypes && (
@@ -7804,13 +6911,20 @@ const IssuePanel = () => {
                       // Remove record field from UI when share-record is selected
                       // Remove folder field from UI when share-folder is selected  
                       // Remove sharedFolder field from UI when record-permission is selected
-                      // Remove recordUid and folder fields from UI when pam-action-rotate is selected
                       // Keep user/email fields visible for manual input
                       const shouldRemoveRecordField = selectedAction.value === 'share-record' && field.name === 'record';
                       const shouldRemoveFolderField = selectedAction.value === 'share-folder' && field.name === 'folder';
                       const shouldRemoveSharedFolderField = selectedAction.value === 'record-permission' && field.name === 'sharedFolder';
-                      const shouldRemovePamRotateFields = selectedAction.value === 'pam-action-rotate' && (field.name === 'recordUid' || field.name === 'folder');
-                      return !shouldRemoveRecordField && !shouldRemoveFolderField && !shouldRemoveSharedFolderField && !shouldRemovePamRotateFields && field.type !== 'checkbox';
+                      
+                      // Handle conditional field visibility
+                      if (field.conditionalOn && field.conditionalValue) {
+                        const conditionalFieldValue = formData[field.conditionalOn];
+                        if (conditionalFieldValue !== field.conditionalValue) {
+                          return false; // Hide field if condition not met
+                        }
+                      }
+                      
+                      return !shouldRemoveRecordField && !shouldRemoveFolderField && !shouldRemoveSharedFolderField && field.type !== 'checkbox';
                     })
                     .map((field) => (
                       <div
@@ -8359,54 +7473,86 @@ const IssuePanel = () => {
         )}
 
         {/* Result Display */}
-        {lastResult && (
-          <div style={{
-            marginTop: "16px",
-            marginBottom: "16px",
-            padding: "12px",
-            backgroundColor: lastResult.success ? "#E3FCEF" : "#FFEBE6",
-            borderRadius: "4px",
-            border: lastResult.success ? "1px solid #ABF5D1" : "1px solid #FF5630",
-            position: "relative"
-          }}>
-            {/* Close button */}
-            <button
-              onClick={() => setLastResult(null)}
-              style={{
-                position: "absolute",
-                top: "8px",
-                right: "8px",
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                padding: "4px",
+        {lastResult && (() => {
+          const messageStyles = {
+            success: {
+              background: "#F0FDF4",
+              border: "2px solid #86EFAC",
+              titleColor: "#166534",
+              iconColor: "#166534",
+              title: "Success Message"
+            },
+            error: {
+              background: "#FFF0F0",
+              border: "2px solid #FCA5A5",
+              titleColor: "#B91C1C",
+              iconColor: "#B91C1C",
+              title: "Error Message"
+            }
+          };
+          const currentStyle = lastResult.success ? messageStyles.success : messageStyles.error;
+          
+          return (
+            <div style={{
+              marginTop: "20px",
+              padding: "16px",
+              borderRadius: "8px",
+              backgroundColor: currentStyle.background,
+              border: currentStyle.border,
+              position: "relative"
+            }}>
+              {/* Close button */}
+              <button
+                onClick={() => setLastResult(null)}
+                style={{
+                  position: "absolute",
+                  top: "8px",
+                  right: "8px",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "4px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: "3px",
+                  transition: "background-color 0.2s"
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                title="Dismiss"
+              >
+                <CrossIcon size="small" label="Close" primaryColor={currentStyle.iconColor} />
+              </button>
+              
+              <div style={{
+                fontWeight: "600",
+                fontSize: "16px",
+                color: currentStyle.titleColor,
+                marginBottom: "6px",
+                paddingRight: "28px",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                borderRadius: "3px",
-                transition: "background-color 0.2s"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-              title="Dismiss"
-            >
-              <CrossIcon size="small" label="Close" primaryColor={lastResult.success ? "#006644" : "#BF2600"} />
-            </button>
-            
-            <div style={{
-              fontWeight: "600",
-              fontSize: "12px",
-              color: lastResult.success ? "#006644" : "#BF2600",
-              marginBottom: "4px",
-              paddingRight: "24px"
-            }}>
-              {lastResult.success ? "Success" : "Error"}
+                gap: "8px"
+              }}>
+                {lastResult.success ? (
+                  <SuccessIcon primaryColor={currentStyle.iconColor} size="medium" label="Success" />
+                ) : (
+                  <ErrorIcon primaryColor={currentStyle.iconColor} size="medium" label="Error" />
+                )}
+                <span>{lastResult.success ? "Success Message" : "Error Message"}</span>
+              </div>
+              <div style={{ 
+                fontSize: "14px", 
+                color: "#6B7280",
+                lineHeight: "1.4",
+                whiteSpace: "pre-wrap"
+              }}>
+                {lastResult.message}
+              </div>
             </div>
-            <div style={{ fontSize: "11px", color: "#6B778C" }}>
-              {lastResult.message}
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Workflow info */}
         {issueContext.hasConfig && !isLoading && !isLoadingStoredData && showWorkflowInfo && (
