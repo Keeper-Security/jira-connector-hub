@@ -749,16 +749,30 @@ resolver.define('getKeeperFolders', async (req) => {
           let cleanName = folder.name || '';
           cleanName = cleanName.replace(/\[?\d+m/g, ''); // Remove [31m, [39m etc.
           
+          // Extract flags from details string (format: "Flags: S, Parent: /")
+          let flags = '';
+          let parentUid = '';
+          if (folder.details) {
+            const flagsMatch = folder.details.match(/Flags:\s*([^,]*)/);
+            if (flagsMatch) {
+              flags = flagsMatch[1].trim();
+            }
+            const parentMatch = folder.details.match(/Parent:\s*(.+)/);
+            if (parentMatch) {
+              parentUid = parentMatch[1].trim();
+            }
+          }
+          
           return {
             number: index + 1,
-            folder_uid: folder.folder_uid, // Use folder_uid to match CLI response format
-            uid: folder.folder_uid, // Keep uid for backward compatibility
+            folder_uid: folder.uid, // Use uid from the new format
+            uid: folder.uid, // Use uid from the new format
             name: cleanName,
             title: cleanName, // Add title alias
             path: cleanName,
-            flags: folder.flags,
-            parent_uid: folder.parent_uid,
-            shared: folder.flags && folder.flags.includes('S'), // Mark as shared if flags contains "S"
+            flags: flags,
+            parent_uid: parentUid,
+            shared: flags && flags.includes('S'), // Mark as shared if flags contains "S"
             raw_data: folder
           };
         });

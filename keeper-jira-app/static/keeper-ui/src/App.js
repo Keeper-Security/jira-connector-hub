@@ -638,12 +638,7 @@ const App = () => {
                             transition: "all 0.2s ease"
                           }}
                         >
-                          {submitting 
-                            ? "Saving..." 
-                            : hasExistingConfig 
-                              ? "Update Settings" 
-                              : "Save Settings"
-                          }
+                          {submitting ? "Saving..." : "Save Settings"}
                         </Button>
                       </FormFooter>
                     )}
@@ -771,7 +766,28 @@ const App = () => {
 
               <div style={{ marginBottom: "32px", paddingBottom: "24px", borderBottom: "1px solid #DFE1E6" }}>
                 <h3 style={{ fontWeight: "600", fontSize: "16px", marginTop: "0", marginBottom: "12px", color: "#172B4D" }}>
-                  3. Service Mode REST API Configuration
+                  3. Tunneling & Network Configuration
+                </h3>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  Since Keeper Commander Service Mode runs in your local environment, you need a tunneling solution to expose the REST API endpoints to Jira Cloud. A tunnel creates a secure bridge between your local service and the public internet, enabling Jira to communicate with your Keeper Commander instance without complex firewall or network configuration.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  <strong style={{ fontWeight: "600", color: "#172B4D" }}>Ngrok</strong> is a popular tunneling solution offering both free and paid plans. It provides instant public URLs with automatic HTTPS encryption. The free tier is suitable for development and testing, while paid plans offer additional features like custom domains and increased bandwidth. Visit <a href="https://ngrok.com/" target="_blank" rel="noopener noreferrer" style={{ color: "#0052CC", textDecoration: "none", fontWeight: "500" }}>ngrok.com</a> to get started and obtain your authentication token.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
+                  <strong style={{ fontWeight: "600", color: "#172B4D" }}>Cloudflare Tunnel</strong> is an enterprise-grade alternative that provides secure, reliable tunneling through Cloudflare's global network. It offers enhanced security features and is particularly well-suited for production deployments. Learn more at <a href="https://www.cloudflare.com/products/tunnel/" target="_blank" rel="noopener noreferrer" style={{ color: "#0052CC", textDecoration: "none", fontWeight: "500" }}>Cloudflare Tunnel documentation</a> to obtain your tunnel token.
+                </p>
+                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "0" }}>
+                  Once your tunnel is established, you'll receive a public URL (e.g., <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>https://xxxxx.ngrok-free.app</code>). Enter only the base tunnel URL in the Configuration tab—the integration will automatically append the required <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>/api/v1/executecommand</code> endpoint path.
+                </p>
+                <p style={{ color: "#5E6C84", fontSize: "13px", lineHeight: "20px", fontStyle: "italic", marginTop: "12px", marginBottom: "0" }}>
+                  Reference: <a href="https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api#create-service-mode-using-tunneling" target="_blank" rel="noopener noreferrer" style={{ color: "#5E6C84", textDecoration: "underline" }}>Creating Service Mode with Tunneling</a>
+                </p>
+              </div>
+
+              <div style={{ marginBottom: "32px", paddingBottom: "24px", borderBottom: "1px solid #DFE1E6" }}>
+                <h3 style={{ fontWeight: "600", fontSize: "16px", marginTop: "0", marginBottom: "12px", color: "#172B4D" }}>
+                  4. Service Mode REST API Configuration & Deployment
                 </h3>
                 <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
                   Service Mode transforms Keeper Commander into a REST API server that can process commands via HTTP endpoints. This mode is specifically designed for integration scenarios where external applications need programmatic access to vault operations. The service automatically generates a secure API key upon startup and exposes the <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>/api/v1/executecommand</code> endpoint for command execution.
@@ -820,39 +836,86 @@ const App = () => {
 
                 <div style={{ marginTop: "16px", padding: "14px 16px", backgroundColor: "#FFF7E6", borderLeft: "4px solid #FF991F", borderRadius: "3px" }}>
                   <p style={{ margin: 0, marginBottom: "8px", fontSize: "13px", color: "#974F0C", fontWeight: "600" }}>
-                    Example Docker Deployment Command
+                    Example Docker Deployment Commands
                   </p>
-                  <code style={{ display: "block", marginTop: "10px", padding: "10px 12px", backgroundColor: "#FFFFFF", borderRadius: "3px", fontSize: "12px", color: "#172B4D", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: "18px" }}>
+                  
+                  <p style={{ margin: "10px 0 6px 0", fontSize: "12px", color: "#974F0C", fontWeight: "600" }}>
+                    Basic Deployment:
+                  </p>
+                  <code style={{ display: "block", padding: "10px 12px", backgroundColor: "#FFFFFF", borderRadius: "3px", fontSize: "12px", color: "#172B4D", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: "18px" }}>
                     docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status' -f json -rm foreground -q n --user your@email.com --password yourpassword
                   </code>
+                  
+                  <p style={{ margin: "16px 0 6px 0", fontSize: "12px", color: "#974F0C", fontWeight: "600" }}>
+                    With Ngrok Tunneling:
+                  </p>
+                  <code style={{ display: "block", padding: "10px 12px", backgroundColor: "#FFFFFF", borderRadius: "3px", fontSize: "12px", color: "#172B4D", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: "18px" }}>
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status' -f json -rm foreground -q n -ng &lt;ngrok-auth-token&gt; -cd &lt;custom-domain&gt; --user your@email.com --password yourpassword
+                  </code>
+                  
+                  <p style={{ margin: "16px 0 6px 0", fontSize: "12px", color: "#974F0C", fontWeight: "600" }}>
+                    With Cloudflare Tunneling:
+                  </p>
+                  <code style={{ display: "block", padding: "10px 12px", backgroundColor: "#FFFFFF", borderRadius: "3px", fontSize: "12px", color: "#172B4D", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: "18px" }}>
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status' -f json -rm foreground -q n -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
+                  </code>
+                  
+                  <p style={{ margin: "16px 0 0 0", fontSize: "11px", color: "#6B778C", fontStyle: "italic", lineHeight: "16px" }}>
+                    <strong>Parameters:</strong> <code style={{ backgroundColor: "#FFFFFF", padding: "1px 4px", borderRadius: "2px", fontSize: "11px" }}>-ng</code> Ngrok auth token, 
+                    <code style={{ backgroundColor: "#FFFFFF", padding: "1px 4px", borderRadius: "2px", fontSize: "11px" }}>-cd</code> Ngrok custom domain (subdomain portion only), 
+                    <code style={{ backgroundColor: "#FFFFFF", padding: "1px 4px", borderRadius: "2px", fontSize: "11px" }}>-cf</code> Cloudflare tunnel token, 
+                    <code style={{ backgroundColor: "#FFFFFF", padding: "1px 4px", borderRadius: "2px", fontSize: "11px" }}>-cfd</code> Cloudflare custom domain
+                  </p>
+                </div>
+
+                <div style={{ marginTop: "16px", padding: "14px 16px", backgroundColor: "#E3FCEF", borderLeft: "4px solid #00875A", borderRadius: "3px" }}>
+                  <p style={{ margin: 0, marginBottom: "8px", fontSize: "13px", color: "#006644", fontWeight: "600" }}>
+                    Keeper Commander CLI Deployment (Without Docker)
+                  </p>
+                  
+                  <p style={{ margin: "10px 0 6px 0", fontSize: "12px", color: "#006644" }}>
+                    First, install Keeper Commander CLI and configure persistent login:
+                  </p>
+                  <code style={{ display: "block", padding: "10px 12px", backgroundColor: "#FFFFFF", borderRadius: "3px", fontSize: "12px", color: "#172B4D", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: "18px" }}>
+                    {`pip install keepercommander
+keeper shell
+login your@email.com
+this-device persistent-login on
+this-device register
+this-device timeout 30d`}
+                  </code>
+                  
+                  <p style={{ margin: "16px 0 6px 0", fontSize: "12px", color: "#006644", fontWeight: "600" }}>
+                    Basic Service Creation:
+                  </p>
+                  <code style={{ display: "block", padding: "10px 12px", backgroundColor: "#FFFFFF", borderRadius: "3px", fontSize: "12px", color: "#172B4D", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: "18px" }}>
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status" -rm="foreground" -q=n -f=json
+                  </code>
+                  
+                  <p style={{ margin: "16px 0 6px 0", fontSize: "12px", color: "#006644", fontWeight: "600" }}>
+                    With Ngrok Tunneling:
+                  </p>
+                  <code style={{ display: "block", padding: "10px 12px", backgroundColor: "#FFFFFF", borderRadius: "3px", fontSize: "12px", color: "#172B4D", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: "18px" }}>
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status" -rm="foreground" -q=n -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
+                  </code>
+                  
+                  <p style={{ margin: "16px 0 6px 0", fontSize: "12px", color: "#006644", fontWeight: "600" }}>
+                    With Cloudflare Tunneling:
+                  </p>
+                  <code style={{ display: "block", padding: "10px 12px", backgroundColor: "#FFFFFF", borderRadius: "3px", fontSize: "12px", color: "#172B4D", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: "18px" }}>
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status" -rm="foreground" -q=n -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
+                  </code>
+                  
+                  <p style={{ margin: "16px 0 0 0", fontSize: "11px", color: "#00875A", fontStyle: "italic", lineHeight: "16px" }}>
+                    <strong>Note:</strong> After service creation, the API key will be displayed in the console output. Make sure to copy and store it securely.
+                  </p>
                 </div>
 
                 <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginTop: "16px", marginBottom: "0" }}>
-                  After successful deployment, the service will generate a unique API key displayed in the container logs. This API key must be securely stored and configured in the Jira integration settings. All configuration files are automatically encrypted using your private key to protect sensitive data including API keys, tokens, and security settings.
+                  After successful deployment, the service will generate a unique API key displayed in the console output or container logs. This API key must be securely stored and configured in the Jira integration settings. All configuration files are automatically encrypted using your private key to protect sensitive data including API keys, tokens, and security settings.
                 </p>
                 <p style={{ color: "#5E6C84", fontSize: "13px", lineHeight: "20px", fontStyle: "italic", marginTop: "12px", marginBottom: "0" }}>
                   Reference: <a href="https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api" target="_blank" rel="noopener noreferrer" style={{ color: "#5E6C84", textDecoration: "underline" }}>Service Mode REST API Documentation</a>
-                </p>
-              </div>
-
-              <div style={{ marginBottom: "32px", paddingBottom: "24px", borderBottom: "1px solid #DFE1E6" }}>
-                <h3 style={{ fontWeight: "600", fontSize: "16px", marginTop: "0", marginBottom: "12px", color: "#172B4D" }}>
-                  4. Tunneling & Network Configuration
-                </h3>
-                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
-                  Since Keeper Commander Service Mode runs in your local environment, you need a tunneling solution to expose the REST API endpoints to Jira Cloud. A tunnel creates a secure bridge between your local service and the public internet, enabling Jira to communicate with your Keeper Commander instance without complex firewall or network configuration.
-                </p>
-                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
-                  <strong style={{ fontWeight: "600", color: "#172B4D" }}>Ngrok</strong> is a popular tunneling solution offering both free and paid plans. It provides instant public URLs with automatic HTTPS encryption. The free tier is suitable for development and testing, while paid plans offer additional features like custom domains and increased bandwidth. Visit <a href="https://ngrok.com/" target="_blank" rel="noopener noreferrer" style={{ color: "#0052CC", textDecoration: "none", fontWeight: "500" }}>ngrok.com</a> to get started.
-                </p>
-                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "12px" }}>
-                  <strong style={{ fontWeight: "600", color: "#172B4D" }}>Cloudflare Tunnel</strong> is an enterprise-grade alternative that provides secure, reliable tunneling through Cloudflare's global network. It offers enhanced security features and is particularly well-suited for production deployments. Learn more at <a href="https://www.cloudflare.com/products/tunnel/" target="_blank" rel="noopener noreferrer" style={{ color: "#0052CC", textDecoration: "none", fontWeight: "500" }}>Cloudflare Tunnel documentation</a>.
-                </p>
-                <p style={{ color: "#42526E", fontSize: "14px", lineHeight: "22px", marginBottom: "0" }}>
-                  Once your tunnel is established, you'll receive a public URL (e.g., <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>https://xxxxx.ngrok-free.app</code>). Enter only the base tunnel URL in the Configuration tab—the integration will automatically append the required <code style={{ backgroundColor: "#F4F5F7", padding: "2px 6px", borderRadius: "3px", fontSize: "13px" }}>/api/v1/executecommand</code> endpoint path.
-                </p>
-                <p style={{ color: "#5E6C84", fontSize: "13px", lineHeight: "20px", fontStyle: "italic", marginTop: "12px", marginBottom: "0" }}>
-                  Reference: <a href="https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api#create-service-mode-using-tunneling" target="_blank" rel="noopener noreferrer" style={{ color: "#5E6C84", textDecoration: "underline" }}>Creating Service Mode with Tunneling</a>
                 </p>
               </div>
 
