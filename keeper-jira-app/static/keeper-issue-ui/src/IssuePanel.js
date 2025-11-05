@@ -180,6 +180,10 @@ const IssuePanel = () => {
   const [adminSearchTerm, setAdminSearchTerm] = useState("");
   const [adminCurrentPage, setAdminCurrentPage] = useState(1);
   
+  // Expiration warning modal for share-record action
+  const [showExpirationWarningModal, setShowExpirationWarningModal] = useState(false);
+  const [pendingExpirationValue, setPendingExpirationValue] = useState(null);
+  
   
   const itemsPerPage = 5;
   const recordsPerPage = 3;
@@ -3791,15 +3795,76 @@ const IssuePanel = () => {
 
   // Handle form input changes
   const handleInputChange = (fieldName, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [fieldName]: value
-    }));
+    // Special handling for share-record and share-folder actions: show modal when expiration changes to non-none
+    if ((selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder') && fieldName === 'expiration_type') {
+      if (value && value !== 'none') {
+        // Store the pending value and show the warning modal
+        setPendingExpirationValue(value);
+        setShowExpirationWarningModal(true);
+        return; // Don't update formData yet - wait for user confirmation
+      }
+    }
+    
+    setFormData(prev => {
+      const newData = {
+        ...prev,
+        [fieldName]: value
+      };
+      
+      // Clear can_share when expiration is set for share-record action
+      if (selectedAction?.value === 'share-record' && fieldName === 'expiration_type') {
+        if (value && value !== 'none') {
+          newData.can_share = false;
+        }
+      }
+      
+      // Clear manage_users when expiration is set for share-folder action
+      if (selectedAction?.value === 'share-folder' && fieldName === 'expiration_type') {
+        if (value && value !== 'none') {
+          newData.manage_users = false;
+        }
+      }
+      
+      return newData;
+    });
     
     // Special handling for addressRef fields - trigger address resolution
     if (fieldName === 'addressRef' && value) {
       resolveAndCacheAddress(value, true); // Force resolution to ensure UI updates
     }
+  };
+
+  // Handle expiration warning modal confirmation
+  const handleExpirationWarningConfirm = () => {
+    if (pendingExpirationValue) {
+      setFormData(prev => {
+        const newData = {
+          ...prev,
+          expiration_type: pendingExpirationValue
+        };
+        
+        // Clear can_share for share-record action
+        if (selectedAction?.value === 'share-record') {
+          newData.can_share = false;
+        }
+        
+        // Clear manage_users for share-folder action
+        if (selectedAction?.value === 'share-folder') {
+          newData.manage_users = false;
+        }
+        
+        return newData;
+      });
+    }
+    setShowExpirationWarningModal(false);
+    setPendingExpirationValue(null);
+  };
+
+  // Handle expiration warning modal cancellation
+  const handleExpirationWarningCancel = () => {
+    setShowExpirationWarningModal(false);
+    setPendingExpirationValue(null);
+    // Keep the expiration_type at its current value (don't change it)
   };
 
   // Add manual custom field
@@ -4073,24 +4138,40 @@ const IssuePanel = () => {
           />
         );
       case 'checkbox':
+        // Special handling for can_share checkbox in share-record action
+        const isCanShareDisabled = selectedAction?.value === 'share-record' && 
+                                     field.name === 'can_share' && 
+                                     formData.expiration_type && 
+                                     formData.expiration_type !== 'none';
+        
+        // Special handling for manage_users checkbox in share-folder action
+        const isManageUsersDisabled = selectedAction?.value === 'share-folder' && 
+                                       field.name === 'manage_users' && 
+                                       formData.expiration_type && 
+                                       formData.expiration_type !== 'none';
+        
+        const isExpirationDisabled = isCanShareDisabled || isManageUsersDisabled;
+        const checkboxDisabled = isFormDisabled || isExpirationDisabled;
+        
         return (
           <div style={{ 
             display: 'flex', 
             alignItems: 'flex-start', 
             gap: '10px',
             padding: '8px 12px',
-            backgroundColor: isFormDisabled ? '#F9F9F9' : '#FAFBFC',
+            backgroundColor: checkboxDisabled ? '#F9F9F9' : '#FAFBFC',
             borderRadius: '4px',
             border: '1px solid #DFE1E6',
-            marginBottom: '8px'
+            marginBottom: '8px',
+            opacity: isExpirationDisabled ? 0.6 : 1
           }}>
             <input
               type="checkbox"
               checked={value === true || value === 'true'}
-              disabled={isFormDisabled}
+              disabled={checkboxDisabled}
               onChange={(e) => handleInputChange(field.name, e.target.checked)}
               style={{
-                cursor: isFormDisabled ? 'not-allowed' : 'pointer',
+                cursor: checkboxDisabled ? 'not-allowed' : 'pointer',
                 marginTop: '2px',
                 minWidth: '16px',
                 width: '16px',
@@ -4101,15 +4182,26 @@ const IssuePanel = () => {
               <div style={{ 
                 fontSize: '13px', 
                 fontWeight: '500',
-                color: isFormDisabled ? '#999' : '#1A1A1A',
+                color: checkboxDisabled ? '#999' : '#1A1A1A',
                 marginBottom: '2px'
               }}>
                 {field.label}
+                {(isCanShareDisabled || isManageUsersDisabled) && (
+                  <span style={{ 
+                    fontSize: '11px', 
+                    color: '#FF5630',
+                    marginLeft: '8px',
+                    fontWeight: 'normal',
+                    fontStyle: 'italic'
+                  }}>
+                    (Disabled due to expiration)
+                  </span>
+                )}
               </div>
               {field.description && (
                 <div style={{ 
                   fontSize: '11px', 
-                  color: isFormDisabled ? '#999' : '#6B778C',
+                  color: checkboxDisabled ? '#999' : '#6B778C',
                   lineHeight: '1.3'
                 }}>
                   {field.description}
@@ -8298,6 +8390,112 @@ const IssuePanel = () => {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Expiration Warning Modal for share-record */}
+        {showExpirationWarningModal && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10001
+          }}>
+            <div style={{
+              backgroundColor: 'white',
+              borderRadius: '8px',
+              padding: '24px',
+              maxWidth: '480px',
+              width: '90%',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '12px',
+                marginBottom: '20px'
+              }}>
+                <div style={{
+                  backgroundColor: '#FFF5E6',
+                  borderRadius: '50%',
+                  padding: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: '40px',
+                  height: '40px'
+                }}>
+                  <span style={{
+                    fontSize: '24px',
+                    color: '#FF9800'
+                  }}>⚠️</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{
+                    margin: '0 0 8px 0',
+                    fontSize: '18px',
+                    fontWeight: '600',
+                    color: '#1A1A1A'
+                  }}>
+                    {selectedAction?.value === 'share-folder' ? 'User Management Restriction' : 'Sharing Restriction'}
+                  </h3>
+                  <p style={{
+                    margin: 0,
+                    fontSize: '14px',
+                    color: '#42526E',
+                    lineHeight: '1.5'
+                  }}>
+                    {selectedAction?.value === 'share-folder' 
+                      ? 'The ability to manage users is restricted for users with time-limited access and will be removed when setting access expiration.'
+                      : 'Sharing is restricted for users with time-limited access. Setting access expiration will remove sharing permissions.'}
+                  </p>
+                </div>
+              </div>
+
+              <div style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '12px',
+                marginTop: '24px'
+              }}>
+                <button
+                  onClick={handleExpirationWarningCancel}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '4px',
+                    border: '1px solid #DFE1E6',
+                    backgroundColor: 'white',
+                    color: '#6B778C',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleExpirationWarningConfirm}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    backgroundColor: '#0066CC',
+                    color: 'white',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}
+                >
+                  Continue
+                </button>
+              </div>
             </div>
           </div>
         )}
