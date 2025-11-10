@@ -983,6 +983,70 @@ resolver.define('getKeeperRecordDetails', async (req) => {
 });
 
 /**
+ * Execute a simple Keeper command (called from config page for PEDM, etc.)
+ */
+resolver.define('executeKeeperCommand', async (req) => {
+  // Handle double nesting: req.payload.payload
+  let payload = req?.payload?.payload || req?.payload || req;
+  
+  if (!payload) {
+    throw new Error('No payload provided');
+  }
+  
+  const { command } = payload;
+  
+  if (!command) {
+    throw new Error('Command is required');
+  }
+  
+  const config = await storage.get('keeperConfig');
+  if (!config) {
+    throw new Error('Keeper configuration not found. Please configure the app first.');
+  }
+
+  const { apiUrl, apiKey } = config;
+  
+  // Construct the full API endpoint
+  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+  const fullApiUrl = `${baseUrl}/api/v1/executecommand`;
+
+  try {
+    // Call Keeper API
+    const response = await fetch(fullApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify({
+        command: command,
+      }),
+    });
+
+    // Check if the API call was successful
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Keeper API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+
+    // Check if API response indicates error
+    if (data.success === false || data.error) {
+      throw new Error(`Keeper API error: ${data.error || data.message || 'Unknown error'}`);
+    }
+
+    return { 
+      success: true, 
+      data: data,
+      message: data.message || 'Command executed successfully'
+    };
+  } catch (err) {
+    throw err;
+  }
+});
+
+/**
  * Manual Keeper action trigger (called from issue panel)
  */
 resolver.define('executeKeeperAction', async (req) => {
@@ -1952,7 +2016,7 @@ resolver.define('clearStoredRequestData', async (req) => {
 });
 
 
-// Export resolver for frontend calls (getConfig, setConfig, testConnection, getIssueContext, executeKeeperAction, getKeeperRecords, getKeeperFolders, getRecordTypes, getRecordTypeTemplate, getKeeperRecordDetails, rejectKeeperRequest, getUserRole, getGlobalUserRole, getProjectAdmins, storeRequestData, getStoredRequestData, activateKeeperPanel, clearStoredRequestData)
+// Export resolver for frontend calls (getConfig, setConfig, testConnection, getIssueContext, executeKeeperCommand, executeKeeperAction, getKeeperRecords, getKeeperFolders, getRecordTypes, getRecordTypeTemplate, getKeeperRecordDetails, rejectKeeperRequest, getUserRole, getGlobalUserRole, getProjectAdmins, storeRequestData, getStoredRequestData, activateKeeperPanel, clearStoredRequestData)
 export const handler = resolver.getDefinitions();
 
 // Export same resolver for issue panel - they can share the same functions
