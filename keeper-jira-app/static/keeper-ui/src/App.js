@@ -666,7 +666,7 @@ const App = () => {
                 <div style={{ padding: "16px 0" }}>
                   <SectionMessage appearance="warning" title="Access Restricted">
                     <p style={{ margin: "8px 0", color: "#42526E", fontSize: "14px", lineHeight: "20px" }}>
-                      Only administrators can access the configuration page. 
+                      Only Jira Administrators or Project Administrators can access the configuration page. 
                       Please contact your Jira administrator if you need to modify Keeper settings.
                     </p>
                   </SectionMessage>
@@ -1245,7 +1245,7 @@ this-device timeout 30d`}
                 <div style={{ padding: "16px 0" }}>
                   <SectionMessage appearance="warning" title="Access Restricted">
                     <p style={{ margin: "8px 0", color: "#42526E", fontSize: "14px", lineHeight: "20px" }}>
-                      Only administrators can access the PEDM Requests page. 
+                      Only Jira Administrators or Project Administrators can access the PEDM Requests page. 
                       Please contact your Jira administrator if you need to view or manage PEDM requests.
                     </p>
                   </SectionMessage>
@@ -2177,7 +2177,7 @@ this-device timeout 30d`}
                     PEDM Management (Administrator Only)
                   </p>
                   <p style={{ margin: 0, fontSize: "13px", color: "#00875A", lineHeight: "20px", marginBottom: "8px" }}>
-                    For users with Jira administrator roles, the integration provides advanced Endpoint Privilege Manager capabilities through the dedicated PEDM tab. Monitor and manage privileged access requests across your organization with real-time approval workflows.
+                    For Global Jira Administrators or Project Administrators, the integration provides advanced Endpoint Privilege Manager capabilities through the dedicated PEDM tab. Monitor and manage privileged access requests across your organization with real-time approval workflows.
                   </p>
                   <p style={{ margin: 0, fontSize: "13px", color: "#00875A", lineHeight: "20px" }}>
                     <strong style={{ fontWeight: "600" }}>Available Commands:</strong> <code style={{ backgroundColor: "#FFFFFF", padding: "2px 4px", borderRadius: "3px", fontSize: "12px" }}>pedm approval list</code> to retrieve pending requests, <code style={{ backgroundColor: "#FFFFFF", padding: "2px 4px", borderRadius: "3px", fontSize: "12px" }}>pedm approval action --approve</code> to grant privilege elevation, and <code style={{ backgroundColor: "#FFFFFF", padding: "2px 4px", borderRadius: "3px", fontSize: "12px" }}>pedm approval action --deny</code> to reject requests. All approvals include live countdown timers, user details, application context, and justification messages for informed decision-making.

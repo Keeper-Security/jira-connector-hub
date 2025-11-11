@@ -1548,7 +1548,9 @@ resolver.define('getUserRole', async (req) => {
 });
 
 /**
- * Get global user admin status - check if current user has admin permissions across Jira
+ * Check if current user has Administrator permissions
+ * Checks for both Global Admin (ADMINISTER) and Project Admin (ADMINISTER_PROJECTS)
+ * Returns true if user has either permission
  */
 resolver.define('getGlobalUserRole', async (req) => {
   try {
@@ -1570,9 +1572,12 @@ resolver.define('getGlobalUserRole', async (req) => {
       // User API call failed - continue with permissions check
     }
     
-    // Get global permissions data (without project key)
+    // Check for both global admin (ADMINISTER) and project admin (ADMINISTER_PROJECTS) permissions
+    // Single API call checks both permission types
     try {
-      const permResponse = await asUser().requestJira(route`/rest/api/3/mypermissions?permissions=ADMINISTER_PROJECTS`);
+      const permResponse = await asUser().requestJira(
+        route`/rest/api/3/mypermissions?permissions=ADMINISTER,ADMINISTER_PROJECTS`
+      );
       
       if (permResponse && permResponse.ok) {
         const permissionsData = await permResponse.json();
@@ -1589,12 +1594,25 @@ resolver.define('getGlobalUserRole', async (req) => {
     if ((userApiResponse && Object.keys(userApiResponse).length > 0) || 
         (permissionsApiResponse && Object.keys(permissionsApiResponse).length > 0)) {
       
-      const hasAdminPermission = permissionsApiResponse?.permissions?.ADMINISTER_PROJECTS?.havePermission === true;
+      // User is admin if they have either global admin OR project admin permission
+      const hasGlobalAdmin = permissionsApiResponse?.permissions?.ADMINISTER?.havePermission === true;
+      const hasProjectAdmin = permissionsApiResponse?.permissions?.ADMINISTER_PROJECTS?.havePermission === true;
+      const hasAdminPermission = hasGlobalAdmin || hasProjectAdmin;
+      
+      // Determine admin type for logging and display
+      let adminType = 'none';
+      if (hasGlobalAdmin && hasProjectAdmin) {
+        adminType = 'global_and_project';
+      } else if (hasGlobalAdmin) {
+        adminType = 'global';
+      } else if (hasProjectAdmin) {
+        adminType = 'project';
+      }
       
       return {
         success: true,
         isAdmin: hasAdminPermission,
-        adminCheckMethod: 'global_permissions',
+        adminCheckMethod: adminType,
         userKey: userApiResponse?.accountId || userApiResponse?.key || 'unknown',
         displayName: userApiResponse?.displayName || userApiResponse?.name || userApiResponse?.emailAddress || 'User'
       };
