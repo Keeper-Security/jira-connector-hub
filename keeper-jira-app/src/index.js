@@ -51,8 +51,8 @@ resolver.define('testConnection', async (req) => {
   }
   
   // Construct the full API endpoint
-  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  const fullApiUrl = `${baseUrl}/api/v1/executecommand`;
+  // Use the complete API URL as provided by the user
+  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
     // Test with service-status command to check Keeper Commander service
@@ -649,8 +649,8 @@ resolver.define('getKeeperRecords', async (req) => {
   const { apiUrl, apiKey } = config;
   
   // Construct the full API endpoint
-  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  const fullApiUrl = `${baseUrl}/api/v1/executecommand`;
+  // Use the complete API URL as provided by the user
+  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
     const response = await fetch(fullApiUrl, {
@@ -713,8 +713,8 @@ resolver.define('getKeeperFolders', async (req) => {
   const { apiUrl, apiKey } = config;
   
   // Construct the full API endpoint
-  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  const fullApiUrl = `${baseUrl}/api/v1/executecommand`;
+  // Use the complete API URL as provided by the user
+  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
     const response = await fetch(fullApiUrl, {
@@ -801,8 +801,8 @@ resolver.define('getRecordTypes', async (req) => {
   const { apiUrl, apiKey } = config;
   
   // Construct the full API endpoint
-  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  const fullApiUrl = `${baseUrl}/api/v1/executecommand`;
+  // Use the complete API URL as provided by the user
+  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
     const response = await fetch(fullApiUrl, {
@@ -869,8 +869,8 @@ resolver.define('getRecordTypeTemplate', async (req) => {
   const { apiUrl, apiKey } = config;
   
   // Construct the full API endpoint
-  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  const fullApiUrl = `${baseUrl}/api/v1/executecommand`;
+  // Use the complete API URL as provided by the user
+  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
     const response = await fetch(fullApiUrl, {
@@ -935,8 +935,8 @@ resolver.define('getKeeperRecordDetails', async (req) => {
   const { apiUrl, apiKey } = config;
   
   // Construct the full API endpoint
-  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  const fullApiUrl = `${baseUrl}/api/v1/executecommand`;
+  // Use the complete API URL as provided by the user
+  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
     const response = await fetch(fullApiUrl, {
@@ -1007,8 +1007,8 @@ resolver.define('executeKeeperCommand', async (req) => {
   const { apiUrl, apiKey } = config;
   
   // Construct the full API endpoint
-  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  const fullApiUrl = `${baseUrl}/api/v1/executecommand`;
+  // Use the complete API URL as provided by the user
+  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
     // Call Keeper API
@@ -1071,8 +1071,8 @@ resolver.define('executeKeeperAction', async (req) => {
   const dynamicCommand = buildKeeperCommand(command, parameters || {}, issueKey);
   
   // Construct the full API endpoint
-  const baseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-  const fullApiUrl = `${baseUrl}/api/v1/executecommand`;
+  // Use the complete API URL as provided by the user
+  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
     // Call Keeper API

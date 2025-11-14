@@ -1,0 +1,501 @@
+/* PEDM Tab Styles - ALL inline styles extracted from original */
+
+/* Header Section */
+.pedm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.pedm-header-title {
+  font-weight: 600;
+  font-size: 20px;
+  margin-bottom: 8px;
+  color: #172B4D;
+}
+
+.pedm-header-subtitle {
+  color: #5E6C84;
+  font-size: 14px;
+  margin-bottom: 0;
+  line-height: 20px;
+}
+
+.pedm-quick-sync {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #172B4D;
+  font-weight: 600;
+  font-size: 14px;
+  transition: color 0.2s ease;
+}
+
+.pedm-quick-sync.disabled {
+  cursor: default;
+}
+
+.pedm-quick-sync:not(.disabled):hover {
+  color: #0052CC;
+}
+
+/* Checking Permissions */
+.pedm-checking-permissions {
+  text-align: center;
+  padding: 20px;
+  color: #5E6C84;
+}
+
+/* Access Restricted */
+.pedm-access-restricted-wrapper {
+  padding: 16px 0;
+}
+
+.pedm-access-restricted-text {
+  margin: 8px 0;
+  color: #42526E;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* Loading State */
+.pedm-loading-state {
+  text-align: center;
+  padding: 60px 40px;
+  background-color: #FAFBFC;
+  border-radius: 3px;
+  border: 1px solid #DFE1E6;
+}
+
+.pedm-loading-spinner-wrapper {
+  margin-bottom: 16px;
+}
+
+.pedm-loading-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: #172B4D;
+  margin-bottom: 8px;
+}
+
+.pedm-loading-subtitle {
+  font-size: 14px;
+  color: #5E6C84;
+  margin: 0;
+}
+
+/* Message Display */
+.pedm-message-wrapper {
+  margin-bottom: 20px;
+  margin-top: 16px;
+}
+
+.pedm-message-box {
+  padding: 10px 14px;
+  border-radius: 8px;
+  position: relative;
+}
+
+.pedm-message-title {
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+.pedm-message-text {
+  font-size: 14px;
+  color: #6B7280;
+  line-height: 1.4;
+}
+
+/* Data Display Section */
+.pedm-search-section {
+  margin-top: 20px;
+}
+
+/* Search and Filter Controls */
+.pedm-search-controls {
+  margin-bottom: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.pedm-search-wrapper {
+  flex: 1;
+}
+
+.pedm-toggle-button {
+  background-color: #FFFFFF;
+  color: #172B4D;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 3px;
+  border: 2px solid #DFE1E6;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.pedm-toggle-button:not(.active):hover {
+  background-color: #F4F5F7;
+}
+
+.pedm-toggle-button.active {
+  background-color: #DE350B;
+  color: #FFFFFF;
+  border-color: #DE350B;
+}
+
+/* Empty States */
+.pedm-empty-state {
+  padding: 40px;
+  text-align: center;
+  background-color: #F4F5F7;
+  border-radius: 3px;
+  border: 1px solid #DFE1E6;
+}
+
+.pedm-empty-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: #42526E;
+  margin-bottom: 8px;
+}
+
+.pedm-empty-subtitle {
+  font-size: 14px;
+  color: #5E6C84;
+  margin: 0;
+}
+
+/* Table Styles */
+.pedm-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid #DFE1E6;
+  border-radius: 3px;
+  background-color: #FFFFFF;
+}
+
+.pedm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.pedm-table thead tr {
+  background-color: #F4F5F7;
+  border-bottom: 2px solid #DFE1E6;
+}
+
+.pedm-table th {
+  padding: 16px;
+  text-align: left;
+  font-weight: 600;
+  color: #172B4D;
+  font-size: 14px;
+}
+
+.pedm-table-row {
+  border-bottom: 1px solid #DFE1E6;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.pedm-table-row:hover {
+  background-color: #F4F5F7;
+}
+
+.pedm-table-row.expired {
+  background-color: #FFEBE6;
+}
+
+.pedm-table td {
+  padding: 16px;
+}
+
+.pedm-user-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pedm-text-cell {
+  color: #172B4D;
+  font-size: 14px;
+}
+
+.pedm-timeout-cell {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pedm-timeout-cell.expired {
+  color: #DE350B;
+}
+
+.pedm-timeout-cell.active {
+  color: #00875A;
+}
+
+.pedm-status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.pedm-status-badge.pending {
+  background-color: #FFF4E6;
+  color: #FF991F;
+}
+
+.pedm-status-badge.approved {
+  background-color: #E3FCEF;
+  color: #00875A;
+}
+
+.pedm-status-badge.denied {
+  background-color: #FFEBE6;
+  color: #DE350B;
+}
+
+.pedm-expired-badge {
+  color: #DE350B;
+  font-weight: 600;
+}
+
+/* Pagination */
+.pedm-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding: 12px 0;
+}
+
+.pedm-pagination-info {
+  font-size: 14px;
+  color: #5E6C84;
+}
+
+/* Modal Styles */
+.pedm-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(9, 30, 66, 0.54);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 24px;
+}
+
+.pedm-modal {
+  background-color: #FFFFFF;
+  border-radius: 3px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 32px -8px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
+}
+
+.pedm-modal-header {
+  padding: 24px 24px 20px;
+  border-bottom: 1px solid #DFE1E6;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pedm-modal-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #172B4D;
+}
+
+.pedm-modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #6B778C;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: background-color 0.2s ease;
+}
+
+.pedm-modal-close:hover {
+  background-color: #F4F5F7;
+}
+
+.pedm-modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.pedm-modal-user-section {
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.pedm-modal-user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.pedm-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.pedm-user-details {
+  flex: 1;
+}
+
+.pedm-username {
+  font-weight: 500;
+  color: #172B4D;
+  font-size: 14px;
+  margin-bottom: 2px;
+}
+
+.pedm-approval-type {
+  color: #00875A;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Modal Action Buttons (in user section) */
+.pedm-modal-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.pedm-action-btn {
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 3px;
+  border: 2px solid;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.pedm-action-btn.deny {
+  background-color: #FFFFFF;
+  color: #DE350B;
+  border-color: #DE350B;
+}
+
+.pedm-action-btn.deny:hover {
+  background-color: #FFEBE6;
+}
+
+.pedm-action-btn.approve {
+  background-color: #FFFFFF;
+  color: #00875A;
+  border-color: #00875A;
+}
+
+.pedm-action-btn.approve:hover {
+  background-color: #E3FCEF;
+}
+
+/* Modal Fields */
+.pedm-modal-field {
+  margin-bottom: 20px;
+}
+
+.pedm-modal-label {
+  font-size: 12px;
+  color: #6B778C;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.pedm-modal-value {
+  font-size: 14px;
+  color: #172B4D;
+}
+
+.pedm-modal-justification {
+  font-size: 14px;
+  color: #172B4D;
+  padding: 10px;
+  background-color: #F4F5F7;
+  border-radius: 3px;
+  border-left: 3px solid #0052CC;
+}
+
+.pedm-modal-row {
+  display: flex;
+  gap: 24px;
+}
+
+.pedm-modal-row .pedm-modal-field {
+  flex: 1;
+}
+
+.pedm-modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #DFE1E6;
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.pedm-modal-close-btn {
+  background-color: #FFFFFF;
+  color: #172B4D;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 3px;
+  border: 2px solid #DFE1E6;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  transition: all 0.2s ease;
+}
+
+.pedm-modal-close-btn:hover {
+  background-color: #F4F5F7;
+}

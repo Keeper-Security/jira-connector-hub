@@ -1,0 +1,15 @@
+/* Loading Component Styles */
+.loading-component {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  gap: 16px;
+}
+
+.loading-component-message {
+  color: #5E6C84;
+  font-size: 14px;
+}
+
