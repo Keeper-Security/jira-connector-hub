@@ -1,5 +1,5 @@
 import Resolver from '@forge/resolver';
-import { storage, fetch, route, asApp, asUser, requestJira } from '@forge/api';
+import { storage, fetch, route, asApp, asUser, requestJira, webTrigger } from '@forge/api';
 
 const resolver = new Resolver();
 
@@ -1548,6 +1548,471 @@ resolver.define('getUserRole', async (req) => {
 });
 
 /**
+ * Get web trigger URL using Forge SDK
+ */
+resolver.define('getWebTriggerUrl', async () => {
+  try {
+    const url = await webTrigger.getUrl('keeper-alert-trigger');
+    return {
+      success: true,
+      url: url
+    };
+  } catch (err) {
+    throw new Error(`Failed to get web trigger URL: ${err.message}`);
+  }
+});
+
+/**
+ * Get web trigger configuration
+ */
+resolver.define('getWebTriggerConfig', async () => {
+  const config = await storage.get('webTriggerConfig');
+  return config || {};
+});
+
+/**
+ * Save web trigger configuration
+ */
+resolver.define('setWebTriggerConfig', async (req) => {
+  let payload = req?.payload?.payload || req?.payload || req;
+  
+  if (!payload) {
+    throw new Error('No payload provided');
+  }
+  
+  const projectKey = payload.projectKey;
+  const issueType = payload.issueType;
+  
+  const configToSave = { projectKey, issueType };
+  
+  await storage.set('webTriggerConfig', configToSave);
+  
+  return { success: true, message: 'Web trigger configuration saved successfully' };
+});
+
+/**
+ * Get all Jira projects
+ */
+resolver.define('getJiraProjects', async () => {
+  try {
+    const response = await asApp().requestJira(route`/rest/api/3/project`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch projects: ${response.status}`);
+    }
+    
+    const projects = await response.json();
+    
+    return {
+      success: true,
+      projects: projects || []
+    };
+  } catch (err) {
+    throw new Error(`Failed to fetch Jira projects: ${err.message}`);
+  }
+});
+
+/**
+ * Get issue types for a specific project
+ */
+resolver.define('getProjectIssueTypes', async (req) => {
+  let payload = req?.payload?.payload || req?.payload || req;
+  
+  if (!payload || !payload.projectKey) {
+    throw new Error('Project key is required');
+  }
+  
+  const { projectKey } = payload;
+  
+  try {
+    // Get project details which includes issue types
+    const response = await asApp().requestJira(route`/rest/api/3/project/${projectKey}`);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch project: ${response.status}`);
+    }
+    
+    const project = await response.json();
+    
+    // Extract issue types from project
+    const issueTypes = project.issueTypes || [];
+    
+    return {
+      success: true,
+      issueTypes: issueTypes
+    };
+  } catch (err) {
+    throw new Error(`Failed to fetch issue types: ${err.message}`);
+  }
+});
+
+/**
+ * Test web trigger by creating a test issue
+ */
+resolver.define('testWebTrigger', async (req) => {
+  let payload = req?.payload?.payload || req?.payload || req;
+  
+  if (!payload) {
+    throw new Error('No payload provided');
+  }
+  
+  const { projectKey, issueType } = payload;
+  
+  if (!projectKey || !issueType) {
+    throw new Error('Project key and issue type are required');
+  }
+  
+  try {
+    // Create a test issue
+    const response = await asApp().requestJira(
+      route`/rest/api/3/issue`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            project: {
+              key: projectKey
+            },
+            summary: `Keeper Security Alert - Test Trigger [${new Date().toISOString()}]`,
+            description: {
+              type: 'doc',
+              version: 1,
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    {
+                      type: 'text',
+                      text: 'This is a test issue created by the Keeper Security web trigger. This confirms that your web trigger configuration is working correctly.'
+                    }
+                  ]
+                }
+              ]
+            },
+            issuetype: {
+              name: issueType
+            },
+            labels: ['keeper-webhook', 'keeper-test']
+          }
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create test issue: ${response.status} - ${errorText}`);
+    }
+    
+    const issue = await response.json();
+    
+    return {
+      success: true,
+      message: 'Test issue created successfully!',
+      issueKey: issue.key,
+      issueUrl: issue.self
+    };
+  } catch (err) {
+    throw new Error(`Failed to test web trigger: ${err.message}`);
+  }
+});
+
+/**
+ * Test web trigger with full payload (simulating actual webhook call)
+ */
+resolver.define('testWebTriggerWithPayload', async (req) => {
+  let payload = req?.payload?.payload || req?.payload || req;
+  
+  if (!payload) {
+    throw new Error('No payload provided');
+  }
+  
+  try {
+    // Get the web trigger configuration
+    const config = await storage.get('webTriggerConfig');
+    
+    if (!config || !config.projectKey || !config.issueType) {
+      throw new Error('Web trigger not configured. Please configure project and issue type first.');
+    }
+    
+    // Extract alert details from payload
+    const summary = payload.summary || payload.alert_name || payload.message || `Keeper Security Alert - ${new Date().toISOString()}`;
+    const description = payload.description || payload.message || 'A security alert was received from Keeper Security.';
+    const alertType = payload.alertType || payload.alert_type || 'security_alert';
+    const severity = payload.severity || 'medium';
+    const source = payload.source || 'keeper_security';
+    
+    // Build detailed description in ADF format
+    const adfDescription = {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: description
+            }
+          ]
+        },
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: '\n\nAlert Details:',
+              marks: [{ type: 'strong' }]
+            }
+          ]
+        },
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    {
+                      type: 'text',
+                      text: `Alert Type: ${alertType}`,
+                      marks: [{ type: 'strong' }]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    {
+                      type: 'text',
+                      text: `Severity: ${severity.toUpperCase()}`,
+                      marks: [{ type: 'strong' }]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    {
+                      type: 'text',
+                      text: `Source: ${source}`
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    {
+                      type: 'text',
+                      text: `Timestamp: ${payload.timestamp || new Date().toISOString()}`
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    
+    // Add user information if present
+    if (payload.user || payload.username) {
+      const userEmail = payload.user?.email || payload.username || 'Unknown';
+      adfDescription.content.push({
+        type: 'paragraph',
+        content: [
+          {
+            type: 'text',
+            text: `\nUser: ${userEmail}`
+          }
+        ]
+      });
+    }
+    
+    // Add additional details if present
+    if (payload.details) {
+      adfDescription.content.push({
+        type: 'paragraph',
+        content: [
+          {
+            type: 'text',
+            text: '\n\nAdditional Information:',
+            marks: [{ type: 'strong' }]
+          }
+        ]
+      });
+      adfDescription.content.push({
+        type: 'codeBlock',
+        attrs: { language: 'json' },
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(payload.details, null, 2)
+          }
+        ]
+      });
+    }
+    
+    // Determine labels based on payload
+    const labels = ['keeper-webhook'];
+    if (payload.source === 'keeper_admin_test' || payload.details?.test) {
+      labels.push('keeper-webhook-test');
+    }
+    if (severity) {
+      labels.push(`severity-${severity.toLowerCase()}`);
+    }
+    if (alertType) {
+      labels.push(alertType.toLowerCase().replace(/_/g, '-'));
+    }
+    
+    // Create the Jira issue
+    const response = await asApp().requestJira(
+      route`/rest/api/3/issue`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            project: {
+              key: config.projectKey
+            },
+            summary: summary,
+            description: adfDescription,
+            issuetype: {
+              name: config.issueType
+            },
+            labels: labels
+          }
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to create issue: ${errorText}`);
+    }
+    
+    const issue = await response.json();
+    
+    return {
+      success: true,
+      message: 'Issue created successfully via webhook test',
+      issueKey: issue.key,
+      issueId: issue.id,
+      labels: labels
+    };
+    
+  } catch (error) {
+    throw new Error(`Failed to test web trigger: ${error.message}`);
+  }
+});
+
+/**
+ * Fetch tickets created by webhook (with keeper-webhook label)
+ */
+resolver.define('getWebhookTickets', async (req) => {
+  try {
+    const config = await storage.get('webTriggerConfig');
+    
+    if (!config || !config.projectKey) {
+      return {
+        success: false,
+        message: 'Web trigger not configured',
+        issues: []
+      };
+    }
+    
+    // Build JQL to find issues with keeper-webhook label in configured project
+    const jql = `project = ${config.projectKey} AND labels = keeper-webhook ORDER BY created DESC`;
+    
+    // Fetch issues using the new JQL enhanced search API (POST /rest/api/3/search/jql)
+    const response = await asApp().requestJira(
+      route`/rest/api/3/search/jql`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jql: jql,
+          maxResults: 100,
+          fields: ['summary', 'created', 'description', 'status', 'labels', 'key', 'issuetype']
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to fetch webhook tickets: ${errorText}`);
+    }
+    
+    const data = await response.json();
+    
+    // Format the issues for frontend consumption
+    const issues = data.issues.map(issue => {
+      // Extract JSON payload from description if it exists
+      let jsonPayload = null;
+      try {
+        // The description is in ADF format, look for codeBlock with JSON
+        const description = issue.fields.description;
+        if (description && description.content) {
+          const codeBlock = description.content.find(
+            block => block.type === 'codeBlock' && block.attrs?.language === 'json'
+          );
+          if (codeBlock && codeBlock.content && codeBlock.content[0]?.text) {
+            jsonPayload = JSON.parse(codeBlock.content[0].text);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to parse JSON from description:', e);
+      }
+      
+      return {
+        key: issue.key,
+        id: issue.id,
+        summary: issue.fields.summary,
+        created: issue.fields.created,
+        status: issue.fields.status?.name || 'Unknown',
+        labels: issue.fields.labels || [],
+        issueType: issue.fields.issuetype?.name || 'Unknown',
+        description: jsonPayload?.description || issue.fields.summary,
+        requestUid: jsonPayload?.request_uid || null,
+        agentUid: jsonPayload?.agent_uid || null,
+        username: jsonPayload?.username || null,
+        category: jsonPayload?.category || null,
+        auditEvent: jsonPayload?.audit_event || null,
+        alertName: jsonPayload?.alert_name || null
+      };
+    });
+    
+    return {
+      success: true,
+      issues: issues,
+      total: data.total
+    };
+    
+  } catch (error) {
+    console.error('Error fetching webhook tickets:', error);
+    throw new Error(`Failed to fetch webhook tickets: ${error.message}`);
+  }
+});
+
+/**
  * Check if current user has Administrator permissions
  * Checks for both Global Admin (ADMINISTER) and Project Admin (ADMINISTER_PROJECTS)
  * Returns true if user has either permission
@@ -2034,7 +2499,336 @@ resolver.define('clearStoredRequestData', async (req) => {
 });
 
 
-// Export resolver for frontend calls (getConfig, setConfig, testConnection, getIssueContext, executeKeeperCommand, executeKeeperAction, getKeeperRecords, getKeeperFolders, getRecordTypes, getRecordTypeTemplate, getKeeperRecordDetails, rejectKeeperRequest, getUserRole, getGlobalUserRole, getProjectAdmins, storeRequestData, getStoredRequestData, activateKeeperPanel, clearStoredRequestData)
+/**
+ * Web trigger handler - receives Keeper Security alerts and creates Jira issues
+ */
+export async function webTriggerHandler(request) {
+  try {
+    // Get the web trigger configuration (project and issue type)
+    const config = await storage.get('webTriggerConfig');
+    
+    if (!config || !config.projectKey || !config.issueType) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({
+          success: false,
+          error: 'Web trigger not configured. Please configure project and issue type in the Keeper app settings.'
+        })
+      };
+    }
+    
+    // Parse the incoming request body
+    const payload = request.body ? JSON.parse(request.body) : {};
+    
+    // Validate that this is an endpoint privilege manager approval request
+    if (payload.category !== 'endpoint_privilege_manager' || payload.audit_event !== 'approval_request_created') {
+      console.log('Webhook received but does not match required criteria. Category:', payload.category, 'Audit Event:', payload.audit_event);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          message: 'Webhook received but skipped - only endpoint_privilege_manager approval_request_created events create tickets',
+          category: payload.category,
+          audit_event: payload.audit_event
+        })
+      };
+    }
+    
+    // Extract request_uid for ticket title
+    const requestUid = payload.request_uid || payload.requestUid || new Date().toISOString();
+    const summary = `KeeperSecurity Alert - ${requestUid}`;
+    
+    // Create description with full JSON payload in ADF format
+    const adfDescription = {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'heading',
+          attrs: { level: 3 },
+          content: [
+            {
+              type: 'text',
+              text: 'Keeper Security Alert'
+            }
+          ]
+        },
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: payload.description || payload.message || 'A security alert was received from Keeper Security.'
+            }
+          ]
+        },
+        {
+          type: 'heading',
+          attrs: { level: 4 },
+          content: [
+            {
+              type: 'text',
+              text: 'Alert Details'
+            }
+          ]
+        }
+      ]
+    };
+    
+    // Add key alert information as bullet list
+    const alertDetails = [];
+    
+    if (payload.alert_name) {
+      alertDetails.push({
+        type: 'listItem',
+        content: [{
+          type: 'paragraph',
+          content: [{
+            type: 'text',
+            text: `Alert Name: `,
+            marks: [{ type: 'strong' }]
+          }, {
+            type: 'text',
+            text: payload.alert_name
+          }]
+        }]
+      });
+    }
+    
+    if (payload.audit_event) {
+      alertDetails.push({
+        type: 'listItem',
+        content: [{
+          type: 'paragraph',
+          content: [{
+            type: 'text',
+            text: `Audit Event: `,
+            marks: [{ type: 'strong' }]
+          }, {
+            type: 'text',
+            text: payload.audit_event
+          }]
+        }]
+      });
+    }
+    
+    if (payload.category) {
+      alertDetails.push({
+        type: 'listItem',
+        content: [{
+          type: 'paragraph',
+          content: [{
+            type: 'text',
+            text: `Category: `,
+            marks: [{ type: 'strong' }]
+          }, {
+            type: 'text',
+            text: payload.category
+          }]
+        }]
+      });
+    }
+    
+    if (payload.username) {
+      alertDetails.push({
+        type: 'listItem',
+        content: [{
+          type: 'paragraph',
+          content: [{
+            type: 'text',
+            text: `Username: `,
+            marks: [{ type: 'strong' }]
+          }, {
+            type: 'text',
+            text: payload.username
+          }]
+        }]
+      });
+    }
+    
+    if (payload.remote_address) {
+      alertDetails.push({
+        type: 'listItem',
+        content: [{
+          type: 'paragraph',
+          content: [{
+            type: 'text',
+            text: `Remote Address: `,
+            marks: [{ type: 'strong' }]
+          }, {
+            type: 'text',
+            text: payload.remote_address
+          }]
+        }]
+      });
+    }
+    
+    if (payload.timestamp) {
+      alertDetails.push({
+        type: 'listItem',
+        content: [{
+          type: 'paragraph',
+          content: [{
+            type: 'text',
+            text: `Timestamp: `,
+            marks: [{ type: 'strong' }]
+          }, {
+            type: 'text',
+            text: payload.timestamp
+          }]
+        }]
+      });
+    }
+    
+    if (payload.agent_uid) {
+      alertDetails.push({
+        type: 'listItem',
+        content: [{
+          type: 'paragraph',
+          content: [{
+            type: 'text',
+            text: `Agent UID: `,
+            marks: [{ type: 'strong' }]
+          }, {
+            type: 'text',
+            text: payload.agent_uid
+          }]
+        }]
+      });
+    }
+    
+    if (payload.request_uid) {
+      alertDetails.push({
+        type: 'listItem',
+        content: [{
+          type: 'paragraph',
+          content: [{
+            type: 'text',
+            text: `Request UID: `,
+            marks: [{ type: 'strong' }]
+          }, {
+            type: 'text',
+            text: payload.request_uid
+          }]
+        }]
+      });
+    }
+    
+    if (alertDetails.length > 0) {
+      adfDescription.content.push({
+        type: 'bulletList',
+        content: alertDetails
+      });
+    }
+    
+    // Add full JSON payload as code block
+    adfDescription.content.push({
+      type: 'heading',
+      attrs: { level: 4 },
+      content: [
+        {
+          type: 'text',
+          text: 'Full Payload'
+        }
+      ]
+    });
+    
+    adfDescription.content.push({
+      type: 'codeBlock',
+      attrs: { language: 'json' },
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(payload, null, 2)
+        }
+      ]
+    });
+    
+    // Determine labels based on payload
+    const labels = ['keeper-webhook'];
+    
+    // Add category label (e.g., endpoint_privilege_manager)
+    if (payload.category) {
+      labels.push(payload.category.toLowerCase().replace(/_/g, '-'));
+    }
+    
+    // Add audit event label (e.g., approval_request_created)
+    if (payload.audit_event) {
+      labels.push(payload.audit_event.toLowerCase().replace(/_/g, '-'));
+    }
+    
+    // Add alert name as label if present
+    if (payload.alert_name) {
+      labels.push(payload.alert_name.toLowerCase().replace(/\s+/g, '-'));
+    }
+    
+    // Add severity label if present
+    if (payload.severity) {
+      labels.push(`severity-${payload.severity.toLowerCase()}`);
+    }
+    
+    // Add request_uid as label for easy searching
+    if (payload.request_uid) {
+      labels.push(`request-${payload.request_uid}`);
+    }
+    
+    // Create the Jira issue
+    const response = await asApp().requestJira(
+      route`/rest/api/3/issue`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            project: {
+              key: config.projectKey
+            },
+            summary: summary,
+            description: adfDescription,
+            issuetype: {
+              name: config.issueType
+            },
+            labels: labels
+          }
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      return {
+        statusCode: response.status,
+        body: JSON.stringify({
+          success: false,
+          error: `Failed to create issue: ${errorText}`
+        })
+      };
+    }
+    
+    const issue = await response.json();
+    
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        success: true,
+        message: 'Issue created successfully',
+        issueKey: issue.key,
+        issueId: issue.id
+      })
+    };
+    
+  } catch (error) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        success: false,
+        error: error.message || 'Internal server error'
+      })
+    };
+  }
+}
+
+// Export resolver for frontend calls (getConfig, setConfig, testConnection, getIssueContext, executeKeeperCommand, executeKeeperAction, getKeeperRecords, getKeeperFolders, getRecordTypes, getRecordTypeTemplate, getKeeperRecordDetails, rejectKeeperRequest, getUserRole, getGlobalUserRole, getProjectAdmins, storeRequestData, getStoredRequestData, activateKeeperPanel, clearStoredRequestData, getWebTriggerUrl, getWebTriggerConfig, setWebTriggerConfig, getJiraProjects, getProjectIssueTypes, testWebTrigger, testWebTriggerWithPayload, getWebhookTickets)
 export const handler = resolver.getDefinitions();
 
 // Export same resolver for issue panel - they can share the same functions

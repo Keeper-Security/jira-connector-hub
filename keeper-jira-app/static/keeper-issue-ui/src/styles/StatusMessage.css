@@ -1,0 +1,12 @@
+/* StatusMessage component styles */
+.status-message-wrapper {
+  margin-bottom: 16px;
+}
+
+.status-message-content {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1A1A1A;
+}
+
+

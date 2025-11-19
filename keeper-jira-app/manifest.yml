@@ -20,6 +20,12 @@ modules:
       handler: index.handler
     - key: keeperIssueResolver
       handler: index.issuePanelHandler
+    - key: keeperWebTriggerHandler
+      handler: index.webTriggerHandler
+      
+  webtrigger:
+    - key: keeper-alert-trigger
+      function: keeperWebTriggerHandler
       
 resources:
   - key: keeper-ui

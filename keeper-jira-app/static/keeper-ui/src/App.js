@@ -2,7 +2,9 @@ import React, { useState, useEffect } from "react";
 import { router } from "@forge/bridge";
 
 // Modular components
-import { TabBar, ConfigTab, PedmTab } from "./components";
+import { TabBar, ConfigTab, PedmTab, WebTriggerConfig } from "./components";
+import SectionMessage from "@atlaskit/section-message";
+import StatusMessage from "./components/common/StatusMessage";
 
 // Hooks
 import { useConfig } from "./hooks/useConfig";
@@ -19,6 +21,7 @@ const App = () => {
   const [activeTab, setActiveTab] = useState("config");
   const [isAdmin, setIsAdmin] = useState(false);
   const [isCheckingAdmin, setIsCheckingAdmin] = useState(true);
+  const [pedmStatusMessage, setPedmStatusMessage] = useState(null);
   
   // Use custom hook for configuration management
   const configHook = useConfig();
@@ -81,13 +84,42 @@ const App = () => {
             />
           )}
 
-          {/* PEDM Tab - Fully self-contained component */}
+          {/* Endpoint Privilege Manager Tab - Web Trigger Configuration */}
           {activeTab === "pedm" && (
-            <PedmTab
-              isAdmin={isAdmin}
-              isCheckingAdmin={isCheckingAdmin}
-              activeTab={activeTab}
-            />
+            <>
+              <h2 className="config-tab-title">
+                Endpoint Privilege Manager
+              </h2>
+              <p className="config-tab-subtitle">
+                Configure web trigger settings for Keeper Security alerts and ITSM project integration.
+              </p>
+              
+              {isCheckingAdmin ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#5E6C84' }}>
+                  <p>Checking admin permissions...</p>
+                </div>
+              ) : !isAdmin ? (
+                <div className="config-tab-admin-check">
+                  <SectionMessage appearance="warning" title="Access Restricted">
+                    <p className="config-tab-section-message">
+                      Only Jira Administrators or Project Administrators can access this configuration page. 
+                      Please contact your Jira administrator if you need to modify these settings.
+                    </p>
+                  </SectionMessage>
+                </div>
+              ) : (
+                <>
+                  <StatusMessage 
+                    message={pedmStatusMessage} 
+                    onDismiss={() => setPedmStatusMessage(null)} 
+                  />
+                  <WebTriggerConfig
+                    statusMessage={pedmStatusMessage}
+                    setStatusMessage={setPedmStatusMessage}
+                  />
+                </>
+              )}
+            </>
           )}
 
           {/* Setup/Prerequisites Tab */}

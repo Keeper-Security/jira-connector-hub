@@ -12,7 +12,7 @@ import '../../styles/TabBar.css';
 const TabBar = ({ activeTab, onTabChange, isAdmin }) => {
   const tabs = [
     { id: TABS.CONFIG, label: "Configuration", icon: SettingsIcon, requiresAdmin: true },
-    { id: TABS.PEDM, label: "PEDM Requests", icon: ListIcon, requiresAdmin: false },
+    { id: TABS.PEDM, label: "Endpoint Privilege Manager", icon: ListIcon, requiresAdmin: false },
     { id: TABS.PREREQ, label: "Prerequisites", icon: BookIcon, requiresAdmin: false },
     { id: TABS.ABOUT, label: "About", icon: InfoIcon, requiresAdmin: false }
   ];

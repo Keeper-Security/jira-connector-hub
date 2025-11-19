@@ -77,3 +77,72 @@ export const denyPedmRequest = async (approvalUid) => {
   });
 };
 
+/**
+ * Get web trigger URL
+ * @returns {Promise<Object>} - Response object with URL
+ */
+export const getWebTriggerUrl = async () => {
+  return await invoke("getWebTriggerUrl");
+};
+
+/**
+ * Get web trigger configuration
+ * @returns {Promise<Object>} - Web trigger configuration
+ */
+export const getWebTriggerConfig = async () => {
+  return await invoke("getWebTriggerConfig");
+};
+
+/**
+ * Save web trigger configuration
+ * @param {Object} config - Configuration object
+ * @returns {Promise<Object>} - Response object
+ */
+export const saveWebTriggerConfig = async (config) => {
+  return await invoke("setWebTriggerConfig", { payload: config });
+};
+
+/**
+ * Get all Jira projects
+ * @returns {Promise<Object>} - Response object with projects
+ */
+export const getJiraProjects = async () => {
+  return await invoke("getJiraProjects");
+};
+
+/**
+ * Get issue types for a project
+ * @param {string} projectKey - Project key
+ * @returns {Promise<Object>} - Response object with issue types
+ */
+export const getProjectIssueTypes = async (projectKey) => {
+  return await invoke("getProjectIssueTypes", { payload: { projectKey } });
+};
+
+/**
+ * Test web trigger by creating a test issue
+ * @param {string} projectKey - Project key
+ * @param {string} issueType - Issue type name
+ * @returns {Promise<Object>} - Response object
+ */
+export const testWebTrigger = async (projectKey, issueType) => {
+  return await invoke("testWebTrigger", { payload: { projectKey, issueType } });
+};
+
+/**
+ * Test web trigger with full payload (simulating actual webhook call)
+ * @param {Object} payload - Test payload data
+ * @returns {Promise<Object>} - Response object
+ */
+export const testWebTriggerWithPayload = async (payload) => {
+  return await invoke("testWebTriggerWithPayload", { payload });
+};
+
+/**
+ * Get tickets created by webhook
+ * @returns {Promise<Object>} - Response object with tickets array
+ */
+export const getWebhookTickets = async () => {
+  return await invoke("getWebhookTickets");
+};
+

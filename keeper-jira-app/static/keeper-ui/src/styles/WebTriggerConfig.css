@@ -1,0 +1,455 @@
+/* Web Trigger Configuration Styles */
+
+.web-trigger-config-container {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.web-trigger-section-title {
+  font-weight: 600;
+  font-size: 18px;
+  margin-bottom: 24px;
+  color: #172B4D;
+}
+
+/* Web Trigger URL Section */
+.web-trigger-url-section {
+  background: #F4F5F7;
+  border: 1px solid #DFE1E6;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.web-trigger-url-header {
+  margin-bottom: 16px;
+}
+
+.web-trigger-url-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #172B4D;
+  margin-bottom: 4px;
+}
+
+.web-trigger-url-description {
+  font-size: 13px;
+  color: #5E6C84;
+  line-height: 20px;
+}
+
+.web-trigger-url-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.web-trigger-url-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: white;
+  border: 1px solid #DFE1E6;
+  border-radius: 4px;
+  color: #5E6C84;
+  font-size: 14px;
+}
+
+.web-trigger-url-display {
+  background: white;
+  border: 1px solid #DFE1E6;
+  border-radius: 4px;
+  padding: 12px;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  color: #172B4D;
+  word-break: break-all;
+  overflow-wrap: break-word;
+}
+
+.web-trigger-url-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.web-trigger-url-button {
+  background-color: #FFFFFF;
+  color: #4285F4;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 2px solid #4285F4;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.web-trigger-url-button:hover:not(:disabled) {
+  background-color: #F4F7FE;
+}
+
+.web-trigger-url-button:disabled {
+  background-color: #F4F5F7;
+  color: #B3D4FF;
+  border-color: #DFE1E6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.web-trigger-url-button.copied {
+  background-color: #E8F5E8;
+  color: #00875A;
+  border-color: #00875A;
+}
+
+.web-trigger-url-button.copied:hover {
+  background-color: #D3F1D3;
+}
+
+.web-trigger-test-button {
+  background-color: #FFFFFF;
+  color: #4285F4;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 2px solid #4285F4;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.web-trigger-test-button:hover:not(:disabled) {
+  background-color: #F4F7FE;
+}
+
+.web-trigger-test-button:disabled {
+  background-color: #F4F5F7;
+  color: #B3D4FF;
+  border-color: #DFE1E6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.web-trigger-view-tickets-button {
+  background-color: #FFFFFF;
+  color: #00875A;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 2px solid #00875A;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.web-trigger-view-tickets-button:hover:not(:disabled) {
+  background-color: #E8F5E8;
+}
+
+.web-trigger-view-tickets-button:disabled {
+  background-color: #F4F5F7;
+  color: #B3D4FF;
+  border-color: #DFE1E6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Target Project Configuration Section */
+.web-trigger-project-section {
+  margin-top: 24px;
+}
+
+.web-trigger-project-header {
+  margin-bottom: 16px;
+}
+
+.web-trigger-project-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #172B4D;
+  margin-bottom: 4px;
+}
+
+.web-trigger-project-description {
+  font-size: 13px;
+  color: #5E6C84;
+  line-height: 20px;
+}
+
+.web-trigger-form {
+  background: #FAFBFC;
+  border: 1px solid #DFE1E6;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.web-trigger-form-field {
+  margin-bottom: 20px;
+}
+
+.web-trigger-form-field:last-of-type {
+  margin-bottom: 0;
+}
+
+.web-trigger-field-label {
+  display: block;
+  font-weight: 600;
+  font-size: 13px;
+  color: #172B4D;
+  margin-bottom: 6px;
+}
+
+.web-trigger-issue-type-description {
+  font-size: 12px;
+  color: #5E6C84;
+  margin-bottom: 8px;
+  line-height: 18px;
+}
+
+.web-trigger-select {
+  width: 100%;
+}
+
+.web-trigger-save-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #DFE1E6;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.web-trigger-save-section button {
+  background-color: #4285F4;
+  color: #FFFFFF;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.web-trigger-save-section button:hover:not(:disabled) {
+  background-color: #3367D6;
+}
+
+.web-trigger-save-section button:disabled {
+  background-color: #B3D4FF;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.web-trigger-config-display {
+  margin-top: 16px;
+  padding: 12px;
+  background: #DEEBFF;
+  border: 1px solid #B3D4FF;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #0747A6;
+  text-align: center;
+}
+
+.web-trigger-config-display strong {
+  font-weight: 600;
+  color: #0052CC;
+}
+
+/* React Select Customization - Matching Atlaskit/JIRA Style */
+.web-trigger-config-container .react-select__control {
+  border: 2px solid #DFE1E6;
+  border-radius: 3px;
+  min-height: 40px;
+  background-color: #FAFBFC;
+  box-shadow: none;
+  transition: all 0.15s ease-in-out;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+}
+
+.web-trigger-config-container .react-select__control:hover {
+  border-color: #B3D4FF;
+  background-color: #FFFFFF;
+  cursor: pointer;
+}
+
+.web-trigger-config-container .react-select__control--is-focused {
+  border-color: #4C9AFF;
+  box-shadow: 0 0 0 1px #4C9AFF;
+  background-color: #FFFFFF;
+}
+
+.web-trigger-config-container .react-select__control--is-focused:hover {
+  border-color: #4C9AFF;
+}
+
+.web-trigger-config-container .react-select__control--is-disabled {
+  background-color: #F4F5F7;
+  border-color: #DFE1E6;
+  cursor: not-allowed;
+}
+
+.web-trigger-config-container .react-select__value-container {
+  padding: 2px 8px;
+}
+
+.web-trigger-config-container .react-select__input-container {
+  margin: 0;
+  padding: 0;
+}
+
+.web-trigger-config-container .react-select__menu {
+  z-index: 99999 !important;
+  position: absolute !important;
+  margin-top: 4px;
+  box-shadow: 0 4px 8px -2px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
+  border-radius: 3px;
+  border: none;
+}
+
+.web-trigger-config-container .react-select__menu-portal {
+  z-index: 99999 !important;
+}
+
+.web-trigger-config-container .react-select__menu-list {
+  padding: 8px 0;
+  max-height: 300px;
+}
+
+.web-trigger-config-container .react-select__option {
+  font-size: 14px;
+  cursor: pointer;
+  padding: 8px 12px;
+  color: #172B4D;
+  transition: background-color 0.1s ease;
+}
+
+.web-trigger-config-container .react-select__option--is-focused {
+  background-color: #F4F5F7;
+  color: #172B4D;
+}
+
+.web-trigger-config-container .react-select__option--is-selected {
+  background-color: #DEEBFF;
+  color: #0052CC;
+  font-weight: 600;
+}
+
+.web-trigger-config-container .react-select__option--is-selected.react-select__option--is-focused {
+  background-color: #B3D4FF;
+  color: #0052CC;
+}
+
+.web-trigger-config-container .react-select__placeholder {
+  color: #6B778C;
+  font-size: 14px;
+}
+
+.web-trigger-config-container .react-select__single-value {
+  color: #172B4D;
+  font-size: 14px;
+}
+
+.web-trigger-config-container .react-select__loading-indicator {
+  color: #0052CC;
+}
+
+.web-trigger-config-container .react-select__indicator-separator {
+  background-color: #DFE1E6;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.web-trigger-config-container .react-select__dropdown-indicator {
+  color: #42526E;
+  padding: 8px;
+  transition: color 0.15s ease-in-out;
+}
+
+.web-trigger-config-container .react-select__dropdown-indicator:hover {
+  color: #172B4D;
+}
+
+.web-trigger-config-container .react-select__clear-indicator {
+  color: #6B778C;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.web-trigger-config-container .react-select__clear-indicator:hover {
+  color: #172B4D;
+}
+
+.web-trigger-config-container .react-select__loading-message,
+.web-trigger-config-container .react-select__no-options-message {
+  color: #6B778C;
+  font-size: 14px;
+  padding: 12px;
+  text-align: center;
+}
+
+/* Search Input Styling */
+.web-trigger-config-container .react-select__input {
+  color: #172B4D;
+  font-size: 14px;
+}
+
+.web-trigger-config-container .react-select__input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Clear Indicator */
+.web-trigger-config-container .react-select__clear-indicator {
+  color: #6B778C;
+  padding: 8px;
+  cursor: pointer;
+  transition: color 0.15s ease-in-out;
+}
+
+.web-trigger-config-container .react-select__clear-indicator:hover {
+  color: #DE350B;
+}
+
+/* Multi-value (if using multi-select in future) */
+.web-trigger-config-container .react-select__multi-value {
+  background-color: #DEEBFF;
+  border-radius: 3px;
+}
+
+.web-trigger-config-container .react-select__multi-value__label {
+  color: #0052CC;
+  padding: 3px 6px;
+}
+
+.web-trigger-config-container .react-select__multi-value__remove {
+  color: #0052CC;
+  cursor: pointer;
+}
+
+.web-trigger-config-container .react-select__multi-value__remove:hover {
+  background-color: #0052CC;
+  color: white;
+}
+
+/* Loading state for dropdown indicator */
+.web-trigger-config-container .react-select__indicators {
+  display: flex;
+  align-items: center;
+}
+
+/* Group headings (if using grouped options in future) */
+.web-trigger-config-container .react-select__group-heading {
+  color: #5E6C84;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+}
+

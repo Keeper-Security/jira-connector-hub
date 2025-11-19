@@ -14,6 +14,7 @@
     "@atlaskit/form": "^12.5.0",
     "@atlaskit/icon": "^28.1.2",
     "@atlaskit/section-message": "^8.7.2",
+    "@atlaskit/select": "^21.4.0",
     "@atlaskit/textfield": "^8.0.10",
     "@forge/bridge": "5.4.1",
     "react": "^18.2.0",

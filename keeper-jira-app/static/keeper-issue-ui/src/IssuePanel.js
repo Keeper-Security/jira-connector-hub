@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from "react";
-import { invoke } from "@forge/bridge";
 
 import Button from "@atlaskit/button";
 import SectionMessage from "@atlaskit/section-message";
@@ -11,81 +10,15 @@ import ErrorIcon from "@atlaskit/icon/glyph/error";
 import LockIcon from "@atlaskit/icon/glyph/lock";
 import CrossIcon from "@atlaskit/icon/glyph/cross";
 
-// Keeper action options with required fields based on CLI documentation
-const keeperActionOptions = [
-  { 
-    value: 'record-add', 
-    label: 'Create New Secret', 
-    description: 'Create new secret after approval.',
-    fields: [
-      { name: 'recordType', label: 'Record Type', type: 'select', required: true, options: [], placeholder: 'Select record type' }
-    ]
-  },
-  { 
-    value: 'record-update', 
-    label: 'Update Record',
-    description: 'Update existing record fields. Only fill in the fields you want to change.',
-    fields: [
-      { name: 'record', label: 'Record ID/Title', type: 'text', required: true, placeholder: 'Record ID or title to update' },
-      { name: 'title', label: 'Title', type: 'text', required: false, placeholder: 'Title' },
-      { name: 'recordType', label: 'Record Type', type: 'select', required: false, options: [], placeholder: 'Record Type' },
-      { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username' },
-      { name: 'password', label: 'Password', type: 'text', required: false, placeholder: 'Password' },
-      { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'URL' },
-      { name: 'email', label: 'Email', type: 'email', required: false, placeholder: 'Email' },
-      { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Notes' },
-      { name: 'force', label: 'Force Update', type: 'checkbox', required: false, description: 'Ignore warnings and force the update' }
-    ]
-  },
-  { 
-    value: 'record-permission', 
-    label: 'Record Permission', 
-    description: 'Grant or revoke record permissions for all users in shared folder.',
-    requiresSharedFolderSelection: true,
-    fields: [
-      { name: 'sharedFolder', label: 'Shared Folder', type: 'folder-select', required: true, placeholder: 'Select shared folder' },
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'revoke'], placeholder: 'Select action' },
-      { name: 'can_share', label: 'Can Share Records', type: 'checkbox', required: false, description: 'Allow sharing records' },
-      { name: 'can_edit', label: 'Can Edit Records', type: 'checkbox', required: false, description: 'Allow modifying records in the folder' },
-      { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply permission changes to all sub folders' },
-      { name: 'dry_run', label: 'Dry Run', type: 'checkbox', required: false, description: 'Display permission changes without actually changing them' }
-    ]
-  },
-  { 
-    value: 'share-record', 
-    label: 'Share Record', 
-    description: 'Grant or revoke user access to record(s).',
-    fields: [
-      { name: 'record', label: 'Record UID/Path', type: 'text', required: true, placeholder: 'Record UID, path, or folder path' },
-      { name: 'user', label: 'Email', type: 'email', required: true, placeholder: 'Email of account to edit permissions for' },
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'revoke', 'owner', 'cancel'], placeholder: 'Select action' },
-      { name: 'can_share', label: 'Allow Sharing', type: 'checkbox', required: false, description: 'Allow user to share record' },
-      { name: 'can_write', label: 'Allow Writing', type: 'checkbox', required: false, description: 'Allow user to modify record' },
-      { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply to shared folder hierarchy' },
-      { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
-      { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
-      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 1d, 2h, 30mi', description: 'Period until expiration (e.g., 1d=1 day, 2h=2 hours, 30mi=30 minutes)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
-    ]
-  },
-  { 
-    value: 'share-folder', 
-    label: 'Share Folder', 
-    description: 'Grant or remove user/team access to folder with specific permissions.',
-    requiresSharedFolderSelection: true,
-    fields: [
-      { name: 'folder', label: 'Shared Folder', type: 'folder-select', required: true, placeholder: 'Select shared folder' },
-      { name: 'user', label: 'Email/Team', type: 'text', required: true, placeholder: 'Email, team name, or * for all' },
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'remove'], placeholder: 'Select action' },
-      { name: 'manage_records', label: 'Can Manage Records', type: 'checkbox', required: false, description: 'Allow user to manage records in folder' },
-      { name: 'manage_users', label: 'Can Manage Users', type: 'checkbox', required: false, description: 'Allow user to manage other users access' },
-      { name: 'can_share', label: 'Can Share Records', type: 'checkbox', required: false, description: 'Allow user to share records (records only)' },
-      { name: 'can_edit', label: 'Can Edit Records', type: 'checkbox', required: false, description: 'Allow user to modify records (records only)' },
-      { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
-      { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
-      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 1d, 2h, 30mi', description: 'Period until expiration (e.g., 1d=1 day, 2h=2 hours, 30mi=30 minutes)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
-    ]
-  }
-];
+// Modular imports
+import { Loading, StatusMessage as Status, Modal } from "./components";
+import { KEEPER_ACTION_OPTIONS, PAGINATION_SETTINGS } from "./constants";
+import * as api from "./services/api";
+import { handleApiError } from "./utils/errorHandler";
+import "./styles/IssuePanel.css";
+
+// Keeper action options - using imported constant
+const keeperActionOptions = KEEPER_ACTION_OPTIONS;
 
 const IssuePanel = () => {
   const [issueContext, setIssueContext] = useState(null);
@@ -185,12 +118,16 @@ const IssuePanel = () => {
   const [pendingExpirationValue, setPendingExpirationValue] = useState(null);
   
   
-  const itemsPerPage = 5;
-  const recordsPerPage = 3;
-  const foldersPerPage = 3;
-  const adminsPerPage = 3;
+  // Pagination settings - using imported constants
+  const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
+  const recordsPerPage = PAGINATION_SETTINGS.RECORDS_PER_PAGE;
+  const foldersPerPage = PAGINATION_SETTINGS.FOLDERS_PER_PAGE;
+  const adminsPerPage = PAGINATION_SETTINGS.ADMINS_PER_PAGE;
 
-  // Centralized error handler for API calls
+  // Centralized error handler for API calls - using imported function
+  const handleError = (error, defaultMessage = "An error occurred") => handleApiError(error, defaultMessage);
+  
+  // Keep old function name for compatibility
   const handleApiError = (error, defaultMessage = "An error occurred") => {
     // Helper function to check if content contains HTML
     const containsHtml = (text) => {
@@ -356,7 +293,7 @@ const IssuePanel = () => {
   const fetchKeeperRecords = async () => {
     setLoadingRecords(true);
     try {
-      const result = await invoke("getKeeperRecords");
+      const result = await api.getKeeperRecords();
       setKeeperRecords(result.records || []);
     } catch (error) {
       // Handle error
@@ -377,7 +314,7 @@ const IssuePanel = () => {
   const fetchKeeperFolders = async () => {
     setLoadingFolders(true);
     try {
-      const result = await invoke("getKeeperFolders");
+      const result = await api.getKeeperFolders();
       setKeeperFolders(result.folders || []);
     } catch (error) {
       // Handle error
@@ -401,7 +338,7 @@ const IssuePanel = () => {
   const fetchKeeperRecordDetails = async (recordUid, preserveStoredData = null) => {
     setLoadingRecordDetails(true);
     try {
-      const result = await invoke("getKeeperRecordDetails", { recordUid });
+      const result = await api.getKeeperRecordDetails(recordUid);
       
       // The API returns { success: true, recordDetails: {...} }
       // The recordDetails contains the actual record data
@@ -658,7 +595,7 @@ const IssuePanel = () => {
   const fetchRecordTypes = async () => {
     setLoadingRecordTypes(true);
     try {
-      const result = await invoke("getRecordTypes");
+      const result = await api.getRecordTypes();
       
       // Transform the response to match the select options format
       if (result && result.data && Array.isArray(result.data)) {
@@ -698,12 +635,12 @@ const IssuePanel = () => {
       setIsLoadingStoredData(true);
       
       // Check if current user is admin by calling the backend
-      const userRole = await invoke("getUserRole", { issueKey: context.issueKey });
+      const userRole = await api.getUserRole(context.issueKey);
       setIsAdmin(userRole.isAdmin || false);
       
       // If admin, try to load any stored request data
       if (userRole.isAdmin) {
-        const storedData = await invoke("getStoredRequestData", { issueKey: context.issueKey });
+        const storedData = await api.getStoredRequestData(context.issueKey);
         if (storedData && storedData.data) {
           setStoredRequestData(storedData.data);
           setHasStoredData(true);
@@ -749,7 +686,7 @@ const IssuePanel = () => {
         }
       } else {
         // For regular users, check if they have previously stored data
-        const storedData = await invoke("getStoredRequestData", { issueKey: context.issueKey });
+        const storedData = await api.getStoredRequestData(context.issueKey);
         if (storedData && storedData.data) {
           setHasStoredData(true);
           // Pre-populate their own stored data
@@ -813,9 +750,7 @@ const IssuePanel = () => {
     
     setLoadingAdmins(true);
     try {
-      const result = await invoke("getProjectAdmins", { 
-        issueKey: issueContext.issueKey
-      });
+      const result = await api.getProjectAdmins(issueContext.projectKey, issueContext.issueKey);
       
       if (result.success && result.admins && result.admins.length > 0) {
         setProjectAdmins(result.admins);
@@ -877,12 +812,12 @@ const IssuePanel = () => {
         hour12: false
       });
       
-      const result = await invoke("storeRequestData", { 
-        issueKey: issueContext.issueKey,
+      const result = await api.storeRequestData(
+        issueContext.issueKey,
         requestData,
         formattedTimestamp,
-        assigneeAccountId: adminAccountId
-      });
+        adminAccountId
+      );
       
       if (result.success) {
         setStoredRequestData(requestData);
@@ -964,11 +899,11 @@ const IssuePanel = () => {
           hour12: false
         });
         
-        const result = await invoke("storeRequestData", { 
-          issueKey: issueContext.issueKey,
+        const result = await api.storeRequestData(
+          issueContext.issueKey,
           requestData,
           formattedTimestamp
-        });
+        );
         
         if (result.success) {
           setStoredRequestData(requestData);
@@ -1235,7 +1170,7 @@ const IssuePanel = () => {
       }
       
       // Pass issueKey to the backend
-      const result = await invoke("clearStoredRequestData", { issueKey: issueContext.issueKey });
+      const result = await api.clearStoredRequestData(issueContext.issueKey);
       
       if (!result || !result.success) {
         throw new Error(result?.error || 'Failed to clear stored data');
@@ -1291,7 +1226,7 @@ const IssuePanel = () => {
   const fetchAddressRecords = async () => {
     setLoadingAddressRecords(true);
     try {
-      const result = await invoke("getKeeperRecords");
+      const result = await api.getKeeperRecords();
       
       // Filter for address type records
       const addressRecords = (result.records || []).filter(record => {
@@ -1319,7 +1254,7 @@ const IssuePanel = () => {
   const fetchAddressTemplate = async () => {
     setLoadingAddressTemplate(true);
     try {
-      const result = await invoke("getRecordTypeTemplate", { recordType: "address" });
+      const result = await api.getRecordTypeTemplate("address");
       
       if (result && result.data) {
         setAddressTemplate(result.data);
@@ -1476,7 +1411,7 @@ const IssuePanel = () => {
     setLoadingTemplate(true);
     
     try {
-      const result = await invoke("getRecordTypeTemplate", { recordType });
+      const result = await api.getRecordTypeTemplate(recordType);
         
         if (result && result.template) {
           setRecordTypeTemplate(result.template);
@@ -1993,7 +1928,7 @@ const IssuePanel = () => {
     setLoadingTemplate(true);
     
     try {
-      const result = await invoke("getRecordTypeTemplate", { recordType });
+      const result = await api.getRecordTypeTemplate(recordType);
         
         if (result && result.template) {
           const template = result.template;
@@ -3450,45 +3385,24 @@ const IssuePanel = () => {
         const lastField = groupFields.find(f => f.subField === 'last');
 
         renderElements.push(
-          <div key={`group-${groupType}`} style={{ marginBottom: "20px" }}>
-            <div style={{ 
-              fontSize: "14px", 
-              fontWeight: "600", 
-              color: "#1A1A1A", 
-              marginBottom: "8px" 
-            }}>
+          <div key={`group-${groupType}`} className="field-group">
+            <div className="field-group-header">
               {groupLabel}
             </div>
             
             {/* First and Middle Name Row */}
-            <div style={{ 
-              display: "flex", 
-              gap: "12px", 
-              marginBottom: "12px" 
-            }}>
+            <div className="field-row">
               {firstField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
-                    {firstField.label} {firstField.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
+                <div className="field-col">
+                  <label className="form-label">
+                    {firstField.label} {firstField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                   </label>
                   {renderFormInput(firstField)}
                 </div>
               )}
               {middleField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
+                <div className="field-col">
+                  <label className="form-label">
                     {middleField.label}
                   </label>
                   {renderFormInput(middleField)}
@@ -3498,15 +3412,9 @@ const IssuePanel = () => {
             
             {/* Last Name Row */}
             {lastField && (
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: "4px", 
-                  fontSize: "13px", 
-                  fontWeight: "500", 
-                  color: "#1A1A1A" 
-                }}>
-                  {lastField.label} {lastField.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
+              <div className="mb-12">
+                <label className="form-label">
+                  {lastField.label} {lastField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                 </label>
                 {renderFormInput(lastField)}
               </div>
@@ -3520,61 +3428,34 @@ const IssuePanel = () => {
         const typeField = groupFields.find(f => f.subField === 'type');
 
         renderElements.push(
-          <div key={`group-${groupType}`} style={{ marginBottom: "20px" }}>
-            <div style={{ 
-              fontSize: "14px", 
-              fontWeight: "600", 
-              color: "#1A1A1A", 
-              marginBottom: "8px" 
-            }}>
+          <div key={`group-${groupType}`} className="field-group">
+            <div className="field-group-header">
               {groupLabel}
             </div>
             
             {/* Phone Number */}
             {numberField && (
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: "4px", 
-                  fontSize: "13px", 
-                  fontWeight: "500", 
-                  color: "#1A1A1A" 
-                }}>
-                  {numberField.label} {numberField.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
+              <div className="mb-12">
+                <label className="form-label">
+                  {numberField.label} {numberField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                 </label>
                 {renderFormInput(numberField)}
               </div>
             )}
             
             {/* Extension and Type Row */}
-            <div style={{ 
-              display: "flex", 
-              gap: "12px", 
-              marginBottom: "12px" 
-            }}>
+            <div className="field-row">
               {extField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
+                <div className="field-col">
+                  <label className="form-label">
                     {extField.label}
                   </label>
                   {renderFormInput(extField)}
                 </div>
               )}
               {typeField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
+                <div className="field-col">
+                  <label className="form-label">
                     {typeField.label}
                   </label>
                   {renderFormInput(typeField)}
@@ -3591,61 +3472,34 @@ const IssuePanel = () => {
         const otherTypeField = groupFields.find(f => f.subField === 'otherType');
 
         renderElements.push(
-          <div key={`group-${groupType}`} style={{ marginBottom: "20px" }}>
-            <div style={{ 
-              fontSize: "14px", 
-              fontWeight: "600", 
-              color: "#1A1A1A", 
-              marginBottom: "8px" 
-            }}>
+          <div key={`group-${groupType}`} className="field-group">
+            <div className="field-group-header">
               {groupLabel}
             </div>
             
             {/* Account Number */}
             {accountNumberField && (
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: "4px", 
-                  fontSize: "13px", 
-                  fontWeight: "500", 
-                  color: "#1A1A1A" 
-                }}>
-                  {accountNumberField.label} {accountNumberField.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
+              <div className="mb-12">
+                <label className="form-label">
+                  {accountNumberField.label} {accountNumberField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                 </label>
                 {renderFormInput(accountNumberField)}
               </div>
             )}
             
             {/* Routing Number and Account Type Row */}
-            <div style={{ 
-              display: "flex", 
-              gap: "12px", 
-              marginBottom: "12px" 
-            }}>
+            <div className="field-row">
               {routingNumberField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
+                <div className="field-col">
+                  <label className="form-label">
                     {routingNumberField.label}
                   </label>
                   {renderFormInput(routingNumberField)}
                 </div>
               )}
               {accountTypeField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
+                <div className="field-col">
+                  <label className="form-label">
                     {accountTypeField.label}
                   </label>
                   {renderFormInput(accountTypeField)}
@@ -3655,14 +3509,8 @@ const IssuePanel = () => {
             
             {/* Other Account Type */}
             {otherTypeField && (
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: "4px", 
-                  fontSize: "13px", 
-                  fontWeight: "500", 
-                  color: "#1A1A1A" 
-                }}>
+              <div className="mb-12">
+                <label className="form-label">
                   {otherTypeField.label}
                 </label>
                 {renderFormInput(otherTypeField)}
@@ -3673,27 +3521,16 @@ const IssuePanel = () => {
       } else {
         // Render other complex field groups
         renderElements.push(
-          <div key={`group-${groupType}`} style={{ marginBottom: "20px" }}>
-            <div style={{ 
-              fontSize: "14px", 
-              fontWeight: "600", 
-              color: "#1A1A1A", 
-              marginBottom: "8px" 
-            }}>
+          <div key={`group-${groupType}`} className="field-group">
+            <div className="field-group-header">
               {groupLabel}
             </div>
             {groupFields.map((field) => {
               
               return (
-                <div key={field.name} style={{ marginBottom: "12px" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
-                    {field.label} {field.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>}
+                <div key={field.name} className="mb-12">
+                  <label className="form-label">
+                    {field.label} {field.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                   </label>
                 {renderFormInput(field)}
               </div>
@@ -3707,15 +3544,9 @@ const IssuePanel = () => {
     individualFields.forEach((field) => {
       
       renderElements.push(
-        <div key={field.name} style={{ marginBottom: "16px" }}>
-          <label style={{ 
-            display: "block", 
-            marginBottom: "4px", 
-            fontSize: "13px", 
-            fontWeight: "500", 
-            color: "#1A1A1A" 
-          }}>
-            {field.label} {field.required && selectedAction.value !== 'record-update' && <span style={{ color: '#FF5630' }}>*</span>} {field.templateField && <span style={{ color: '#666', fontSize: '11px' }}>(Template)</span>}
+        <div key={field.name} className="mb-16">
+          <label className="form-label">
+            {field.label} {field.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>} {field.templateField && <span className="text-muted text-xs">(Template)</span>}
           </label>
           {renderFormInput(field)}
         </div>
@@ -3771,6 +3602,11 @@ const IssuePanel = () => {
       fetchKeeperRecords();
     }
     
+    // Fetch folders when share-record is selected (for the new folder dropdown)
+    if (selectedAction && selectedAction.value === 'share-record' && !isLoadingStoredData) {
+      fetchKeeperFolders();
+    }
+    
     // Fetch record types when record-add or record-update is selected (but not when loading stored data)
     if (selectedAction && (selectedAction.value === 'record-add' || selectedAction.value === 'record-update') && !isLoadingStoredData) {
       fetchRecordTypes();
@@ -3795,6 +3631,32 @@ const IssuePanel = () => {
 
   // Handle form input changes
   const handleInputChange = (fieldName, value) => {
+    // Special handling for share-record action: mutual exclusivity between record and sharedFolder
+    if (selectedAction?.value === 'share-record') {
+      if (fieldName === 'record' && value) {
+        // When record is selected, clear sharedFolder and disable recursive
+        setFormData(prev => ({
+          ...prev,
+          [fieldName]: value,
+          sharedFolder: null,
+          recursive: false
+        }));
+        setSelectedFolder(null);
+        return;
+      }
+      
+      if (fieldName === 'sharedFolder' && value) {
+        // When sharedFolder is selected, clear record
+        setFormData(prev => ({
+          ...prev,
+          [fieldName]: value,
+          record: null
+        }));
+        setSelectedRecord(null);
+        return;
+      }
+    }
+    
     // Special handling for share-record and share-folder actions: show modal when expiration changes to non-none
     if ((selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder') && fieldName === 'expiration_type') {
       if (value && value !== 'none') {
@@ -4051,25 +3913,199 @@ const IssuePanel = () => {
     
     // For record-update, show different border color when field has current value (either in form or in record)
     const hasCurrentValue = selectedAction?.value === 'record-update' && (value !== '' || currentRecordValue !== '');
-    const borderColor = isFormDisabled ? '#E0E0E0' : 
-                       hasCurrentValue ? '#006644' :
-                       (field.required && !value && selectedAction?.value !== 'record-update') ? '#FF5630' : '#DFE1E6';
-
-    const baseStyle = {
-      width: '100%',
-      padding: '8px 12px',
-      borderRadius: '4px',
-      border: `1px solid ${borderColor}`,
-      fontSize: '14px',
-      backgroundColor: isFormDisabled ? '#F5F5F5' : hasCurrentValue ? '#F8FFF8' : 'white',
-      color: isFormDisabled ? '#999' : '#000',
-      cursor: isFormDisabled ? 'not-allowed' : 'text',
-      outline: 'none',
-      boxSizing: 'border-box'
+    const hasRequiredError = field.required && !value && selectedAction?.value !== 'record-update';
+    
+    // Generate className for input fields based on state
+    const getInputClassName = (additionalClasses = '') => {
+      const classes = ['input-field'];
+      if (isFormDisabled) classes.push('disabled');
+      if (hasCurrentValue) classes.push('has-value');
+      if (hasRequiredError) classes.push('required-error');
+      if (additionalClasses) classes.push(additionalClasses);
+      return classes.join(' ');
     };
 
 
     switch (field.type) {
+      case 'record-select':
+        // Render record dropdown for share-record action
+        const isRecordFieldDisabled = isFormDisabled || formData.sharedFolder || selectedFolder;
+        return (
+          <div className="relative">
+            <input
+              type="text"
+              value={selectedRecord ? selectedRecord.title : ''}
+              placeholder={isRecordFieldDisabled ? 'Disabled (folder selected)' : field.placeholder}
+              disabled={isRecordFieldDisabled}
+              readOnly
+              onClick={() => {
+                if (!isRecordFieldDisabled) {
+                  setShowRecordDropdown(!showRecordDropdown);
+                }
+              }}
+              className={`input-field pointer ${isRecordFieldDisabled ? 'disabled opacity-60' : 'opacity-100'} ${selectedRecord ? 'has-value' : ''}`}
+            />
+            {!isRecordFieldDisabled && (
+              <div className="dropdown-arrow">
+                ▼
+              </div>
+            )}
+            {showRecordDropdown && !isRecordFieldDisabled && keeperRecords.length > 0 && (
+              <>
+                <div
+                  className="dropdown-overlay"
+                  onClick={() => setShowRecordDropdown(false)}
+                />
+                <div className="dropdown-container">
+                  {keeperRecords.map((record, index) => (
+                    <div
+                      key={index}
+                      className="dropdown-item"
+                      onClick={() => {
+                        setSelectedRecord(record);
+                        handleInputChange(field.name, record.record_uid);
+                        setShowRecordDropdown(false);
+                      }}
+                    >
+                      <div className="font-medium text-md text-primary">{record.title}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      
+      case 'folder-select':
+        // Render folder dropdown for share-record action with search and pagination
+        const isFolderFieldDisabled = isFormDisabled || formData.record || selectedRecord;
+        return (
+          <div className="relative">
+            <input
+              type="text"
+              value={selectedFolder ? (selectedFolder.name || selectedFolder.folderPath) : ''}
+              placeholder={isFolderFieldDisabled ? 'Disabled (record selected)' : field.placeholder}
+              disabled={isFolderFieldDisabled}
+              readOnly
+              onClick={() => {
+                if (!isFolderFieldDisabled) {
+                  setShowFolderDropdown(!showFolderDropdown);
+                  if (!showFolderDropdown) {
+                    setFolderSearchTerm('');
+                    setFolderCurrentPage(1);
+                  }
+                }
+              }}
+              className={`input-field pointer ${isFolderFieldDisabled ? 'disabled opacity-60' : 'opacity-100'} ${selectedFolder ? 'has-value' : ''}`}
+            />
+            {!isFolderFieldDisabled && (
+              <div className="dropdown-arrow">
+                ▼
+              </div>
+            )}
+            {showFolderDropdown && !isFolderFieldDisabled && keeperFolders.length > 0 && (() => {
+              // Filter to show only shared folders for share-record action (same logic as share-folder/record-permission)
+              const sharedFolders = selectedAction?.value === 'share-record' 
+                ? keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')))
+                : keeperFolders;
+              
+              // Apply search filter
+              const searchFiltered = sharedFolders.filter(folder =>
+                (folder.name || folder.folderPath || '').toLowerCase().includes(folderSearchTerm.toLowerCase())
+              );
+              
+              // Pagination
+              const totalPages = Math.ceil(searchFiltered.length / foldersPerPage);
+              const startIdx = (folderCurrentPage - 1) * foldersPerPage;
+              const paginatedItems = searchFiltered.slice(startIdx, startIdx + foldersPerPage);
+              
+              return (
+                <>
+                  <div
+                    className="dropdown-overlay"
+                    onClick={() => {
+                      setShowFolderDropdown(false);
+                      setFolderSearchTerm('');
+                      setFolderCurrentPage(1);
+                    }}
+                  />
+                  <div className="folder-dropdown-menu">
+                    {/* Search Input */}
+                    <input
+                      type="text"
+                      value={folderSearchTerm}
+                      onChange={(e) => {
+                        setFolderSearchTerm(e.target.value);
+                        setFolderCurrentPage(1);
+                      }}
+                      placeholder="Search folders..."
+                      autoFocus
+                      className="folder-search-input"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    
+                    {/* Folder List */}
+                    <div className="overflow-y-auto flex-1">
+                      {paginatedItems.length === 0 ? (
+                        <div className="dropdown-no-results">
+                          {sharedFolders.length === 0 ? 'No shared folders found' : 'No matching folders'}
+                        </div>
+                      ) : (
+                        paginatedItems.map((folder, index) => (
+                          <div
+                            key={index}
+                            className="dropdown-item"
+                            onClick={() => {
+                              setSelectedFolder(folder);
+                              handleInputChange(field.name, folder.folderUid || folder.folder_uid);
+                              setShowFolderDropdown(false);
+                              setFolderSearchTerm('');
+                              setFolderCurrentPage(1);
+                            }}
+                          >
+                            <div className="font-medium text-md text-primary">
+                              {folder.name || folder.folderPath}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    
+                    {/* Pagination */}
+                    {totalPages > 1 && (
+                      <div className="pagination-container">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (folderCurrentPage > 1) setFolderCurrentPage(folderCurrentPage - 1);
+                          }}
+                          disabled={folderCurrentPage === 1}
+                          className="pagination-button"
+                        >
+                          Previous
+                        </button>
+                        <span className="pagination-info">
+                          Page {folderCurrentPage} of {totalPages}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (folderCurrentPage < totalPages) setFolderCurrentPage(folderCurrentPage + 1);
+                          }}
+                          disabled={folderCurrentPage === totalPages}
+                          className="pagination-button"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        );
+      
       case 'select':
         if (field.name === 'recordType') {
         }
@@ -4101,7 +4137,7 @@ const IssuePanel = () => {
                 }
               }
             }}
-            style={baseStyle}
+            className={getInputClassName()}
           >
             <option value="">{field.placeholder}</option>
             {field.options?.map(option => {
@@ -4123,7 +4159,7 @@ const IssuePanel = () => {
             onChange={(e) => handleInputChange(field.name, e.target.value)}
             placeholder={field.placeholder}
             rows={3}
-            style={{...baseStyle, resize: 'vertical', fontFamily: 'inherit'}}
+            className={getInputClassName()}
           />
         );
       case 'number':
@@ -4134,10 +4170,15 @@ const IssuePanel = () => {
             disabled={isFormDisabled}
             onChange={(e) => handleInputChange(field.name, e.target.value)}
             placeholder={field.placeholder}
-            style={baseStyle}
+            className={getInputClassName()}
           />
         );
       case 'checkbox':
+        // Special handling for recursive checkbox in share-record action
+        const isRecursiveDisabled = selectedAction?.value === 'share-record' && 
+                                     field.name === 'recursive' && 
+                                     (formData.record || !formData.sharedFolder);
+        
         // Special handling for can_share checkbox in share-record action
         const isCanShareDisabled = selectedAction?.value === 'share-record' && 
                                      field.name === 'can_share' && 
@@ -4151,59 +4192,33 @@ const IssuePanel = () => {
                                        formData.expiration_type !== 'none';
         
         const isExpirationDisabled = isCanShareDisabled || isManageUsersDisabled;
-        const checkboxDisabled = isFormDisabled || isExpirationDisabled;
+        const checkboxDisabled = isFormDisabled || isExpirationDisabled || isRecursiveDisabled;
         
         return (
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'flex-start', 
-            gap: '10px',
-            padding: '8px 12px',
-            backgroundColor: checkboxDisabled ? '#F9F9F9' : '#FAFBFC',
-            borderRadius: '4px',
-            border: '1px solid #DFE1E6',
-            marginBottom: '8px',
-            opacity: isExpirationDisabled ? 0.6 : 1
-          }}>
+          <div className={`checkbox-container ${(checkboxDisabled || isExpirationDisabled) ? 'disabled' : ''}`}>
             <input
               type="checkbox"
               checked={value === true || value === 'true'}
               disabled={checkboxDisabled}
               onChange={(e) => handleInputChange(field.name, e.target.checked)}
-              style={{
-                cursor: checkboxDisabled ? 'not-allowed' : 'pointer',
-                marginTop: '2px',
-                minWidth: '16px',
-                width: '16px',
-                height: '16px'
-              }}
+              className="checkbox-input"
             />
-            <div style={{ flex: 1 }}>
-              <div style={{ 
-                fontSize: '13px', 
-                fontWeight: '500',
-                color: checkboxDisabled ? '#999' : '#1A1A1A',
-                marginBottom: '2px'
-              }}>
+            <div className="checkbox-content">
+              <div className={`checkbox-label ${checkboxDisabled ? 'disabled' : ''}`}>
                 {field.label}
                 {(isCanShareDisabled || isManageUsersDisabled) && (
-                  <span style={{ 
-                    fontSize: '11px', 
-                    color: '#FF5630',
-                    marginLeft: '8px',
-                    fontWeight: 'normal',
-                    fontStyle: 'italic'
-                  }}>
+                  <span className="checkbox-disabled-msg">
                     (Disabled due to expiration)
+                  </span>
+                )}
+                {isRecursiveDisabled && (
+                  <span className="checkbox-disabled-msg">
+                    (Only for shared folder)
                   </span>
                 )}
               </div>
               {field.description && (
-                <div style={{ 
-                  fontSize: '11px', 
-                  color: checkboxDisabled ? '#999' : '#6B778C',
-                  lineHeight: '1.3'
-                }}>
+                <div className={`field-description ${checkboxDisabled ? 'disabled' : ''}`}>
                   {field.description}
                 </div>
               )}
@@ -4212,7 +4227,7 @@ const IssuePanel = () => {
         );
       case 'folder-select':
         return (
-          <div style={{ position: 'relative' }}>
+          <div className="relative">
             <select
               value={value}
               disabled={isFormDisabled}
@@ -4226,7 +4241,7 @@ const IssuePanel = () => {
                   setSelectedFolder(folder);
                 }
               }}
-              style={baseStyle}
+              className={getInputClassName()}
             >
               <option value="">{field.placeholder || 'Select shared folder'}</option>
               {keeperFolders
@@ -4239,24 +4254,13 @@ const IssuePanel = () => {
             </select>
             
             {loadingFolders && (
-              <div style={{
-                position: 'absolute',
-                right: '12px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                fontSize: '11px',
-                color: '#0066CC'
-              }}>
+              <div className="loading-indicator">
                 Loading...
               </div>
             )}
             
               {!loadingFolders && getFilteredFolders().length === 0 && (
-                <div style={{
-                  fontSize: '11px',
-                  color: '#FF5630',
-                  marginTop: '4px'
-                }}>
+                <div className="error-text">
                   {keeperFolders.length === 0 
                     ? 'No folders found.' 
                     : 'No shared folders found. Only folders with "S" flag (shared folders) are available for record-permission commands.'
@@ -4269,48 +4273,19 @@ const IssuePanel = () => {
         // Special handling for PIN code fields with show/hide toggle
         if (field.name === 'pinCode') {
           return (
-            <div style={{ position: 'relative' }}>
+            <div className="relative">
               <input
                 type={showPinCode ? 'text' : 'password'}
                 value={value}
                 disabled={isFormDisabled}
                 onChange={(e) => handleInputChange(field.name, e.target.value)}
                 placeholder={field.placeholder}
-                style={{
-                  ...baseStyle,
-                  paddingRight: '60px' // Add space for the Show/Hide button
-                }}
+                className={getInputClassName('input-with-button')}
               />
               <button
                 type="button"
                 onClick={() => setShowPinCode(!showPinCode)}
-                onMouseEnter={(e) => {
-                  e.target.style.background = '#e6f2ff';
-                  e.target.style.borderColor = '#0066cc';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.background = '#f4f5f7';
-                  e.target.style.borderColor = '#ddd';
-                }}
-                style={{
-                  position: 'absolute',
-                  right: '8px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: '#f4f5f7',
-                  border: '1px solid #ddd',
-                  cursor: 'pointer',
-                  padding: '4px 8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  height: '28px',
-                  fontWeight: '500',
-                  color: '#6B778C',
-                  transition: 'all 0.2s ease'
-                }}
+                className="toggle-password-btn"
                 title={showPinCode ? 'Hide PIN' : 'Show PIN'}
               >
                 {showPinCode ? 'Hide' : 'Show'}
@@ -4330,30 +4305,17 @@ const IssuePanel = () => {
               disabled={isFormDisabled}
               onChange={(e) => handleInputChange(field.name, e.target.value)}
               placeholder={field.placeholder || "Password or $GEN"}
-              style={{
-                ...baseStyle,
-                borderColor: hasValidationErrors ? '#FF5630' : baseStyle.borderColor
-              }}
+              className={`${getInputClassName()} ${hasValidationErrors ? 'required-error' : ''}`}
             />
-            <div style={{ 
-              fontSize: "11px", 
-              color: "#1A1A1A", 
-              marginTop: "4px",
-              fontStyle: "italic"
-            }}>
+            <div className="password-hint">
               Enter your own password or type <strong>$GEN</strong> for automatic password generation
             </div>
             {hasValidationErrors && (
-              <div style={{ 
-                fontSize: "11px", 
-                color: "#FF5630", 
-                marginTop: "4px",
-                fontWeight: "500"
-              }}>
+              <div className="validation-errors">
                 Password requirements:
-                <ul style={{ margin: "2px 0 0 16px", padding: 0 }}>
+                <ul>
                   {passwordValidation.errors.map((error, index) => (
-                    <li key={index} style={{ marginBottom: "2px" }}>{error}</li>
+                    <li key={index}>{error}</li>
                   ))}
                 </ul>
               </div>
@@ -4367,17 +4329,9 @@ const IssuePanel = () => {
         const isLoading = addressUid && loadingAddresses.has(addressUid);
         
         return (
-          <div style={{ position: 'relative' }}>
+          <div className="relative">
             <div
-              style={{
-                ...baseStyle,
-                cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                backgroundColor: isFormDisabled ? '#F5F5F5' : hasCurrentValue ? '#F8FFF8' : 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                minHeight: '42px'
-              }}
+              className={`${getInputClassName()} ref-field-container ${isFormDisabled ? 'disabled' : ''}`}
               onClick={() => {
                 if (!isFormDisabled) {
                   if (!showAddressDropdown) {
@@ -4388,18 +4342,10 @@ const IssuePanel = () => {
                 }
               }}
             >
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: addressUid ? '#000' : '#999',
-                  fontSize: '14px'
-                }}
-              >
+              <span className={`ref-field-text ${addressUid ? 'value' : 'placeholder'}`}>
                 {isLoading ? 'Loading address...' : displayValue}
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <div className="ref-field-actions">
                 {addressUid && (
                   <button
                     type="button"
@@ -4415,30 +4361,13 @@ const IssuePanel = () => {
                         });
                       }
                     }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: '4px',
-                      borderRadius: '50%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#6B778C',
-                      fontSize: '16px'
-                    }}
+                    className="ref-clear-btn"
                     title="Remove address"
                   >
                     ×
                   </button>
                 )}
-                <span
-                  style={{
-                    color: '#6B778C',
-                    fontSize: '12px',
-                    cursor: 'pointer'
-                  }}
-                >
+                <span className="dropdown-arrow cursor-pointer">
                   ▼
                 </span>
               </div>
@@ -4446,24 +4375,9 @@ const IssuePanel = () => {
             
             {/* Address Dropdown */}
             {showAddressDropdown && !isFormDisabled && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  backgroundColor: 'white',
-                  border: '1px solid #DFE1E6',
-                  borderRadius: '4px',
-                  boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
-                  zIndex: 1000,
-                  marginTop: '2px',
-                  maxHeight: '300px',
-                  overflowY: 'auto'
-                }}
-              >
+              <div className="ref-dropdown-menu">
                 {loadingAddressRecords ? (
-                  <div style={{ padding: '12px', textAlign: 'center', color: '#6B778C', fontSize: '13px' }}>
+                  <div className="ref-dropdown-loading">
                     Loading addresses...
                   </div>
                 ) : (
@@ -4471,23 +4385,16 @@ const IssuePanel = () => {
                     {/* Current Address (if selected) */}
                     {addressUid && (
                       <div
-                        style={{
-                          padding: '12px',
-                          borderBottom: '1px solid #F4F5F7',
-                          cursor: 'pointer',
-                          backgroundColor: 'white'
-                        }}
+                        className="ref-dropdown-item"
                         onClick={() => {
                           setShowAddressDropdown(false);
                           // Keep current address selected
                         }}
-                        onMouseEnter={(e) => { e.target.style.backgroundColor = '#F4F5F7'; }}
-                        onMouseLeave={(e) => { e.target.style.backgroundColor = 'white'; }}
                       >
-                        <div style={{ fontWeight: '500', fontSize: '13px', color: '#1A1A1A', marginBottom: '4px' }}>
+                        <div className="ref-dropdown-item-title">
                           Current Address
                         </div>
-                        <div style={{ fontSize: '12px', color: '#6B778C', wordBreak: 'break-word' }}>
+                        <div className="ref-dropdown-item-text">
                           {displayValue}
                         </div>
                       </div>
@@ -4496,15 +4403,7 @@ const IssuePanel = () => {
                     {/* Existing Address Records */}
                     {addressRecords.length > 0 && (
                       <>
-                        <div style={{ 
-                          padding: '8px 12px', 
-                          backgroundColor: '#F4F5F7', 
-                          fontSize: '11px', 
-                          fontWeight: '600', 
-                          color: '#6B778C',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.5px'
-                        }}>
+                        <div className="ref-dropdown-section-header">
                           Existing Addresses ({addressRecords.length})
                         </div>
                         {addressRecords.map((record) => {
@@ -4529,26 +4428,19 @@ const IssuePanel = () => {
                           return (
                             <div
                               key={record.record_uid}
-                              style={{
-                                padding: '12px',
-                                cursor: 'pointer',
-                                backgroundColor: 'white',
-                                borderBottom: '1px solid #F4F5F7'
-                              }}
+                              className="ref-dropdown-item"
                               onClick={() => {
                                 handleInputChange('addressRef', record.record_uid);
                                 setShowAddressDropdown(false);
                               }}
-                              onMouseEnter={(e) => { e.target.style.backgroundColor = '#F4F5F7'; }}
-                              onMouseLeave={(e) => { e.target.style.backgroundColor = 'white'; }}
                             >
-                              <div style={{ fontWeight: '500', fontSize: '13px', color: '#1A1A1A', marginBottom: '4px' }}>
+                              <div className="ref-dropdown-item-title">
                                 {record.title || 'Address Record'}
                               </div>
-                              <div style={{ fontSize: '12px', color: '#6B778C', wordBreak: 'break-word' }}>
+                              <div className="ref-dropdown-item-text">
                                 {displayText}
                               </div>
-                              <div style={{ fontSize: '11px', color: '#999', marginTop: '2px' }}>
+                              <div className="text-xs text-muted mt-2">
                                 ID: {record.record_uid}
                               </div>
                             </div>
@@ -4559,25 +4451,12 @@ const IssuePanel = () => {
 
                     {/* New Address Option */}
                     <div
-                      style={{
-                        padding: '12px',
-                        cursor: 'pointer',
-                        backgroundColor: 'white',
-                        color: '#0052CC',
-                        fontSize: '13px',
-                        fontWeight: '500',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        borderTop: addressRecords.length > 0 ? '1px solid #F4F5F7' : 'none'
-                      }}
+                      className={`ref-dropdown-new-item ${addressRecords.length > 0 ? 'with-border' : ''}`}
                       onClick={() => {
                         handleNewAddress();
                       }}
-                      onMouseEnter={(e) => { e.target.style.backgroundColor = '#F4F5F7'; }}
-                      onMouseLeave={(e) => { e.target.style.backgroundColor = 'white'; }}
                     >
-                      <span style={{ fontSize: '16px' }}>+</span>
+                      <span className="ref-dropdown-new-item-icon">+</span>
                       New Address
                     </div>
                   </>
@@ -4588,14 +4467,7 @@ const IssuePanel = () => {
             {/* Click outside to close dropdown */}
             {showAddressDropdown && (
               <div
-                style={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  zIndex: 999
-                }}
+                className="click-overlay z-999"
                 onClick={() => setShowAddressDropdown(false)}
               />
             )}
@@ -4607,36 +4479,20 @@ const IssuePanel = () => {
         const fileDisplayValue = fileUid ? `File: ${fileUid}` : field.placeholder || 'Select files...';
         
         return (
-          <div style={{ position: 'relative' }}>
+          <div className="relative">
             <div
-              style={{
-                ...baseStyle,
-                cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                backgroundColor: isFormDisabled ? '#F5F5F5' : hasCurrentValue ? '#F8FFF8' : 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                minHeight: '42px'
-              }}
+              className={`${getInputClassName()} ref-field-container ${isFormDisabled ? 'disabled' : ''}`}
               onClick={() => {
                 if (!isFormDisabled) {
                   alert('File selection functionality will be implemented soon');
                 }
               }}
             >
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: fileUid ? '#000' : '#999',
-                  flex: 1
-                }}
-              >
+              <span className={`ref-field-text flex-1 ${fileUid ? 'value' : 'placeholder'}`}>
                 {fileDisplayValue}
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                <span style={{ fontSize: '12px', color: '#6B778C' }}>FOLDER</span>
+              <div className="ref-field-actions">
+                <span className="text-sm text-secondary">FOLDER</span>
               </div>
             </div>
           </div>
@@ -4647,36 +4503,20 @@ const IssuePanel = () => {
         const cardDisplayValue = cardUid ? `Card: ${cardUid}` : field.placeholder || 'Select payment card...';
         
         return (
-          <div style={{ position: 'relative' }}>
+          <div className="relative">
             <div
-              style={{
-                ...baseStyle,
-                cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                backgroundColor: isFormDisabled ? '#F5F5F5' : hasCurrentValue ? '#F8FFF8' : 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                minHeight: '42px'
-              }}
+              className={`${getInputClassName()} ref-field-container ${isFormDisabled ? 'disabled' : ''}`}
               onClick={() => {
                 if (!isFormDisabled) {
                   alert('Payment card selection functionality will be implemented soon');
                 }
               }}
             >
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: cardUid ? '#000' : '#999',
-                  flex: 1
-                }}
-              >
+              <span className={`ref-field-text flex-1 ${cardUid ? 'value' : 'placeholder'}`}>
                 {cardDisplayValue}
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                <span style={{ fontSize: '12px', color: '#6B778C' }}>CARD</span>
+              <div className="ref-field-actions">
+                <span className="text-sm text-secondary">CARD</span>
               </div>
             </div>
           </div>
@@ -4696,7 +4536,7 @@ const IssuePanel = () => {
               }}
               placeholder="•••• •••• •••• 1234"
               maxLength={19} // 16 digits + 3 spaces
-              style={baseStyle}
+              className={getInputClassName()}
             />
           );
         }
@@ -4717,30 +4557,17 @@ const IssuePanel = () => {
                 disabled={isFormDisabled}
                 onChange={(e) => handleInputChange(field.name, e.target.value)}
                 placeholder={field.placeholder || "Password or $GEN"}
-                style={{
-                  ...baseStyle,
-                  borderColor: hasValidationErrors ? '#FF5630' : baseStyle.borderColor
-                }}
+                className={`${getInputClassName()} ${hasValidationErrors ? 'required-error' : ''}`}
               />
-              <div style={{ 
-                fontSize: "11px", 
-                color: "#1A1A1A", 
-                marginTop: "4px",
-                fontStyle: "italic"
-              }}>
+              <div className="password-hint">
                 Enter your own password or type <strong>$GEN</strong> for automatic password generation
               </div>
               {hasValidationErrors && (
-                <div style={{ 
-                  fontSize: "11px", 
-                  color: "#FF5630", 
-                  marginTop: "4px",
-                  fontWeight: "500"
-                }}>
+                <div className="validation-errors">
                   Password requirements:
-                  <ul style={{ margin: "2px 0 0 16px", padding: 0 }}>
+                  <ul>
                     {passwordValidation.errors.map((error, index) => (
-                      <li key={index} style={{ marginBottom: "2px" }}>{error}</li>
+                      <li key={index}>{error}</li>
                     ))}
                   </ul>
                 </div>
@@ -4756,7 +4583,7 @@ const IssuePanel = () => {
             disabled={isFormDisabled}
             onChange={(e) => handleInputChange(field.name, e.target.value)}
             placeholder={field.placeholder}
-            style={baseStyle}
+            className={getInputClassName()}
           />
         );
     }
@@ -4765,7 +4592,7 @@ const IssuePanel = () => {
   useEffect(() => {
     // Load issue context
     setIsLoading(true);
-    invoke("getIssueContext")
+    api.getIssueContext()
       .then((context) => {
         
         setIssueContext(context);
@@ -4776,7 +4603,7 @@ const IssuePanel = () => {
         
         // Activate Keeper panel for all users on this issue
         if (context.issueKey) {
-          invoke("activateKeeperPanel", { issueKey: context.issueKey })
+          api.activateKeeperPanel(context.issueKey)
             .then((result) => {
             })
             .catch((error) => {
@@ -4946,11 +4773,11 @@ const IssuePanel = () => {
             }
 
             // Create the address record in Keeper using executeKeeperAction
-            const addressResult = await invoke("executeKeeperAction", {
-              issueKey: issueContext.issueKey,
-              command: "record-add",
-              commandDescription: "Create address record",
-              parameters: {
+            const addressResult = await api.executeKeeperAction(
+              issueContext.issueKey,
+              "record-add",
+              "Create address record",
+              {
                 recordType: "address",
                 title: tempAddressData.tempData.title,
                 skipComment: true, // Don't create comment for reference records
@@ -4970,7 +4797,7 @@ const IssuePanel = () => {
                 }, {}),
                 notes: tempAddressData.tempData.notes || ''
               }
-            });
+            );
 
             if (addressResult && addressResult.record_uid) {
               realAddressUid = addressResult.record_uid;
@@ -5036,11 +4863,11 @@ const IssuePanel = () => {
           }
 
           // Create the address record in Keeper using executeKeeperAction
-          const addressResult = await invoke("executeKeeperAction", {
-            issueKey: issueContext.issueKey,
-            command: "record-add",
-            commandDescription: "Create address record",
-            parameters: {
+          const addressResult = await api.executeKeeperAction(
+            issueContext.issueKey,
+            "record-add",
+            "Create address record",
+            {
               recordType: "address",
               title: newAddressFormData.title,
               skipComment: true, // Don't create comment for reference records
@@ -5052,7 +4879,7 @@ const IssuePanel = () => {
               country: newAddressFormData.country || '',
               notes: newAddressFormData.notes || ''
             }
-          });
+          );
 
           if (addressResult && addressResult.record_uid) {
             realAddressUid = addressResult.record_uid;
@@ -5090,13 +4917,13 @@ const IssuePanel = () => {
         }
       }
       
-      const result = await invoke("executeKeeperAction", {
-        issueKey: issueContext.issueKey,
-        command: selectedAction.value,
-        commandDescription: selectedAction.description,
-        parameters: finalParameters,
-        formattedTimestamp: formattedTimestamp
-      });
+      const result = await api.executeKeeperAction(
+        issueContext.issueKey,
+        selectedAction.value,
+        selectedAction.description,
+        finalParameters,
+        formattedTimestamp
+      );
       
       
       // Create success message that includes address creation info if applicable
@@ -5165,11 +4992,7 @@ const IssuePanel = () => {
       });
       
       // Update the JIRA ticket with rejection comment
-      const result = await invoke("rejectKeeperRequest", {
-        issueKey: issueContext.issueKey,
-        rejectionReason: rejectionReason.trim(),
-        formattedTimestamp
-      });
+      const result = await api.rejectKeeperRequest(issueContext.issueKey, rejectionReason.trim());
 
       setRejectionResult({ 
         success: true, 
@@ -5210,27 +5033,16 @@ const IssuePanel = () => {
 
   if (isLoading) {
     return (
-      <div
-        style={{
-          fontFamily: "Inter, Arial, sans-serif",
-          padding: "16px",
-          textAlign: "center",
-        }}
-      >
+      <div className="loading-container-centered">
         <Spinner size="medium" />
-        <p style={{ marginTop: "12px", color: "#6B778C" }}>Loading...</p>
+        <p className="loading-text">Loading...</p>
       </div>
     );
   }
 
   if (!issueContext) {
     return (
-      <div
-        style={{
-          fontFamily: "Inter, Arial, sans-serif",
-          padding: "16px",
-        }}
-      >
+      <div className="error-container">
         <SectionMessage appearance="error" title="Error">
           Failed to load issue context. Please refresh the page.
         </SectionMessage>
@@ -5238,53 +5050,27 @@ const IssuePanel = () => {
     );
   }
 
+  const rootClassName = `app-root ${
+    (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown) 
+      ? 'app-root-expanded'
+      : selectedAction 
+        ? 'app-root-viewport'
+        : 'app-root-auto'
+  }`;
+
+  const cardClassName = `app-card ${
+    (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown)
+      ? 'app-card-expanded'
+      : ''
+  }`;
+
   return (
-    <div
-      style={{
-        fontFamily: "Inter, Arial, sans-serif",
-        padding: "16px",
-        backgroundColor: "#F7F7FA",
-        minHeight: (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown) 
-          ? "max(100vh, 700px)" 
-          : selectedAction 
-            ? "100vh" 
-            : "auto",
-        boxSizing: "border-box",
-        transition: "min-height 0.3s ease-in-out"
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: "#FFFFFF",
-          borderRadius: "8px",
-          padding: "16px",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-          minHeight: (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown) 
-            ? "600px" 
-            : selectedAction 
-              ? "400px" 
-              : "auto",
-          position: "relative",
-          transition: "min-height 0.3s ease-in-out"
-        }}
-      >
+    <div className={rootClassName}>
+      <div className={cardClassName}>
         {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            marginBottom: "12px",
-            gap: "8px",
-          }}
-        >
+        <div className="app-header">
           <LockIcon size="medium" primaryColor="#FFD700" />
-          <h3
-            style={{
-              margin: 0,
-              fontWeight: "600",
-              color: "#1A1A1A",
-            }}
-          >
+          <h3 className="app-title">
             Keeper Integration Hub
           </h3>
         </div>
@@ -5302,21 +5088,13 @@ const IssuePanel = () => {
         {issueContext.hasConfig && (
           <>
             {/* Action Dropdown */}
-            <div style={{ marginBottom: "12px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "600",
-                  fontSize: "14px",
-                  color: "#1A1A1A",
-                }}
-              >
+            <div className="mb-12">
+              <label className="label-block">
                 Select Keeper Action:
               </label>
               
               {/* Dropdown Container */}
-              <div style={{ position: "relative", zIndex: 1001 }}>
+              <div className="relative z-1001">
                 {/* Search Input */}
                 <input
                 id="keeper-action-input"
@@ -5345,19 +5123,7 @@ const IssuePanel = () => {
                     setShowDropdown(true);
                   }
                 }}
-                style={{
-                  width: "100%",
-                  padding: "8px 40px 8px 12px",
-                  borderRadius: "6px",
-                  border: isFormDisabled ? "2px solid #E0E0E0" : (showDropdown ? "2px solid #0066CC" : "2px solid #DFE1E6"),
-                  fontSize: "14px",
-                  backgroundColor: isFormDisabled ? "#F5F5F5" : "white",
-                  color: isFormDisabled ? "#999" : "#000",
-                  outline: "none",
-                  cursor: isFormDisabled ? "not-allowed" : "pointer",
-                  boxSizing: "border-box",
-                  transition: "border-color 0.2s ease, background-color 0.2s ease"
-                }}
+                className={`action-select-input ${isFormDisabled ? 'action-select-input-disabled' : (showDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
               />
               
               {/* Dropdown Arrow */}
@@ -5367,51 +5133,17 @@ const IssuePanel = () => {
                     setShowDropdown(!showDropdown);
                   }
                 }}
-                style={{
-                  position: "absolute",
-                  right: "12px",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  cursor: isFormDisabled ? "not-allowed" : "pointer",
-                  fontSize: "16px",
-                  color: isFormDisabled ? "#CCC" : "#666",
-                  userSelect: "none"
-                }}
+                className={`dropdown-arrow-pos ${isFormDisabled ? 'dropdown-arrow-pos-disabled' : 'dropdown-arrow-pos-enabled'}`}
               >
                 ▼
               </div>
 
               {/* Dropdown Menu */}
               {showDropdown && !isFormDisabled && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    left: "0",
-                    right: "0",
-                    backgroundColor: "white",
-                    border: "2px solid #DFE1E6",
-                    borderTop: "none",
-                    borderRadius: "0 0 6px 6px",
-                    maxHeight: "320px",
-                    overflowY: "auto",
-                    zIndex: 1000,
-                    boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                    boxSizing: "border-box"
-                  }}
-                >
+                <div className="action-dropdown-menu">
                   {/* Search Hint */}
                   {!searchTerm && (
-                    <div
-                      style={{
-                        padding: "8px 12px",
-                        fontSize: "11px",
-                        color: "#666",
-                        fontStyle: "italic",
-                        borderBottom: "1px solid #F0F0F0",
-                        backgroundColor: "#FAFAFA"
-                      }}
-                    >
+                    <div className="search-hint">
                       Tip: Type in the field above to search options
                     </div>
                   )}
@@ -5427,22 +5159,12 @@ const IssuePanel = () => {
                             setShowDropdown(false);
                             setSearchTerm("");
                           }}
-                          style={{
-                            padding: "6px 12px",
-                            cursor: "pointer",
-                            borderBottom: "1px solid #F0F0F0",
-                            backgroundColor: selectedAction?.value === option.value ? "#FFF8CC" : "transparent",
-                            "&:hover": {
-                              backgroundColor: "#F8F9FA"
-                            }
-                          }}
-                          onMouseEnter={(e) => e.target.style.backgroundColor = "#F8F9FA"}
-                          onMouseLeave={(e) => e.target.style.backgroundColor = selectedAction?.value === option.value ? "#FFF8CC" : "transparent"}
+                          className={`action-option-item ${selectedAction?.value === option.value ? 'selected' : ''}`}
                         >
-                          <div style={{ fontWeight: "600", fontSize: "13px", color: "#1A1A1A" }}>
+                          <div className="dropdown-option-title">
                             {option.label}
                           </div>
-                          <div style={{ fontSize: "11px", color: "#6B778C", marginTop: "2px" }}>
+                          <div className="dropdown-option-description">
                             {option.description}
                           </div>
                         </div>
@@ -5450,49 +5172,23 @@ const IssuePanel = () => {
                       
                       {/* Pagination */}
                       {totalPages > 1 && (
-                        <div
-                          style={{
-                            padding: "8px 12px",
-                            borderTop: "1px solid #DFE1E6",
-                            backgroundColor: "#F8F9FA",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            fontSize: "12px"
-                          }}
-                        >
+                        <div className="dropdown-pagination">
                           <button
                             disabled={currentPage === 1}
                             onClick={() => setCurrentPage(prev => prev - 1)}
-                            style={{
-                              padding: "4px 8px",
-                              border: "1px solid #DFE1E6",
-                              backgroundColor: currentPage === 1 ? "#F0F0F0" : "white",
-                              color: currentPage === 1 ? "#999" : "#333",
-                              borderRadius: "4px",
-                              cursor: currentPage === 1 ? "not-allowed" : "pointer",
-                              fontSize: "11px"
-                            }}
+                            className={`pagination-btn ${currentPage === 1 ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
                           >
                             Previous
                           </button>
                           
-                          <span style={{ color: "#6B778C" }}>
+                          <span className="pagination-text">
                             Page {currentPage} of {totalPages} ({filteredOptions.length} items)
                           </span>
                           
                           <button
                             disabled={currentPage === totalPages}
                             onClick={() => setCurrentPage(prev => prev + 1)}
-                            style={{
-                              padding: "4px 8px",
-                              border: "1px solid #DFE1E6",
-                              backgroundColor: currentPage === totalPages ? "#F0F0F0" : "white",
-                              color: currentPage === totalPages ? "#999" : "#333",
-                              borderRadius: "4px",
-                              cursor: currentPage === totalPages ? "not-allowed" : "pointer",
-                              fontSize: "11px"
-                            }}
+                            className={`pagination-btn ${currentPage === totalPages ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
                           >
                             Next
                           </button>
@@ -5500,14 +5196,7 @@ const IssuePanel = () => {
                       )}
                     </>
                   ) : (
-                    <div
-                      style={{
-                        padding: "12px",
-                        textAlign: "center",
-                        color: "#6B778C",
-                        fontSize: "14px"
-                      }}
-                    >
+                    <div className="no-results-message">
                       No actions found matching "{searchTerm}"
                     </div>
                   )}
@@ -5517,14 +5206,7 @@ const IssuePanel = () => {
               {/* Click outside to close dropdown */}
               {showDropdown && (
                 <div
-                  style={{
-                    position: "fixed",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    zIndex: 999
-                  }}
+                  className="fixed-overlay"
                   onClick={() => setShowDropdown(false)}
                 />
               )}
@@ -5532,25 +5214,10 @@ const IssuePanel = () => {
               
               {/* Show description for selected action */}
               {selectedAction && (
-                <div
-                  style={{
-                    marginTop: "8px",
-                    padding: "8px 12px",
-                    backgroundColor: "#F4F5F7",
-                    borderRadius: "4px",
-                    fontSize: "12px",
-                    color: "#6B778C",
-                    border: "1px solid #DFE1E6"
-                  }}
-                >
+                <div className="action-description-box">
                   <strong>{selectedAction.label}:</strong> {selectedAction.description}
                   {selectedAction.value === 'record-update' && (
-                    <div style={{ 
-                      marginTop: "6px", 
-                      fontSize: "11px", 
-                      color: "#0065FF",
-                      fontStyle: "italic" 
-                    }}>
+                    <div className="action-note">
                       Note: Form fields will be blank. Only fill in the fields you want to update - empty fields will be ignored.
                     </div>
                   )}
@@ -5559,72 +5226,29 @@ const IssuePanel = () => {
 
               {/* Dynamic Form Fields */}
               {selectedAction && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields.length > 0 && (
-                <div
-                  style={{
-                    marginTop: "16px",
-                    padding: "16px",
-                    backgroundColor: "#FFFFFF",
-                    borderRadius: "4px",
-                    border: "1px solid #DFE1E6"
-                  }}
-                >
-                  <div
-                    style={{
-                      marginBottom: "12px",
-                      fontWeight: "600",
-                      fontSize: "14px",
-                      color: "#1A1A1A"
-                    }}
-                  >
+                <div className="form-container">
+                  <div className="form-section-heading">
                     Required Information:
                   </div>
 
                   {/* Records Selector for record-update action only */}
                   {selectedAction.value === 'record-update' && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <label
-                        style={{
-                          display: "block",
-                          marginBottom: "8px",
-                          fontWeight: "600",
-                          fontSize: "14px",
-                          color: "#1A1A1A",
-                        }}
-                      >
-                        Step 1: Select Record to Update <span style={{ color: "#FF5630" }}>*</span>
+                    <div className="mb-16">
+                      <label className="label-block">
+                        Step 1: Select Record to Update <span className="text-error">*</span>
                       </label>
                       
                       {/* Info about the record update process */}
                       {!selectedRecordForUpdate && (
-                        <div
-                          style={{
-                            marginBottom: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "11px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1",
-                            fontStyle: "italic"
-                          }}
-                        >
+                        <div className="info-msg-success italic">
                           Select a record to update.
                         </div>
                       )}
                       
                       {/* Records Dropdown Container for Update */}
-                      <div style={{ position: "relative", zIndex: 1000 }}>
+                      <div className="relative z-1000">
                         {loadingRecords ? (
-                          <div style={{
-                            width: "100%",
-                            padding: "8px 12px",
-                            borderRadius: "6px",
-                            border: "2px solid #DFE1E6",
-                            fontSize: "14px",
-                            backgroundColor: "#F5F5F5",
-                            color: "#666",
-                            boxSizing: "border-box"
-                          }}>
+                          <div className="loading-container">
                             Loading records...
                           </div>
                         ) : (
@@ -5657,19 +5281,7 @@ const IssuePanel = () => {
                                   setShowRecordForUpdateDropdown(true);
                                 }
                               }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 40px 8px 12px",
-                                borderRadius: "6px",
-                                border: isFormDisabled ? "2px solid #E0E0E0" : (showRecordForUpdateDropdown ? "2px solid #0066CC" : "2px solid #DFE1E6"),
-                                fontSize: "14px",
-                                backgroundColor: isFormDisabled ? "#F5F5F5" : "white",
-                                color: isFormDisabled ? "#999" : "#000",
-                                outline: "none",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                boxSizing: "border-box",
-                                transition: "border-color 0.2s ease, background-color 0.2s ease"
-                              }}
+                              className={`action-select-input ${isFormDisabled ? 'action-select-input-disabled' : (showRecordForUpdateDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
                             />
                             
                             {/* Records Dropdown Arrow for Update */}
@@ -5679,51 +5291,17 @@ const IssuePanel = () => {
                                   setShowRecordForUpdateDropdown(!showRecordForUpdateDropdown);
                                 }
                               }}
-                              style={{
-                                position: "absolute",
-                                right: "12px",
-                                top: "50%",
-                                transform: "translateY(-50%)",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                fontSize: "16px",
-                                color: isFormDisabled ? "#CCC" : "#666",
-                                userSelect: "none"
-                              }}
+                              className={`dropdown-arrow-pos ${isFormDisabled ? 'dropdown-arrow-pos-disabled' : 'dropdown-arrow-pos-enabled'}`}
                             >
                               ▼
                             </div>
 
                             {/* Records Dropdown Menu for Update */}
                             {showRecordForUpdateDropdown && !isFormDisabled && (
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: "100%",
-                                  left: "0",
-                                  right: "0",
-                                  backgroundColor: "white",
-                                  border: "2px solid #DFE1E6",
-                                  borderTop: "none",
-                                  borderRadius: "0 0 6px 6px",
-                                  maxHeight: "300px",
-                                  overflowY: "auto",
-                                  zIndex: 999,
-                                  boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                                  boxSizing: "border-box"
-                                }}
-                              >
+                              <div className="record-update-dropdown">
                                 {/* Records Search Hint for Update */}
                                 {!recordForUpdateSearchTerm && (
-                                  <div
-                                    style={{
-                                      padding: "8px 12px",
-                                      fontSize: "11px",
-                                      color: "#666",
-                                      fontStyle: "italic",
-                                      borderBottom: "1px solid #F0F0F0",
-                                      backgroundColor: "#FAFAFA"
-                                    }}
-                                  >
+                                  <div className="search-hint-sm">
                                     Tip: Type in the field above to search records
                                   </div>
                                 )}
@@ -5755,19 +5333,12 @@ const IssuePanel = () => {
                                           const currentStoredData = hasStoredData && storedRequestData ? storedRequestData : null;
                                           fetchKeeperRecordDetails(record.record_uid, currentStoredData);
                                         }}
-                                        style={{
-                                          padding: "8px 12px",
-                                          cursor: "pointer",
-                                          borderBottom: "1px solid #F0F0F0",
-                                          backgroundColor: selectedRecordForUpdate?.record_uid === record.record_uid ? "#FFF8CC" : "transparent",
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F8F9FA"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = selectedRecordForUpdate?.record_uid === record.record_uid ? "#FFF8CC" : "transparent"}
+                                        className={`record-dropdown-item ${selectedRecordForUpdate?.record_uid === record.record_uid ? 'selected' : ''}`}
                                       >
-                                        <div style={{ fontWeight: "600", fontSize: "13px", color: "#1A1A1A" }}>
+                                        <div className="dropdown-option-title">
                                           {record.title}
                                         </div>
-                                        <div style={{ fontSize: "11px", color: "#6B778C", marginTop: "2px" }}>
+                                        <div className="dropdown-option-description">
                                           UID: {record.record_uid}
                                         </div>
                                       </div>
@@ -5775,49 +5346,23 @@ const IssuePanel = () => {
                                     
                                     {/* Records Pagination for Update */}
                                     {totalRecordForUpdatePages > 1 && (
-                                      <div
-                                        style={{
-                                          padding: "8px 12px",
-                                          borderTop: "1px solid #DFE1E6",
-                                          backgroundColor: "#F8F9FA",
-                                          display: "flex",
-                                          justifyContent: "space-between",
-                                          alignItems: "center",
-                                          fontSize: "12px"
-                                        }}
-                                      >
+                                      <div className="dropdown-pagination">
                                         <button
                                           disabled={recordForUpdateCurrentPage === 1}
                                           onClick={() => setRecordForUpdateCurrentPage(prev => prev - 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: recordForUpdateCurrentPage === 1 ? "#F0F0F0" : "white",
-                                            color: recordForUpdateCurrentPage === 1 ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: recordForUpdateCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className={`pagination-btn ${recordForUpdateCurrentPage === 1 ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
                                         >
                                           Previous
                                         </button>
                                         
-                                        <span style={{ color: "#6B778C" }}>
+                                        <span className="pagination-text">
                                           Page {recordForUpdateCurrentPage} of {totalRecordForUpdatePages} ({filteredRecordsForUpdate.length} records)
                                         </span>
                                         
                                         <button
                                           disabled={recordForUpdateCurrentPage === totalRecordForUpdatePages}
                                           onClick={() => setRecordForUpdateCurrentPage(prev => prev + 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: recordForUpdateCurrentPage === totalRecordForUpdatePages ? "#F0F0F0" : "white",
-                                            color: recordForUpdateCurrentPage === totalRecordForUpdatePages ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: recordForUpdateCurrentPage === totalRecordForUpdatePages ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className={`pagination-btn ${recordForUpdateCurrentPage === totalRecordForUpdatePages ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
                                         >
                                           Next
                                         </button>
@@ -5825,14 +5370,7 @@ const IssuePanel = () => {
                                     )}
                                   </>
                                 ) : (
-                                  <div
-                                    style={{
-                                      padding: "12px",
-                                      textAlign: "center",
-                                      color: "#6B778C",
-                                      fontSize: "14px"
-                                    }}
-                                  >
+                                  <div className="no-results-msg">
                                     No records found matching "{recordForUpdateSearchTerm}"
                                   </div>
                                 )}
@@ -5842,14 +5380,7 @@ const IssuePanel = () => {
                             {/* Click outside to close records dropdown for update */}
                             {showRecordForUpdateDropdown && (
                               <div
-                                style={{
-                                  position: "fixed",
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  zIndex: 998
-                                }}
+                                className="click-overlay z-998"
                                 onClick={() => setShowRecordForUpdateDropdown(false)}
                               />
                             )}
@@ -5859,20 +5390,10 @@ const IssuePanel = () => {
                       
                       {/* Selected record for update info */}
                       {selectedRecordForUpdate && (
-                        <div
-                          style={{
-                            marginTop: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1"
-                          }}
-                        >
-                          <div>Selected: <strong>{selectedRecordForUpdate.title}</strong> (UID: {selectedRecordForUpdate.record_uid})</div>
+                        <div className="selected-item-box mt-8">
+                          <div>Selected: <strong>{selectedRecordForUpdate.title}</strong></div>
                           {loadingRecordDetails && (
-                            <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
+                            <div className="text-italic-sm">
                               Loading...
                             </div>
                           )}
@@ -5880,12 +5401,7 @@ const IssuePanel = () => {
                       )}
 
                       {keeperRecords.length > 0 && (
-                        <div style={{ 
-                          fontSize: '11px', 
-                          color: '#6B778C', 
-                          marginTop: '4px',
-                          fontStyle: 'italic'
-                        }}>
+                        <div className="item-count">
                           {keeperRecords.length} total records available for update
                         </div>
                       )}
@@ -5894,50 +5410,15 @@ const IssuePanel = () => {
 
                   {/* Records Selector for share-record action only */}
                   {selectedAction.value === 'share-record' && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <label
-                        style={{
-                          display: "block",
-                          marginBottom: "8px",
-                          fontWeight: "600",
-                          fontSize: "14px",
-                          color: "#1A1A1A",
-                        }}
-                      >
-                        Select Record: <span style={{ color: "#FF5630" }}>*</span>
+                    <div className="share-record-selector">
+                      <label className="share-record-label">
+                        Select Record:
                       </label>
                       
-                      {/* Info about hidden fields */}
-                      {!selectedRecord && (
-                        <div
-                          style={{
-                            marginBottom: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "11px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1",
-                            fontStyle: "italic"
-                          }}
-                        >
-                          Record ID field is hidden for Share Record action. Select a record, enter an email, and choose permission level to enable the Execute button.
-                        </div>
-                      )}
-                      
                       {/* Records Dropdown Container */}
-                      <div style={{ position: "relative", zIndex: 1000 }}>
+                      <div className="relative z-1000">
                         {loadingRecords ? (
-                          <div style={{
-                            width: "100%",
-                            padding: "8px 12px",
-                            borderRadius: "6px",
-                            border: "2px solid #DFE1E6",
-                            fontSize: "14px",
-                            backgroundColor: "#F5F5F5",
-                            color: "#666",
-                            boxSizing: "border-box"
-                          }}>
+                          <div className="loading-container">
                             Loading records...
                           </div>
                         ) : (
@@ -5946,97 +5427,54 @@ const IssuePanel = () => {
                             <input
                               id="keeper-records-input"
                               type="text"
-                              disabled={isFormDisabled}
+                              disabled={isFormDisabled || selectedFolder}
                               placeholder={
-                                isFormDisabled ? "Form disabled..." :
+                                (isFormDisabled || selectedFolder) ? (selectedFolder ? "Disabled (folder selected)" : "Form disabled...") :
                                 showRecordDropdown ? "Type to search records..." : 
                                 (selectedRecord ? selectedRecord.title : "Click to select record...")
                               }
                               value={showRecordDropdown ? recordSearchTerm : (selectedRecord ? selectedRecord.title : "")}
                               onChange={(e) => {
-                                if (!isFormDisabled) {
+                                if (!isFormDisabled && !selectedFolder) {
                                   setRecordSearchTerm(e.target.value);
                                   setShowRecordDropdown(true);
                                 }
                               }}
                               onClick={() => {
-                                if (!isFormDisabled) {
+                                if (!isFormDisabled && !selectedFolder) {
                                   setShowRecordDropdown(!showRecordDropdown);
                                 }
                               }}
                               onFocus={(e) => {
-                                if (!isFormDisabled) {
+                                if (!isFormDisabled && !selectedFolder) {
                                   setRecordSearchTerm("");
                                   setShowRecordDropdown(true);
                                 }
                               }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 40px 8px 12px",
-                                borderRadius: "6px",
-                                border: isFormDisabled ? "2px solid #E0E0E0" : (showRecordDropdown ? "2px solid #0066CC" : "2px solid #DFE1E6"),
-                                fontSize: "14px",
-                                backgroundColor: isFormDisabled ? "#F5F5F5" : "white",
-                                color: isFormDisabled ? "#999" : "#000",
-                                outline: "none",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                boxSizing: "border-box",
-                                transition: "border-color 0.2s ease, background-color 0.2s ease"
-                              }}
+                              className={`action-select-input ${(isFormDisabled || selectedFolder) ? 'action-select-input-disabled' : (showRecordDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
                             />
                             
                             {/* Records Dropdown Arrow */}
-                            <div
-                              onClick={() => {
-                                if (!isFormDisabled) {
-                                  setShowRecordDropdown(!showRecordDropdown);
-                                }
-                              }}
-                              style={{
-                                position: "absolute",
-                                right: "12px",
-                                top: "50%",
-                                transform: "translateY(-50%)",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                fontSize: "16px",
-                                color: isFormDisabled ? "#CCC" : "#666",
-                                userSelect: "none"
-                              }}
-                            >
-                              ▼
-                            </div>
+                            {!isFormDisabled && !selectedFolder && (
+                              <div
+                                onClick={() => {
+                                  if (!isFormDisabled && !selectedFolder) {
+                                    setShowRecordDropdown(!showRecordDropdown);
+                                  }
+                                }}
+                                className="dropdown-arrow-pos dropdown-arrow-pos-enabled"
+                              >
+                                ▼
+                              </div>
+                            )}
 
                             {/* Records Dropdown Menu */}
-                            {showRecordDropdown && !isFormDisabled && (
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: "100%",
-                                  left: "0",
-                                  right: "0",
-                                  backgroundColor: "white",
-                                  border: "2px solid #DFE1E6",
-                                  borderTop: "none",
-                                  borderRadius: "0 0 6px 6px",
-                                  maxHeight: "300px",
-                                  overflowY: "auto",
-                                  zIndex: 999,
-                                  boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                                  boxSizing: "border-box"
-                                }}
-                              >
+                            {showRecordDropdown && !isFormDisabled && !selectedFolder && (
+                              <div className="record-update-dropdown">
+
                                 {/* Records Search Hint */}
                                 {!recordSearchTerm && (
-                                  <div
-                                    style={{
-                                      padding: "8px 12px",
-                                      fontSize: "11px",
-                                      color: "#666",
-                                      fontStyle: "italic",
-                                      borderBottom: "1px solid #F0F0F0",
-                                      backgroundColor: "#FAFAFA"
-                                    }}
-                                  >
+                                  <div className="search-hint-sm">
                                     Tip: Type in the field above to search records
                                   </div>
                                 )}
@@ -6058,16 +5496,9 @@ const IssuePanel = () => {
                                             handleInputChange('user', issueContext.issueCreatorEmail);
                                           }
                                         }}
-                                        style={{
-                                          padding: "8px 12px",
-                                          cursor: "pointer",
-                                          borderBottom: "1px solid #F0F0F0",
-                                          backgroundColor: selectedRecord?.record_uid === record.record_uid ? "#FFF8CC" : "transparent",
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F8F9FA"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = selectedRecord?.record_uid === record.record_uid ? "#FFF8CC" : "transparent"}
+                                        className={`dropdown-item ${selectedRecord?.record_uid === record.record_uid ? 'selected' : ''}`}
                                       >
-                                        <div style={{ fontWeight: "600", fontSize: "13px", color: "#1A1A1A" }}>
+                                        <div className="dropdown-option-title">
                                           {record.title}
                                         </div>
                                       </div>
@@ -6075,49 +5506,23 @@ const IssuePanel = () => {
                                     
                                     {/* Records Pagination */}
                                     {totalRecordPages > 1 && (
-                                      <div
-                                        style={{
-                                          padding: "8px 12px",
-                                          borderTop: "1px solid #DFE1E6",
-                                          backgroundColor: "#F8F9FA",
-                                          display: "flex",
-                                          justifyContent: "space-between",
-                                          alignItems: "center",
-                                          fontSize: "12px"
-                                        }}
-                                      >
+                                      <div className="pagination-container">
                                         <button
                                           disabled={recordCurrentPage === 1}
                                           onClick={() => setRecordCurrentPage(prev => prev - 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: recordCurrentPage === 1 ? "#F0F0F0" : "white",
-                                            color: recordCurrentPage === 1 ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: recordCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className="pagination-button"
                                         >
                                           Previous
                                         </button>
                                         
-                                        <span style={{ color: "#6B778C" }}>
+                                        <span className="pagination-info">
                                           Page {recordCurrentPage} of {totalRecordPages} ({filteredRecords.length} records)
                                         </span>
                                         
                                         <button
                                           disabled={recordCurrentPage === totalRecordPages}
                                           onClick={() => setRecordCurrentPage(prev => prev + 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: recordCurrentPage === totalRecordPages ? "#F0F0F0" : "white",
-                                            color: recordCurrentPage === totalRecordPages ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: recordCurrentPage === totalRecordPages ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className="pagination-button"
                                         >
                                           Next
                                         </button>
@@ -6125,14 +5530,7 @@ const IssuePanel = () => {
                                     )}
                                   </>
                                 ) : (
-                                  <div
-                                    style={{
-                                      padding: "12px",
-                                      textAlign: "center",
-                                      color: "#6B778C",
-                                      fontSize: "14px"
-                                    }}
-                                  >
+                                  <div className="dropdown-no-results">
                                     No records found matching "{recordSearchTerm}"
                                   </div>
                                 )}
@@ -6142,14 +5540,7 @@ const IssuePanel = () => {
                             {/* Click outside to close records dropdown */}
                             {showRecordDropdown && (
                               <div
-                                style={{
-                                  position: "fixed",
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  zIndex: 998
-                                }}
+                                className="click-overlay z-998"
                                 onClick={() => setShowRecordDropdown(false)}
                               />
                             )}
@@ -6159,300 +5550,417 @@ const IssuePanel = () => {
                       
                       {/* Selected record info */}
                       {selectedRecord && (
-                        <div
-                          style={{
-                            marginTop: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1"
-                          }}
-                        >
-                          <div>Selected: <strong>{selectedRecord.title}</strong> (UID: {selectedRecord.record_uid})</div>
-                          {selectedAction?.value === 'share-record' && (
-                            <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                              Record ID will be sent automatically: {selectedRecord.record_uid}
-                            </div>
-                          )}
+                        <div className="share-record-selected-box">
+                          <div>Selected: <span className="share-record-selected-text">{selectedRecord.title}</span></div>
                         </div>
                       )}
 
                       {keeperRecords.length > 0 && (
-                        <div style={{ 
-                          fontSize: '11px', 
-                          color: '#6B778C', 
-                          marginTop: '4px',
-                          fontStyle: 'italic'
-                        }}>
+                        <div className="share-record-count">
                           {keeperRecords.length} total records available
                         </div>
                       )}
                     </div>
                   )}
 
+                  {/* Folder Selector for share-record action only */}
+                  {selectedAction.value === 'share-record' && (
+                    <div className="share-record-selector">
+                      <label className="share-record-label">
+                        Select Folder:
+                      </label>
+                      
+                      {/* Info message when folder is selected */}
+                      {selectedFolder && (
+                        <div className="share-record-selected-box">
+                          <div>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.folderPath}</span></div>
+                        </div>
+                      )}
+
+                      {/* Folders Dropdown Container with search and pagination */}
+                      <div className="relative z-997">
+                        {loadingFolders ? (
+                          <div className="loading-container">
+                            Loading folders...
+                          </div>
+                        ) : (
+                          <>
+                            {/* Folder Search Input */}
+                            <input
+                              type="text"
+                              disabled={isFormDisabled || selectedRecord}
+                              placeholder={
+                                (isFormDisabled || selectedRecord) ? "Disabled (record selected)" :
+                                showFolderDropdown ? "Type to search folders..." : 
+                                (selectedFolder ? selectedFolder.name || selectedFolder.folderPath : "Click to select folder...")
+                              }
+                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? selectedFolder.name || selectedFolder.folderPath : "")}
+                              onChange={(e) => {
+                                if (!isFormDisabled && !selectedRecord) {
+                                  setFolderSearchTerm(e.target.value);
+                                  setFolderCurrentPage(1);
+                                  setShowFolderDropdown(true);
+                                }
+                              }}
+                              onClick={() => {
+                                if (!isFormDisabled && !selectedRecord) {
+                                  setShowFolderDropdown(!showFolderDropdown);
+                                  if (!showFolderDropdown) {
+                                    setFolderSearchTerm("");
+                                    setFolderCurrentPage(1);
+                                  }
+                                }
+                              }}
+                              onFocus={(e) => {
+                                if (!isFormDisabled && !selectedRecord) {
+                                  setFolderSearchTerm("");
+                                  setShowFolderDropdown(true);
+                                }
+                              }}
+                              className={`folder-select-input ${
+                                (isFormDisabled || selectedRecord) ? 'folder-select-input-disabled' : 
+                                showFolderDropdown ? 'folder-select-input-focused' :
+                                selectedFolder ? 'folder-select-input-selected' :
+                                'folder-select-input-default'
+                              }`}
+                            />
+                            
+                            {/* Dropdown arrow icon */}
+                            {!isFormDisabled && !selectedRecord && (
+                              <div className="dropdown-arrow-positioned">
+                                ▼
+                              </div>
+                            )}
+                            
+                            {/* Folder Dropdown with search results */}
+                            {showFolderDropdown && !isFormDisabled && !selectedRecord && (() => {
+                              // Filter shared folders
+                              const sharedFolders = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
+                              
+                              // Apply search filter
+                              const searchFiltered = sharedFolders.filter(folder =>
+                                (folder.name || folder.folderPath || '').toLowerCase().includes(folderSearchTerm.toLowerCase())
+                              );
+                              
+                              // Pagination
+                              const totalPages = Math.ceil(searchFiltered.length / foldersPerPage);
+                              const startIdx = (folderCurrentPage - 1) * foldersPerPage;
+                              const paginatedItems = searchFiltered.slice(startIdx, startIdx + foldersPerPage);
+                              
+                              return (
+                                <>
+                                  {/* Fixed overlay to close dropdown */}
+                                  <div
+                                    className="click-overlay z-996"
+                                    onClick={() => {
+                                      setShowFolderDropdown(false);
+                                      setFolderSearchTerm("");
+                                      setFolderCurrentPage(1);
+                                    }}
+                                  />
+                                  
+                                  {/* Dropdown container */}
+                                  <div className="dropdown-container z-997">
+                                    {paginatedItems.length === 0 ? (
+                                      <div className="dropdown-no-results">
+                                        {sharedFolders.length === 0 ? 'No shared folders found' : 'No matching folders'}
+                                      </div>
+                                    ) : (
+                                      paginatedItems.map((folder, index) => (
+                                        <div
+                                          key={index}
+                                          className={`dropdown-item ${selectedFolder?.folder_uid === folder.folder_uid ? 'selected' : ''}`}
+                                          onClick={() => {
+                                            setSelectedFolder(folder);
+                                            handleInputChange('sharedFolder', folder.folderUid || folder.folder_uid);
+                                            setShowFolderDropdown(false);
+                                            setFolderSearchTerm("");
+                                            setFolderCurrentPage(1);
+                                          }}
+                                        >
+                                          <div className="font-semibold text-base text-primary">
+                                            {folder.name || folder.folderPath}
+                                          </div>
+                                        </div>
+                                      ))
+                                    )}
+                                    
+                                    {/* Pagination controls */}
+                                    {totalPages > 1 && (
+                                      <div className="pagination-container">
+                                        <button
+                                          disabled={folderCurrentPage === 1}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setFolderCurrentPage(prev => prev - 1);
+                                          }}
+                                          className="pagination-button"
+                                        >
+                                          Previous
+                                        </button>
+                                        <span className="pagination-info">
+                                          Page {folderCurrentPage} of {totalPages}
+                                        </span>
+                                        <button
+                                          disabled={folderCurrentPage >= totalPages}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setFolderCurrentPage(prev => prev + 1);
+                                          }}
+                                          className="pagination-button"
+                                        >
+                                          Next
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </>
+                        )}
+                      </div>
+
+                      {(() => {
+                        const sharedFolders = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
+                        return sharedFolders.length > 0 && (
+                          <div className="share-record-count">
+                            {sharedFolders.length} shared folders available
+                          </div>
+                        );
+                      })()}
+
+                      {/* Info message and requirement text area */}
+                      <div className="share-record-textarea-wrapper">
+                        <div className="share-record-info-message">
+                          Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.
+                        </div>
+
+                        <div>
+                          <label className="share-record-label">
+                            Additional Requirements (Optional):
+                          </label>
+                          <textarea
+                            value={formData.requirements || ''}
+                            onChange={(e) => handleInputChange('requirements', e.target.value)}
+                            placeholder="Describe your requirements if you're not sure which record or folder to select..."
+                            disabled={isFormDisabled}
+                            className="share-record-textarea"
+                          />
+                        </div>
+
+                        <div className="share-record-textarea-wrapper">
+                          <label className="share-record-label">
+                            Justification for this Request:
+                          </label>
+                          <textarea
+                            value={formData.justification || ''}
+                            onChange={(e) => handleInputChange('justification', e.target.value)}
+                            placeholder="Explain why you need access to this record or folder..."
+                            disabled={isFormDisabled}
+                            className="share-record-textarea"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Folders Selector for record-permission and share-folder actions */}
                   {(selectedAction.value === 'record-permission' || selectedAction.value === 'share-folder') && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <label
-                        style={{
-                          display: "block",
-                          marginBottom: "8px",
-                          fontSize: "13px",
-                          fontWeight: "500",
-                          color: "#1A1A1A",
-                        }}
-                      >
-                        Select Shared Folder: <span style={{ color: "#FF5630" }}>*</span>
+                    <div className="share-record-selector">
+                      <label className="share-record-label">
+                        Select Folder: <span className="text-error">*</span>
                       </label>
-                      
-                      {/* Info about workflow */}
-                      {!selectedFolder && (
-                        <div
-                          style={{
-                            marginBottom: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "11px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1",
-                            fontStyle: "italic"
-                          }}
-                        >
-                          {selectedAction.value === 'record-permission' 
-                            ? "Shared Folder field is hidden for Record Permission action. Select a shared folder and configure permissions to enable the Execute button. Changes apply to all users in the folder."
-                            : "Select a shared folder to share with users or teams. Configure permissions and specify the recipient email to enable the Execute button."}
-                        </div>
-                      )}
-                      
+
                       {/* Folders Dropdown Container */}
-                      <div style={{ position: "relative", zIndex: 998 }}>
+                      <div className="relative z-997">
                         {loadingFolders ? (
-                          <div style={{
-                            width: "100%",
-                            padding: "8px 12px",
-                            borderRadius: "6px",
-                            border: "2px solid #DFE1E6",
-                            fontSize: "14px",
-                            backgroundColor: "#F5F5F5",
-                            color: "#666",
-                            boxSizing: "border-box"
-                          }}>
-                            Loading shared folders...
+                          <div className="loading-container">
+                            Loading folders...
                           </div>
                         ) : (
                           <>
                             {/* Folders Search Input */}
                             <input
-                              id="keeper-folders-permissions-input"
                               type="text"
                               disabled={isFormDisabled}
                               placeholder={
                                 isFormDisabled ? "Form disabled..." :
                                 showFolderDropdown ? "Type to search folders..." : 
-                                (selectedFolder ? selectedFolder.name || selectedFolder.title : "Click to select shared folder...")
+                                (selectedFolder ? selectedFolder.name || selectedFolder.title : "Click to select folder...")
                               }
-                              value={folderSearchTerm}
-                              onClick={() => {
+                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? selectedFolder.name || selectedFolder.title : "")}
+                              onChange={(e) => {
                                 if (!isFormDisabled) {
+                                  setFolderSearchTerm(e.target.value);
                                   setShowFolderDropdown(true);
                                 }
                               }}
-                              onChange={(e) => {
-                                setFolderSearchTerm(e.target.value);
-                                setFolderCurrentPage(1);
-                                if (!showFolderDropdown) setShowFolderDropdown(true);
+                              onClick={() => {
+                                if (!isFormDisabled) {
+                                  setShowFolderDropdown(!showFolderDropdown);
+                                }
                               }}
-                              onBlur={(e) => {
-                                setTimeout(() => {
-                                  if (!e.currentTarget.contains(document.activeElement)) {
-                                    setShowFolderDropdown(false);
-                                  }
-                                }, 150);
+                              onFocus={(e) => {
+                                if (!isFormDisabled) {
+                                  setFolderSearchTerm("");
+                                  setShowFolderDropdown(true);
+                                }
                               }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                borderRadius: "6px",
-                                border: selectedFolder ? "2px solid #006644" : "2px solid #DFE1E6",
-                                fontSize: "14px",
-                                backgroundColor: isFormDisabled ? "#F5F5F5" : selectedFolder ? "#F8FFF8" : "white",
-                                color: isFormDisabled ? "#999" : "#000",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                outline: "none",
-                                boxSizing: "border-box"
-                              }}
+                              className={`action-select-input ${isFormDisabled ? 'action-select-input-disabled' : (showFolderDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
                             />
                             
-                            {/* Folders Dropdown */}
-                            {showFolderDropdown && !isFormDisabled && (
+                            {/* Folders Dropdown Arrow */}
+                            {!isFormDisabled && (
                               <div
-                                style={{
-                                  position: "absolute",
-                                  top: "100%",
-                                  left: 0,
-                                  right: 0,
-                                  backgroundColor: "white",
-                                  border: "1px solid #DFE1E6",
-                                  borderRadius: "6px",
-                                  boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-                                  zIndex: 1001,
-                                  maxHeight: "200px",
-                                  overflowY: "auto"
+                                onClick={() => {
+                                  if (!isFormDisabled) {
+                                    setShowFolderDropdown(!showFolderDropdown);
+                                  }
                                 }}
+                                className="dropdown-arrow-pos dropdown-arrow-pos-enabled"
                               >
-                                {paginatedFolders.map((folder) => (
-                                  <div
-                                    key={folder.folder_uid}
-                                    onClick={() => {
-                                      setSelectedFolder(folder);
-                                      // Set different field name based on action type
-                                      const fieldName = selectedAction.value === 'record-permission' ? 'sharedFolder' : 'folder';
-                                      setFormData(prev => ({ ...prev, [fieldName]: folder.folder_uid }));
-                                      setFolderSearchTerm(folder.name || folder.title || `Folder ${folder.folder_uid}`);
-                                      setShowFolderDropdown(false);
-                                    }}
-                                    style={{
-                                      padding: "8px 12px",
-                                      cursor: "pointer",
-                                      borderBottom: "1px solid #F4F5F7"
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.target.style.backgroundColor = "#F4F5F7";
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.target.style.backgroundColor = "white";
-                                    }}
-                                  >
-                                    <div style={{ fontSize: "14px", fontWeight: "500" }}>
-                                      {folder.name || folder.title || `Folder ${folder.folder_uid}`}
-                                    </div>
-                                    <div style={{ fontSize: "11px", color: "#6B778C", marginTop: "2px" }}>
-                                      UID: {folder.folder_uid} - Shared Folder (flags: {folder.flags})
-                                    </div>
+                                ▼
+                              </div>
+                            )}
+
+                            {/* Folders Dropdown Menu */}
+                            {showFolderDropdown && !isFormDisabled && (
+                              <div className="record-update-dropdown">
+
+                                {/* Folders Search Hint */}
+                                {!folderSearchTerm && (
+                                  <div className="search-hint-sm">
+                                    Tip: Type in the field above to search folders
                                   </div>
-                                ))}
-                                
-                                {/* Pagination Controls */}
-                                {totalFolderPages > 1 && (
-                                  <div style={{
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                    padding: "8px 12px",
-                                    backgroundColor: "#F8F9FA",
-                                    borderTop: "1px solid #E1E5E9"
-                                  }}>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (folderCurrentPage > 1) {
-                                          setFolderCurrentPage(folderCurrentPage - 1);
-                                        }
-                                      }}
-                                      disabled={folderCurrentPage <= 1}
-                                      style={{
-                                        padding: "4px 8px",
-                                        fontSize: "11px",
-                                        border: "1px solid #DFE1E6",
-                                        borderRadius: "4px",
-                                        backgroundColor: folderCurrentPage <= 1 ? "#F5F5F5" : "white",
-                                        cursor: folderCurrentPage <= 1 ? "not-allowed" : "pointer"
-                                      }}
-                                    >
-                                      Previous
-                                    </button>
-                                    <span style={{ fontSize: "11px", color: "#6B778C" }}>
-                                      Page {folderCurrentPage} of {totalFolderPages}
-                                    </span>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (folderCurrentPage < totalFolderPages) {
-                                          setFolderCurrentPage(folderCurrentPage + 1);
-                                        }
-                                      }}
-                                      disabled={folderCurrentPage >= totalFolderPages}
-                                      style={{
-                                        padding: "4px 8px",
-                                        fontSize: "11px",
-                                        border: "1px solid #DFE1E6",
-                                        borderRadius: "4px",
-                                        backgroundColor: folderCurrentPage >= totalFolderPages ? "#F5F5F5" : "white",
-                                        cursor: folderCurrentPage >= totalFolderPages ? "not-allowed" : "pointer"
-                                      }}
-                                    >
-                                      Next
-                                    </button>
+                                )}
+
+                                {/* Folders Options */}
+                                {filteredFolders.length > 0 ? (
+                                  <>
+                                    {paginatedFolders.map((folder) => (
+                                      <div
+                                        key={folder.folder_uid}
+                                        onClick={() => {
+                                          setSelectedFolder(folder);
+                                          setShowFolderDropdown(false);
+                                          setFolderSearchTerm("");
+                                          // Set different field name based on action type
+                                          const fieldName = selectedAction.value === 'record-permission' ? 'sharedFolder' : 'folder';
+                                          handleInputChange(fieldName, folder.folder_uid);
+                                        }}
+                                        className={`dropdown-item ${selectedFolder?.folder_uid === folder.folder_uid ? 'selected' : ''}`}
+                                      >
+                                        <div className="dropdown-option-title">
+                                          {folder.name || folder.title}
+                                        </div>
+                                      </div>
+                                    ))}
+                                    
+                                    {/* Folders Pagination */}
+                                    {totalFolderPages > 1 && (
+                                      <div className="pagination-container">
+                                        <button
+                                          disabled={folderCurrentPage === 1}
+                                          onClick={() => setFolderCurrentPage(prev => prev - 1)}
+                                          className="pagination-button"
+                                        >
+                                          Previous
+                                        </button>
+                                        
+                                        <span className="pagination-info">
+                                          Page {folderCurrentPage} of {totalFolderPages} ({filteredFolders.length} folders)
+                                        </span>
+                                        
+                                        <button
+                                          disabled={folderCurrentPage === totalFolderPages}
+                                          onClick={() => setFolderCurrentPage(prev => prev + 1)}
+                                          className="pagination-button"
+                                        >
+                                          Next
+                                        </button>
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div className="dropdown-no-results">
+                                    No folders found matching "{folderSearchTerm}"
                                   </div>
                                 )}
                               </div>
                             )}
+
+                            {/* Click outside to close folders dropdown */}
+                            {showFolderDropdown && (
+                              <div
+                                className="click-overlay z-998"
+                                onClick={() => setShowFolderDropdown(false)}
+                              />
+                            )}
                           </>
                         )}
                       </div>
-
-                      {/* Selected Folder Display */}
+                      
+                      {/* Selected folder info */}
                       {selectedFolder && (
-                        <div
-                          style={{
-                            marginTop: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1"
-                          }}
-                        >
-                          <div>Selected: <strong>{selectedFolder.name || selectedFolder.title}</strong></div>
-                          <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                            Folder UID will be used for record-permission command: {selectedFolder.folder_uid}
-                          </div>
+                        <div className="share-record-selected-box">
+                          <div>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.title}</span></div>
                         </div>
                       )}
 
                       {getFilteredFolders().length > 0 && (
-                        <div style={{ 
-                          fontSize: '11px', 
-                          color: '#6B778C', 
-                          marginTop: '4px',
-                          fontStyle: 'italic'
-                        }}>
-                          {getFilteredFolders().length} shared folders available (filtered for "S" flag only)
+                        <div className="share-record-count">
+                          {getFilteredFolders().length} shared folders available
                         </div>
                       )}
+
+                      {/* Info message and requirement text area for share-folder and record-permission actions */}
+                      <div className="share-record-textarea-wrapper">
+                        <div className="share-record-info-message">
+                          {selectedAction.value === 'record-permission' 
+                            ? 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'
+                            : 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'}
+                        </div>
+
+                        <div>
+                          <label className="share-record-label">
+                            Additional Requirements (Optional):
+                          </label>
+                          <textarea
+                            value={formData.requirements || ''}
+                            onChange={(e) => handleInputChange('requirements', e.target.value)}
+                            placeholder="Describe your requirements if you're not sure which folder to select..."
+                            disabled={isFormDisabled}
+                            className="share-record-textarea"
+                          />
+                        </div>
+
+                        <div className="share-record-textarea-wrapper">
+                          <label className="share-record-label">
+                            Justification for this Request:
+                          </label>
+                          <textarea
+                            value={formData.justification || ''}
+                            onChange={(e) => handleInputChange('justification', e.target.value)}
+                            placeholder={selectedAction.value === 'record-permission' 
+                              ? "Explain why you need to change permissions for this folder..."
+                              : "Explain why you need access to this folder..."}
+                            disabled={isFormDisabled}
+                            className="share-record-textarea"
+                          />
+                        </div>
+                      </div>
                     </div>
                   )}
 
                   
                   {/* Loading state for record types */}
                   {selectedAction.value === 'record-update' && selectedRecordForUpdate && Object.keys(recordDetails).length > 0 && !loadingRecordDetails && loadingRecordTypes && (
-                    <div style={{
-                      padding: '24px',
-                      textAlign: 'center',
-                      backgroundColor: '#F8F9FA',
-                      borderRadius: '8px',
-                      border: '2px dashed #DFE1E6',
-                      marginBottom: '16px',
-                      marginTop: '24px'
-                    }}>
-                      <div style={{
-                        fontSize: '14px',
-                        color: '#0066CC',
-                        fontWeight: '500',
-                        marginBottom: '8px'
-                      }}>
+                    <div className="loading-state-box">
+                      <div className="loading-state-title">
                         Loading record types...
                       </div>
-                      <div style={{
-                        fontSize: '12px',
-                        color: '#6B778C',
-                        fontStyle: 'italic'
-                      }}>
+                      <div className="loading-state-subtitle">
                         Please wait while we load the available record types
                       </div>
                     </div>
@@ -6460,32 +5968,15 @@ const IssuePanel = () => {
                   
                   {/* Step 2: Dynamic Form Fields for record-update (only show after record selection) */}
                   {selectedAction.value === 'record-update' && selectedRecordForUpdate && Object.keys(recordDetails).length > 0 && !loadingRecordDetails && !loadingRecordTypes && recordTypes.length > 0 && (
-                    <div style={{ marginBottom: "16px", marginTop: "24px" }}>
-                      <div
-                        style={{
-                          fontSize: "16px",
-                          fontWeight: "600",
-                          color: "#1A1A1A",
-                          marginBottom: "12px",
-                          paddingBottom: "8px",
-                          borderBottom: "2px solid #0066CC"
-                        }}
-                      >
+                    <div className="mb-16 mt-24">
+                      <div className="section-header">
                         Step 2: Update Record Fields
                       </div>
                       
                       
                       {/* Record Type Field */}
-                      <div style={{ marginBottom: "16px" }}>
-                        <label
-                          style={{
-                            display: "block",
-                            marginBottom: "4px",
-                            fontSize: "13px",
-                            fontWeight: "500",
-                            color: "#1A1A1A"
-                          }}
-                        >
+                      <div className="mb-16">
+                        <label className="label-sm">
                           Record Type
                         </label>
                         <select
@@ -6512,18 +6003,7 @@ const IssuePanel = () => {
                               setDynamicCustomFields([]);
                             }
                           }}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            borderRadius: '4px',
-                            border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.recordType ? '#006644' : '#DFE1E6')}`,
-                            fontSize: '14px',
-                            backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.recordType ? '#F8FFF8' : 'white'),
-                            color: isFormDisabled ? '#999' : '#000',
-                            cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                            outline: 'none',
-                            boxSizing: 'border-box'
-                          }}
+                          className={isFormDisabled ? 'select-disabled-state' : (formData.recordType ? 'select-with-value' : 'select-no-value')}
                         >
                           <option value="">
                             {recordTypes.length === 0 ? "Loading record types..." : "Select Type"}
@@ -6535,52 +6015,22 @@ const IssuePanel = () => {
                           ))}
                         </select>
                         {(loadingRecordTypes || loadingTemplate) && (
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "#0066CC",
-                              marginTop: "2px",
-                              fontStyle: "italic"
-                            }}
-                          >
+                          <div className="helper-text-loading">
                             {loadingRecordTypes ? "Loading record types..." : "Loading template..."}
                           </div>
                         )}
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "#6B778C",
-                            marginTop: "2px",
-                            fontStyle: "italic"
-                          }}
-                        >
+                        <div className="helper-text-sm">
                           Change the record type if needed (optional)
                         </div>
                       </div>
                       
                       {/* Loading indicator when template is being fetched */}
                       {selectedAction.value === 'record-update' && loadingTemplate && (
-                        <div style={{
-                          padding: '24px',
-                          textAlign: 'center',
-                          backgroundColor: '#F8F9FA',
-                          borderRadius: '8px',
-                          border: '2px dashed #DFE1E6',
-                          marginBottom: '16px'
-                        }}>
-                          <div style={{
-                            fontSize: '14px',
-                            color: '#0066CC',
-                            fontWeight: '500',
-                            marginBottom: '8px'
-                          }}>
+                        <div className="loading-state-box-no-mt">
+                          <div className="loading-state-title">
                             Loading template fields for {formData.recordType}...
                           </div>
-                          <div style={{
-                            fontSize: '12px',
-                            color: '#6B778C',
-                            fontStyle: 'italic'
-                          }}>
+                          <div className="loading-state-subtitle">
                             Please wait while we fetch the appropriate form fields
                           </div>
                         </div>
@@ -6589,16 +6039,7 @@ const IssuePanel = () => {
                       {/* Dynamic Template Fields for record-update only */}
                       {selectedAction.value === 'record-update' && templateFields.length > 0 && !loadingTemplate && (
                         <div>
-                          <div
-                            style={{
-                              fontSize: "14px",
-                              fontWeight: "600",
-                              color: "#1A1A1A",
-                              marginBottom: "8px",
-                              paddingBottom: "4px",
-                              borderBottom: "1px solid #E1E5E9"
-                            }}
-                          >
+                          <div className="template-fields-header">
                             {recordTypeTemplate.$id ? `${recordTypeTemplate.$id} Fields:` : recordTypeTemplate.type ? `${recordTypeTemplate.type} Fields:` : 'Template Fields:'} ({templateFields.length} fields)
                           </div>
                           
@@ -6611,22 +6052,13 @@ const IssuePanel = () => {
                       {/* Fallback Standard Fields for record-update when no template */}
                       {selectedAction.value === 'record-update' && templateFields.length === 0 && !loadingTemplate && (
                         <div>
-                          <div
-                            style={{
-                              fontSize: "14px",
-                              fontWeight: "600",
-                              color: "#1A1A1A",
-                              marginBottom: "8px",
-                              paddingBottom: "4px",
-                              borderBottom: "1px solid #E1E5E9"
-                            }}
-                          >
+                          <div className="template-fields-header">
                             Standard Fields:
                           </div>
                           
                           {/* Title Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Title
                             </label>
                             <input
@@ -6635,19 +6067,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('title', e.target.value)}
                               placeholder="Title"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.title ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.title ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.title ? 'has-value' : ''}`}
                             />
                           </div>
                           
                           {/* Name Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Name (Full Name)
                             </label>
                             <input
@@ -6656,19 +6082,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('name', e.target.value)}
                               placeholder="Full Name"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.name ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.name ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.name ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* Login Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Login/Username
                             </label>
                             <input
@@ -6677,19 +6097,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('login', e.target.value)}
                               placeholder="Username"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.login ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.login ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.login ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* Password Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Password
                             </label>
                             <input
@@ -6698,19 +6112,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('password', e.target.value)}
                               placeholder="Password or $GEN"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.password && formData.password !== '••••••••' ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.password && formData.password !== '••••••••' ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.password && formData.password !== '••••••••' ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* URL Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               URL
                             </label>
                             <input
@@ -6719,19 +6127,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('url', e.target.value)}
                               placeholder="URL"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.url ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.url ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.url ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* Email Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Email
                             </label>
                             <input
@@ -6740,19 +6142,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('email', e.target.value)}
                               placeholder="Email"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.email ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.email ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.email ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* Notes Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Notes
                             </label>
                             <textarea
@@ -6761,38 +6157,18 @@ const IssuePanel = () => {
                               onChange={(e) => handleInputChange('notes', e.target.value)}
                               placeholder="Notes"
                               rows={3}
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.notes && formData.notes !== recordDetails.notes ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.notes && formData.notes !== recordDetails.notes ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.notes && formData.notes !== recordDetails.notes ? 'has-value' : ''}`}
                             />
-                            <div style={{ 
-                              display: 'flex', 
-                              alignItems: 'center', 
-                              gap: '10px',
-                              marginTop: '8px',
-                              padding: '8px 12px',
-                              backgroundColor: '#FAFBFC',
-                              borderRadius: '4px',
-                              border: '1px solid #DFE1E6'
-                            }}>
+                            <div className="checkbox-option-container">
                               <input
                                 type="checkbox"
                                 id="appendNotes"
                                 checked={formData.appendNotes === true || formData.appendNotes === 'true'}
                                 disabled={isFormDisabled}
                                 onChange={(e) => handleInputChange('appendNotes', e.target.checked)}
-                                style={{
-                                  cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                                  minWidth: '16px',
-                                  width: '16px',
-                                  height: '16px'
-                                }}
+                                className={`checkbox-option-input ${isFormDisabled ? 'disabled' : ''}`}
                               />
-                              <label htmlFor="appendNotes" style={{ fontSize: '12px', color: '#1A1A1A', cursor: 'pointer', flex: 1 }}>
+                              <label htmlFor="appendNotes" className="checkbox-option-label">
                                 <strong>Append to existing notes</strong> (if checked, adds to current notes instead of replacing)
                               </label>
                             </div>
@@ -6805,30 +6181,13 @@ const IssuePanel = () => {
                   {/* Record Add Section - Step by Step Flow */}
                   {selectedAction.value === 'record-add' && (
                     <div>
-                      <div
-                        style={{
-                          fontSize: "16px",
-                          fontWeight: "600",
-                          color: "#1A1A1A",
-                          marginBottom: "12px",
-                          paddingBottom: "8px",
-                          borderBottom: "2px solid #0066CC"
-                        }}
-                      >
+                      <div className="section-header">
                         Step 1: Select Record Type
                       </div>
                       
-                      <div style={{ marginBottom: "16px" }}>
-                        <label
-                          style={{
-                            display: "block",
-                            marginBottom: "8px",
-                            fontSize: "14px",
-                            fontWeight: "500",
-                            color: "#1A1A1A"
-                          }}
-                        >
-                          Record Type <span style={{ color: "#FF5630" }}>*</span>
+                      <div className="mb-16">
+                        <label className="label-md-8">
+                          Record Type <span className="text-error">*</span>
                         </label>
                         <select
                           value={formData.recordType || ''}
@@ -6856,18 +6215,7 @@ const IssuePanel = () => {
                               setDynamicCustomFields([]);
                             }
                           }}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            borderRadius: '4px',
-                            border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.recordType ? '#006644' : '#DFE1E6')}`,
-                            fontSize: '14px',
-                            backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.recordType ? '#F8FFF8' : 'white'),
-                            color: isFormDisabled ? '#999' : '#000',
-                            cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                            outline: 'none',
-                            boxSizing: 'border-box'
-                          }}
+                          className={isFormDisabled ? 'select-disabled-state' : (formData.recordType ? 'select-with-value' : 'select-no-value')}
                         >
                           <option value="">
                             {recordTypes.length === 0 ? "Loading record types..." : "Select Type"}
@@ -6879,25 +6227,11 @@ const IssuePanel = () => {
                           ))}
                         </select>
                         {(loadingRecordTypes || loadingTemplate) && (
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "#0066CC",
-                              marginTop: "2px",
-                              fontStyle: "italic"
-                            }}
-                          >
+                          <div className="helper-text-link">
                             {loadingRecordTypes ? "Loading record types..." : "Loading template..."}
                           </div>
                         )}
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "#6B778C",
-                            marginTop: "4px",
-                            lineHeight: "1.4"
-                          }}
-                        >
+                        <div className="helper-text-muted">
                           Choose the type of record you want to create
                         </div>
                       </div>
@@ -6905,42 +6239,17 @@ const IssuePanel = () => {
                       {/* Step 2: Show template fields after record type is selected */}
                       {formData.recordType && (
                         <div>
-                          <div
-                            style={{
-                              fontSize: "16px",
-                              fontWeight: "600",
-                              color: "#1A1A1A",
-                              marginBottom: "12px",
-                              paddingBottom: "8px",
-                              borderBottom: "2px solid #0066CC"
-                            }}
-                          >
+                          <div className="section-header-bordered">
                             Step 2: Configure {formData.recordType} Fields
                           </div>
                           
                           {/* Loading indicator when template is being fetched */}
                           {loadingTemplate && (
-                            <div style={{
-                              padding: '24px',
-                              textAlign: 'center',
-                              backgroundColor: '#F8F9FA',
-                              borderRadius: '8px',
-                              border: '2px dashed #DFE1E6',
-                              marginBottom: '16px'
-                            }}>
-                              <div style={{
-                                fontSize: '14px',
-                                color: '#0066CC',
-                                fontWeight: '500',
-                                marginBottom: '8px'
-                              }}>
+                            <div className="loading-state-box-no-mt">
+                              <div className="loading-state-title">
                                 Loading template fields for {formData.recordType}...
                               </div>
-                              <div style={{
-                                fontSize: '12px',
-                                color: '#6B778C',
-                                fontStyle: 'italic'
-                              }}>
+                              <div className="loading-state-subtitle">
                                 Please wait while we fetch the appropriate form fields
                               </div>
                             </div>
@@ -6949,16 +6258,7 @@ const IssuePanel = () => {
                           {/* Dynamic Template Fields */}
                           {templateFields.length > 0 && !loadingTemplate && (
                             <div>
-                              <div
-                                style={{
-                                  fontSize: "14px",
-                                  fontWeight: "600",
-                                  color: "#1A1A1A",
-                                  marginBottom: "8px",
-                                  paddingBottom: "4px",
-                                  borderBottom: "1px solid #E1E5E9"
-                                }}
-                              >
+                              <div className="subsection-header">
                                 {recordTypeTemplate.$id ? `${recordTypeTemplate.$id} Fields:` : recordTypeTemplate.type ? `${recordTypeTemplate.type} Fields:` : 'Template Fields:'} ({templateFields.length} fields)
                               </div>
                               
@@ -6969,25 +6269,11 @@ const IssuePanel = () => {
                           
                           {/* Fallback message when no template fields */}
                           {templateFields.length === 0 && !loadingTemplate && (
-                            <div style={{
-                              padding: '16px',
-                              backgroundColor: '#FFF8E1',
-                              border: '1px solid #FFC107',
-                              borderRadius: '4px',
-                              marginBottom: '16px'
-                            }}>
-                              <div style={{
-                                fontSize: '14px',
-                                color: '#F57C00',
-                                fontWeight: '500'
-                              }}>
+                            <div className="warning-message-box">
+                              <div className="warning-message-title">
                                 No template fields available for {formData.recordType}
                               </div>
-                              <div style={{
-                                fontSize: '12px',
-                                color: '#E65100',
-                                marginTop: '4px'
-                              }}>
+                              <div className="warning-message-subtitle">
                                 You can still create the record. Standard fields will be available.
                               </div>
                             </div>
@@ -7021,42 +6307,21 @@ const IssuePanel = () => {
                     .map((field) => (
                       <div
                         key={field.name}
-                        style={{ marginBottom: "12px" }}
+                        className="mb-12"
                       >
-                        <label
-                          style={{
-                            display: "block",
-                            marginBottom: "4px",
-                            fontSize: "13px",
-                            fontWeight: "500",
-                            color: "#1A1A1A"
-                          }}
-                        >
+                        <label className="label-record-add">
                           {field.label}
                           {field.required && selectedAction.value !== 'record-update' && (
-                            <span style={{ color: "#FF5630", marginLeft: "4px" }}>*</span>
+                            <span className="text-error ml-4">*</span>
                           )}
                         </label>
                         {renderFormInput(field)}
                         {selectedAction.value === 'record-update' && (
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "#6B778C",
-                              marginTop: "2px",
-                              fontStyle: "italic"
-                            }}
-                          >
+                          <div className="field-hint-text">
                           </div>
                         )}
                         {field.required && !formData[field.name] && selectedAction.value !== 'record-update' && (
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "#FF5630",
-                              marginTop: "2px"
-                            }}
-                          >
+                          <div className="field-error-text">
                             This field is required
                           </div>
                         )}
@@ -7072,7 +6337,7 @@ const IssuePanel = () => {
                     .map((field) => (
                       <div
                         key={field.name}
-                        style={{ marginBottom: "12px" }}
+                        className="mb-12"
                       >
                         {renderFormInput(field)}
                       </div>
@@ -7081,14 +6346,7 @@ const IssuePanel = () => {
                   {/* Custom fields for record-update action handled on backend */}
                   
                   {selectedAction.value !== 'record-update' && (
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "#6B778C",
-                        fontStyle: "italic",
-                        marginTop: "8px"
-                      }}
-                    >
+                    <div className="field-hint-text-mt-8">
                       * Required fields must be completed before approval
                     </div>
                   )}
@@ -7097,70 +6355,31 @@ const IssuePanel = () => {
             </div>
 
             {/* Action Buttons - Different for Admin vs Regular Users */}
-            <div style={{ marginBottom: "16px" }}>
+            <div className="mb-16">
               
               {/* Show stored data status */}
               {hasStoredData && storedRequestData && showStoredRequestMessage && (
-                <div style={{
-                  marginBottom: "12px",
-                  padding: "10px 14px",
-                  backgroundColor: isAdmin ? "#EFF6FF" : "#F0FDF4",
-                  borderRadius: "8px",
-                  border: isAdmin ? "2px solid #93C5FD" : "2px solid #86EFAC",
-                  position: "relative"
-                }}>
+                <div className={`message-box-dynamic ${isAdmin ? 'message-box-admin' : 'message-box-user'}`}>
                   {/* Close button */}
                   <button
                     onClick={() => setShowStoredRequestMessage(false)}
-                    style={{
-                      position: "absolute",
-                      top: "8px",
-                      right: "8px",
-                      background: "transparent",
-                      border: "none",
-                      cursor: "pointer",
-                      padding: "4px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: "3px",
-                      transition: "background-color 0.2s"
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                    className="close-button-absolute"
                     title="Dismiss"
                   >
                     <CrossIcon size="small" label="Close" primaryColor={isAdmin ? "#1E40AF" : "#166534"} />
                   </button>
                   
-                  <div style={{
-                    fontWeight: "600",
-                    fontSize: "16px",
-                    color: isAdmin ? "#1E40AF" : "#166534",
-                    marginBottom: "6px",
-                    paddingRight: "28px"
-                  }}>
+                  <div className={isAdmin ? 'message-box-title-admin' : 'message-box-title-user'}>
                     {isAdmin ? "Info Message" : "Success Message"}
                   </div>
-                  <div style={{ 
-                    fontSize: "14px", 
-                    color: "#6B7280",
-                    marginBottom: storedRequestData.timestamp ? "6px" : "0",
-                    lineHeight: "1.4"
-                  }}>
+                  <div className={storedRequestData.timestamp ? 'message-box-text-with-margin' : 'message-box-text'}>
                     {isAdmin 
                       ? `A user has submitted a '${storedRequestData.selectedAction?.label}' request for review.`
                       : `Your ${storedRequestData.selectedAction?.label} request has been saved and is awaiting admin approval.`
                     }
                   </div>
                   {storedRequestData.timestamp && (
-                    <div style={{ 
-                      fontSize: "13px", 
-                      color: "#9CA3AF",
-                      marginTop: "6px",
-                      borderTop: "1px solid #E5E7EB",
-                      paddingTop: "6px"
-                    }}>
+                    <div className="message-box-timestamp">
                       Saved: {new Date(storedRequestData.timestamp).toLocaleString('en-GB', {
                         day: '2-digit',
                         month: '2-digit',
@@ -7178,7 +6397,7 @@ const IssuePanel = () => {
               {isAdmin && !isLoading && !isLoadingStoredData && !loadingTemplate && !loadingRecordTypes && !loadingRecordDetails ? (
                 // Admin View - Show buttons based on their individual conditions
                 <>
-                <div style={{ display: "flex", gap: "12px" }}>
+                <div className="flex-gap-12">
                   {/* Approve & Execute Button - show when there's stored data and form is valid */}
                   {hasStoredData && (
                     <Button
@@ -7239,42 +6458,19 @@ const IssuePanel = () => {
                 
                 {/* Rejection Form for Admin */}
                 {showRejectionForm && (
-                  <div style={{
-                    marginTop: "16px",
-                    backgroundColor: "#FFF5F5",
-                    border: "1px solid #FFD1D1",
-                    borderRadius: "6px",
-                    padding: "16px"
-                  }}>
-                    <div style={{
-                      marginBottom: "12px"
-                    }}>
-                      <h4 style={{
-                        margin: "0 0 8px 0",
-                        fontWeight: "600",
-                        color: "#FF5630",
-                        fontSize: "16px"
-                      }}>
+                  <div className="rejection-form-container">
+                    <div className="mb-12">
+                      <h4 className="rejection-form-title">
                         Reject Keeper Request
                       </h4>
-                      <p style={{
-                        margin: "0",
-                        fontSize: "13px",
-                        color: "#6B778C"
-                      }}>
+                      <p className="rejection-form-description">
                         This will reject the request and add a comment to the JIRA ticket with your reason.
                       </p>
                     </div>
                     
-                    <div style={{ marginBottom: "12px" }}>
-                      <label style={{
-                        display: "block",
-                        marginBottom: "6px",
-                        fontSize: "13px",
-                        fontWeight: "500",
-                        color: "#1A1A1A"
-                      }}>
-                        Rejection Reason <span style={{ color: "#FF5630" }}>*</span>
+                    <div className="mb-12">
+                      <label className="label-sm-6">
+                        Rejection Reason <span className="text-error">*</span>
                       </label>
                       <textarea
                         value={rejectionReason}
@@ -7282,25 +6478,11 @@ const IssuePanel = () => {
                         placeholder="Please provide a clear reason for rejecting this request..."
                         rows={3}
                         disabled={isRejecting}
-                        style={{
-                          width: "100%",
-                          padding: "8px 12px",
-                          borderRadius: "4px",
-                          border: "2px solid #DFE1E6",
-                          fontSize: "14px",
-                          fontFamily: "inherit",
-                          resize: "vertical",
-                          backgroundColor: isRejecting ? "#F5F5F5" : "#FFFFFF",
-                          boxSizing: "border-box"
-                        }}
+                        className={`input-field textarea-border-override ${isRejecting ? 'disabled' : ''}`}
                       />
                     </div>
                     
-                    <div style={{
-                      display: "flex",
-                      gap: "12px",
-                      alignItems: "center"
-                    }}>
+                    <div className="button-group">
                       <Button
                         appearance="primary"
                         onClick={handleRejectRequest}
@@ -7346,48 +6528,20 @@ const IssuePanel = () => {
                 
                 {/* Rejection Result Message for Admin */}
                 {rejectionResult && (
-                  <div style={{
-                    marginTop: "16px",
-                    padding: "12px",
-                    backgroundColor: rejectionResult.success ? "#E3FCEF" : "#FFEBE6",
-                    borderRadius: "4px",
-                    border: rejectionResult.success ? "1px solid #ABF5D1" : "1px solid #FF5630",
-                    position: "relative"
-                  }}>
+                  <div className={rejectionResult.success ? 'rejection-result-success' : 'rejection-result-error'}>
                     {/* Close button */}
                     <button
                       onClick={() => setRejectionResult(null)}
-                      style={{
-                        position: "absolute",
-                        top: "8px",
-                        right: "8px",
-                        background: "transparent",
-                        border: "none",
-                        cursor: "pointer",
-                        padding: "4px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        borderRadius: "3px",
-                        transition: "background-color 0.2s"
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                      className="close-button-absolute"
                       title="Dismiss"
                     >
                       <CrossIcon size="small" label="Close" primaryColor={rejectionResult.success ? "#006644" : "#BF2600"} />
                     </button>
                     
-                    <div style={{
-                      fontWeight: "600",
-                      fontSize: "12px",
-                      color: rejectionResult.success ? "#006644" : "#BF2600",
-                      marginBottom: "4px",
-                      paddingRight: "24px"
-                    }}>
+                    <div className={rejectionResult.success ? 'rejection-result-title-success' : 'rejection-result-title-error'}>
                       {rejectionResult.success ? "Request Rejected" : "Rejection Failed"}
                     </div>
-                    <div style={{ fontSize: "11px", color: "#6B778C" }}>
+                    <div className="rejection-result-message">
                       {rejectionResult.message}
                     </div>
                   </div>
@@ -7395,7 +6549,7 @@ const IssuePanel = () => {
                 </>
               ) : !isLoading && !isLoadingStoredData && !loadingTemplate && !loadingRecordTypes && !loadingRecordDetails ? (
                 // Regular User View - Show buttons with flex layout
-                <div style={{ display: "flex", gap: "12px" }}>
+                <div className="flex-gap-12">
                   <Button
                     appearance="primary"
                     onClick={updateFormData}
@@ -7486,47 +6640,20 @@ const IssuePanel = () => {
                 };
                 
                 const style = messageStyles[saveRequestMessage.type] || messageStyles.info;
+                const messageType = saveRequestMessage.type || 'info';
                 
                 return (
-                  <div style={{
-                    marginTop: "16px",
-                    padding: "10px 14px",
-                    backgroundColor: style.background,
-                    borderRadius: "8px",
-                    border: style.border,
-                    position: "relative"
-                  }}>
+                  <div className={`message-box-base message-box-${messageType}`}>
                     {/* Close button */}
                     <button
                       onClick={() => setSaveRequestMessage(null)}
-                      style={{
-                        position: "absolute",
-                        top: "8px",
-                        right: "8px",
-                        background: "transparent",
-                        border: "none",
-                        cursor: "pointer",
-                        padding: "4px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        borderRadius: "3px",
-                        transition: "background-color 0.2s"
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                      className="close-button-absolute"
                       title="Dismiss"
                     >
                       <CrossIcon size="small" label="Close" primaryColor={style.iconColor} />
                     </button>
                     
-                    <div style={{
-                      fontWeight: "600",
-                      fontSize: "16px",
-                      color: style.titleColor,
-                      marginBottom: "6px",
-                      paddingRight: "28px"
-                    }}>
+                    <div className={`result-message-title message-title-${messageType}`}>
                       {style.title}
                     </div>
                     <div style={{ 
@@ -7704,52 +6831,15 @@ const IssuePanel = () => {
 
         {/* Simple Address Modal */}
         {showNewAddressModal && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000
-          }}>
-            <div style={{
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              padding: '24px',
-              maxWidth: '500px',
-              width: '90%',
-              maxHeight: '80vh',
-              overflow: 'auto',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '20px'
-              }}>
-                <h3 style={{
-                  margin: 0,
-                  fontSize: '18px',
-                  fontWeight: '600',
-                  color: '#1A1A1A'
-                }}>
+          <div className="modal-overlay">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h3 className="modal-title">
                   Create New Address
                 </h3>
                 <button
                   onClick={() => setShowNewAddressModal(false)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    fontSize: '20px',
-                    cursor: 'pointer',
-                    color: '#6B778C',
-                    padding: '4px'
-                  }}
+                  className="modal-close-btn"
                 >
                   ×
                 </button>
@@ -7757,14 +6847,8 @@ const IssuePanel = () => {
 
               <div>
                 {/* Simple address form fields */}
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
+                <div className="mb-16">
+                  <label className="label-md-6">
                     Title *
                   </label>
                   <input
@@ -7772,25 +6856,12 @@ const IssuePanel = () => {
                     value={newAddressFormData.title || ''}
                     onChange={(e) => handleAddressFieldChange('title', e.target.value)}
                     placeholder="Enter address title"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
+                    className="input-field"
                   />
                 </div>
 
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
+                <div className="mb-16">
+                  <label className="label-md-6">
                     Street Address
                   </label>
                   <input
@@ -7798,25 +6869,12 @@ const IssuePanel = () => {
                     value={newAddressFormData.street1 || ''}
                     onChange={(e) => handleAddressFieldChange('street1', e.target.value)}
                     placeholder="Enter street address"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
+                    className="input-field"
                   />
                 </div>
 
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
+                <div className="mb-16">
+                  <label className="label-md-6">
                     Street Address 2
                   </label>
                   <input
@@ -7824,25 +6882,12 @@ const IssuePanel = () => {
                     value={newAddressFormData.street2 || ''}
                     onChange={(e) => handleAddressFieldChange('street2', e.target.value)}
                     placeholder="Enter street address 2 (optional)"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
+                    className="input-field"
                   />
                 </div>
 
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
+                <div className="mb-16">
+                  <label className="label-md-6">
                     City
                   </label>
                   <input
@@ -7850,25 +6895,12 @@ const IssuePanel = () => {
                     value={newAddressFormData.city || ''}
                     onChange={(e) => handleAddressFieldChange('city', e.target.value)}
                     placeholder="Enter city"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
+                    className="input-field"
                   />
                 </div>
 
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
+                <div className="mb-16">
+                  <label className="label-md-6">
                     State
                   </label>
                   <input
@@ -7876,25 +6908,12 @@ const IssuePanel = () => {
                     value={newAddressFormData.state || ''}
                     onChange={(e) => handleAddressFieldChange('state', e.target.value)}
                     placeholder="Enter state"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
+                    className="input-field"
                   />
                 </div>
 
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
+                <div className="mb-16">
+                  <label className="label-md-6">
                     ZIP Code
                   </label>
                   <input
@@ -7902,25 +6921,12 @@ const IssuePanel = () => {
                     value={newAddressFormData.zip || ''}
                     onChange={(e) => handleAddressFieldChange('zip', e.target.value)}
                     placeholder="Enter ZIP code"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
+                    className="input-field"
                   />
                 </div>
 
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
+                <div className="mb-16">
+                  <label className="label-md-6">
                     Country
                   </label>
                   <input
@@ -7928,25 +6934,12 @@ const IssuePanel = () => {
                     value={newAddressFormData.country || ''}
                     onChange={(e) => handleAddressFieldChange('country', e.target.value)}
                     placeholder="Enter country"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
+                    className="input-field"
                   />
                 </div>
 
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
+                <div className="mb-20">
+                  <label className="label-md-6">
                     Notes
                   </label>
                   <textarea
@@ -7954,50 +6947,21 @@ const IssuePanel = () => {
                     onChange={(e) => handleAddressFieldChange('notes', e.target.value)}
                     placeholder="Enter notes (optional)"
                     rows={3}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box',
-                      resize: 'vertical'
-                    }}
+                    className="input-field"
                   />
                 </div>
                 
-                <div style={{
-                  display: 'flex',
-                  gap: '12px',
-                  justifyContent: 'flex-end',
-                  marginTop: '20px'
-                }}>
+                <div className="button-group-end">
                   <button
                     onClick={() => setShowNewAddressModal(false)}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      backgroundColor: 'white',
-                      color: '#6B778C',
-                      cursor: 'pointer',
-                      fontSize: '14px'
-                    }}
+                    className="btn-cancel"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={saveNewAddress}
                     disabled={!newAddressFormData.title}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '4px',
-                      border: 'none',
-                      backgroundColor: newAddressFormData.title ? '#0066CC' : '#E0E0E0',
-                      color: newAddressFormData.title ? 'white' : '#999',
-                      cursor: newAddressFormData.title ? 'pointer' : 'not-allowed',
-                      fontSize: '14px'
-                    }}
+                    className="btn-primary"
                   >
                     Create Address
                   </button>
@@ -8009,38 +6973,10 @@ const IssuePanel = () => {
 
         {/* Admin Selection Modal */}
         {showAdminModal && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000
-          }}>
-            <div style={{
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              padding: '24px',
-              maxWidth: '500px',
-              width: '90%',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '20px'
-              }}>
-                <h3 style={{
-                  margin: 0,
-                  fontSize: '18px',
-                  fontWeight: '600',
-                  color: '#1A1A1A'
-                }}>
+          <div className="modal-overlay">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h3 className="modal-title">
                   Select Administrator
                 </h3>
                 <button
@@ -8051,52 +6987,30 @@ const IssuePanel = () => {
                     setAdminSearchTerm("");
                     setAdminCurrentPage(1);
                   }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    fontSize: '20px',
-                    cursor: 'pointer',
-                    color: '#6B778C',
-                    padding: '4px'
-                  }}
+                  className="modal-close-btn"
                 >
                   ×
                 </button>
               </div>
 
-              <p style={{
-                fontSize: '14px',
-                color: '#6B778C',
-                marginBottom: '20px',
-                lineHeight: '1.5'
-              }}>
+              <p className="modal-description">
                 Please select an administrator to assign this request to. The ticket will be assigned to the selected admin for review and approval.
               </p>
 
               {loadingAdmins ? (
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  padding: '40px'
-                }}>
+                <div className="loading-spinner-container">
                   <Spinner size="large" />
                 </div>
               ) : (
                 <>
                   {projectAdmins.length === 0 ? (
-                    <div style={{
-                      padding: '20px',
-                      textAlign: 'center',
-                      color: '#6B778C',
-                      fontSize: '14px'
-                    }}>
+                    <div className="empty-state">
                       No administrators found for this project.
                     </div>
                   ) : (
                     <>
                       {/* Custom Admin Dropdown */}
-                      <div style={{ position: 'relative', marginBottom: '20px' }}>
+                      <div className="relative mb-20">
                         {/* Search/Display Input */}
                         <input
                           type="text"
@@ -8108,56 +7022,21 @@ const IssuePanel = () => {
                           }}
                           onFocus={() => setShowAdminDropdown(true)}
                           onClick={() => setShowAdminDropdown(!showAdminDropdown)}
-                          style={{
-                            width: '100%',
-                            padding: '10px 40px 10px 12px',
-                            borderRadius: '4px',
-                            border: showAdminDropdown ? '2px solid #0066CC' : '2px solid #DFE1E6',
-                            fontSize: '14px',
-                            backgroundColor: 'white',
-                            outline: 'none',
-                            cursor: 'pointer',
-                            boxSizing: 'border-box',
-                            transition: 'border-color 0.2s ease'
-                          }}
+                          className={`admin-selector-input ${showAdminDropdown ? 'admin-selector-input-focused' : 'admin-selector-input-default'}`}
                         />
                         
                         {/* Dropdown Arrow */}
                         <div
                           onClick={() => setShowAdminDropdown(!showAdminDropdown)}
-                          style={{
-                            position: 'absolute',
-                            right: '12px',
-                            top: '50%',
-                            transform: 'translateY(-50%)',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            color: '#666',
-                            userSelect: 'none'
-                          }}
+                          className="admin-dropdown-arrow"
                         >
                           ▼
                         </div>
 
                         {/* Dropdown Menu */}
                         {showAdminDropdown && (
-                          <div
-                            style={{
-                              position: 'absolute',
-                              top: '100%',
-                              left: '0',
-                              right: '0',
-                              backgroundColor: 'white',
-                              border: '2px solid #DFE1E6',
-                              borderTop: 'none',
-                              borderRadius: '0 0 6px 6px',
-                              maxHeight: '300px',
-                              overflowY: 'auto',
-                              zIndex: 1000,
-                              boxShadow: '0 8px 16px rgba(0,0,0,0.15)',
-                              marginTop: '-2px'
-                            }}
-                          >
+                          <div className="admin-dropdown-menu">
+
                             {(() => {
                               // Filter admins based on search
                               const filteredAdmins = projectAdmins.filter(admin => {
@@ -8174,12 +7053,7 @@ const IssuePanel = () => {
                               return (
                                 <>
                                   {filteredAdmins.length === 0 ? (
-                                    <div style={{
-                                      padding: '16px',
-                                      textAlign: 'center',
-                                      color: '#6B778C',
-                                      fontSize: '13px'
-                                    }}>
+                                    <div className="admin-dropdown-no-results">
                                       No administrators match your search.
                                     </div>
                                   ) : (
@@ -8197,73 +7071,29 @@ const IssuePanel = () => {
                                               setShowAdminDropdown(false);
                                               setAdminSearchTerm('');
                                             }}
-                                            style={{
-                                              padding: '10px 12px',
-                                              cursor: 'pointer',
-                                              borderBottom: '1px solid #F0F0F0',
-                                              backgroundColor: isSelected ? '#E6F7FF' : 'transparent',
-                                              display: 'flex',
-                                              alignItems: 'center',
-                                              gap: '12px',
-                                              transition: 'background-color 0.15s ease'
-                                            }}
-                                            onMouseEnter={(e) => {
-                                              if (!isSelected) {
-                                                e.currentTarget.style.backgroundColor = '#F8F9FA';
-                                              }
-                                            }}
-                                            onMouseLeave={(e) => {
-                                              if (!isSelected) {
-                                                e.currentTarget.style.backgroundColor = 'transparent';
-                                              }
-                                            }}
+                                            className={`admin-dropdown-item-wrapper ${isSelected ? 'selected' : ''}`}
                                           >
                                             {/* Avatar */}
                                             {admin.avatarUrl ? (
                                               <img
                                                 src={admin.avatarUrl}
                                                 alt={displayName}
-                                                style={{
-                                                  width: '32px',
-                                                  height: '32px',
-                                                  borderRadius: '50%',
-                                                  flexShrink: 0
-                                                }}
+                                                className="avatar-img"
                                               />
                                             ) : (
-                                              <div style={{
-                                                width: '32px',
-                                                height: '32px',
-                                                borderRadius: '50%',
-                                                backgroundColor: '#0066CC',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                color: 'white',
-                                                fontSize: '14px',
-                                                fontWeight: '600',
-                                                flexShrink: 0
-                                              }}>
+                                              <div className="avatar-placeholder">
                                                 {displayName.charAt(0).toUpperCase()}
                                               </div>
                                             )}
                                             
                                             {/* Name */}
-                                            <div style={{
-                                              fontSize: '14px',
-                                              fontWeight: '500',
-                                              color: '#1A1A1A',
-                                              flex: 1
-                                            }}>
+                                            <div className="admin-name-text">
                                               {displayName}
                                             </div>
                                             
                                             {/* Check Icon */}
                                             {isSelected && (
-                                              <div style={{
-                                                fontSize: '16px',
-                                                color: '#0066CC'
-                                              }}>
+                                              <div className="check-icon">
                                                 ✓
                                               </div>
                                             )}
@@ -8273,37 +7103,19 @@ const IssuePanel = () => {
                                       
                                       {/* Pagination */}
                                       {totalPages > 1 && (
-                                        <div style={{
-                                          display: 'flex',
-                                          alignItems: 'center',
-                                          justifyContent: 'space-between',
-                                          padding: '8px 12px',
-                                          borderTop: '1px solid #E0E0E0',
-                                          backgroundColor: '#F9F9F9'
-                                        }}>
+                                        <div className="pagination-layout">
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation();
                                               setAdminCurrentPage(Math.max(1, adminCurrentPage - 1));
                                             }}
                                             disabled={adminCurrentPage === 1}
-                                            style={{
-                                              padding: '4px 8px',
-                                              fontSize: '12px',
-                                              border: '1px solid #DFE1E6',
-                                              borderRadius: '3px',
-                                              backgroundColor: adminCurrentPage === 1 ? '#F4F5F7' : 'white',
-                                              color: adminCurrentPage === 1 ? '#9CA3AF' : '#172B4D',
-                                              cursor: adminCurrentPage === 1 ? 'not-allowed' : 'pointer'
-                                            }}
+                                            className={`pagination-button-prev ${adminCurrentPage === 1 ? 'pagination-button-prev-disabled' : 'pagination-button-prev-enabled'}`}
                                           >
                                             ← Prev
                                           </button>
                                           
-                                          <span style={{
-                                            fontSize: '12px',
-                                            color: '#6B778C'
-                                          }}>
+                                          <span className="pagination-page-info">
                                             {adminCurrentPage} / {totalPages}
                                           </span>
                                           
@@ -8313,15 +7125,7 @@ const IssuePanel = () => {
                                               setAdminCurrentPage(Math.min(totalPages, adminCurrentPage + 1));
                                             }}
                                             disabled={adminCurrentPage === totalPages}
-                                            style={{
-                                              padding: '4px 8px',
-                                              fontSize: '12px',
-                                              border: '1px solid #DFE1E6',
-                                              borderRadius: '3px',
-                                              backgroundColor: adminCurrentPage === totalPages ? '#F4F5F7' : 'white',
-                                              color: adminCurrentPage === totalPages ? '#9CA3AF' : '#172B4D',
-                                              cursor: adminCurrentPage === totalPages ? 'not-allowed' : 'pointer'
-                                            }}
+                                            className={`pagination-button-prev ${adminCurrentPage === totalPages ? 'pagination-button-prev-disabled' : 'pagination-button-prev-enabled'}`}
                                           >
                                             Next →
                                           </button>
@@ -8338,12 +7142,7 @@ const IssuePanel = () => {
                     </>
                   )}
 
-                  <div style={{
-                    display: 'flex',
-                    gap: '12px',
-                    justifyContent: 'flex-end',
-                    marginTop: '20px'
-                  }}>
+                  <div className="modal-footer-btns">
                     <button
                       onClick={() => {
                         setShowAdminModal(false);
@@ -8352,15 +7151,7 @@ const IssuePanel = () => {
                         setAdminSearchTerm("");
                         setAdminCurrentPage(1);
                       }}
-                      style={{
-                        padding: '8px 16px',
-                        borderRadius: '4px',
-                        border: '1px solid #DFE1E6',
-                        backgroundColor: 'white',
-                        color: '#6B778C',
-                        cursor: 'pointer',
-                        fontSize: '14px'
-                      }}
+                      className="modal-cancel-btn"
                     >
                       Cancel
                     </button>
@@ -8371,18 +7162,7 @@ const IssuePanel = () => {
                         }
                       }}
                       disabled={!selectedAdmin || isUpdating}
-                      style={{
-                        padding: '8px 16px',
-                        borderRadius: '4px',
-                        border: 'none',
-                        backgroundColor: selectedAdmin && !isUpdating ? '#0066CC' : '#E0E0E0',
-                        color: selectedAdmin && !isUpdating ? 'white' : '#999',
-                        cursor: selectedAdmin && !isUpdating ? 'pointer' : 'not-allowed',
-                        fontSize: '14px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px'
-                      }}
+                      className={`modal-primary-btn btn-flex-layout ${selectedAdmin && !isUpdating ? 'modal-primary-btn-enabled' : 'modal-primary-btn-disabled'}`}
                     >
                       {isUpdating && <Spinner size="small" />}
                       {isUpdating ? 'Assigning...' : 'Assign & Submit Request'}
@@ -8396,62 +7176,17 @@ const IssuePanel = () => {
 
         {/* Expiration Warning Modal for share-record */}
         {showExpirationWarningModal && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10001
-          }}>
-            <div style={{
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              padding: '24px',
-              maxWidth: '480px',
-              width: '90%',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '12px',
-                marginBottom: '20px'
-              }}>
-                <div style={{
-                  backgroundColor: '#FFF5E6',
-                  borderRadius: '50%',
-                  padding: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: '40px',
-                  height: '40px'
-                }}>
-                  <span style={{
-                    fontSize: '24px',
-                    color: '#FF9800'
-                  }}>⚠️</span>
+          <div className="warning-modal-overlay">
+            <div className="warning-modal-content">
+              <div className="warning-modal-body">
+                <div className="warning-icon-container">
+                  <span className="warning-icon">⚠️</span>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <h3 style={{
-                    margin: '0 0 8px 0',
-                    fontSize: '18px',
-                    fontWeight: '600',
-                    color: '#1A1A1A'
-                  }}>
+                <div className="warning-content">
+                  <h3 className="warning-title">
                     {selectedAction?.value === 'share-folder' ? 'User Management Restriction' : 'Sharing Restriction'}
                   </h3>
-                  <p style={{
-                    margin: 0,
-                    fontSize: '14px',
-                    color: '#42526E',
-                    lineHeight: '1.5'
-                  }}>
+                  <p className="warning-description">
                     {selectedAction?.value === 'share-folder' 
                       ? 'The ability to manage users is restricted for users with time-limited access and will be removed when setting access expiration.'
                       : 'Sharing is restricted for users with time-limited access. Setting access expiration will remove sharing permissions.'}
@@ -8459,39 +7194,16 @@ const IssuePanel = () => {
                 </div>
               </div>
 
-              <div style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                gap: '12px',
-                marginTop: '24px'
-              }}>
+              <div className="modal-footer">
                 <button
                   onClick={handleExpirationWarningCancel}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: '4px',
-                    border: '1px solid #DFE1E6',
-                    backgroundColor: 'white',
-                    color: '#6B778C',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500'
-                  }}
+                  className="btn-secondary"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleExpirationWarningConfirm}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: '4px',
-                    border: 'none',
-                    backgroundColor: '#0066CC',
-                    color: 'white',
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    fontWeight: '500'
-                  }}
+                  className="btn-primary-solid"
                 >
                   Continue
                 </button>

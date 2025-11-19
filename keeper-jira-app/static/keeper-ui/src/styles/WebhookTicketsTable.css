@@ -1,0 +1,519 @@
+/* Overlay */
+.webhook-tickets-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(9, 30, 66, 0.54);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Modal */
+.webhook-tickets-modal {
+  background: #ffffff;
+  border-radius: 3px;
+  box-shadow: 0 20px 32px -8px rgba(9, 30, 66, 0.25), 0 0 1px rgba(9, 30, 66, 0.31);
+  max-width: 95%;
+  max-height: 90vh;
+  width: 1200px;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Header */
+.webhook-tickets-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 2px solid #DFE1E6;
+}
+
+.webhook-tickets-header h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+  color: #172B4D;
+  line-height: 1;
+}
+
+.webhook-tickets-close {
+  background: none;
+  border: none;
+  font-size: 28px;
+  color: #42526E;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.webhook-tickets-close:hover {
+  background-color: #EBECF0;
+  color: #172B4D;
+}
+
+/* Content */
+.webhook-tickets-content {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Loading */
+.webhook-tickets-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #6B778C;
+}
+
+.spinner {
+  border: 3px solid #DFE1E6;
+  border-top: 3px solid #0052CC;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Error */
+.webhook-tickets-error {
+  background-color: #FFEBE6;
+  border: 1px solid #FF8F73;
+  border-radius: 3px;
+  padding: 16px;
+  text-align: center;
+  color: #BF2600;
+}
+
+.webhook-tickets-error button {
+  margin-top: 12px;
+  background: #0052CC;
+  color: #FFFFFF;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.webhook-tickets-error button:hover {
+  background: #0747A6;
+}
+
+/* Empty State */
+.webhook-tickets-empty {
+  text-align: center;
+  padding: 40px;
+  color: #6B778C;
+  font-size: 14px;
+}
+
+/* Table Container */
+.webhook-tickets-table-container {
+  overflow-x: auto;
+  border: 1px solid #DFE1E6;
+  border-radius: 3px;
+}
+
+/* Table */
+.webhook-tickets-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  background: #FFFFFF;
+}
+
+.webhook-tickets-table thead {
+  background-color: #F4F5F7;
+  border-bottom: 2px solid #DFE1E6;
+}
+
+.webhook-tickets-table th {
+  padding: 12px 16px;
+  text-align: left;
+  font-weight: 600;
+  color: #172B4D;
+  white-space: nowrap;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.webhook-tickets-table tbody tr {
+  border-bottom: 1px solid #DFE1E6;
+  transition: background-color 0.2s ease;
+}
+
+.webhook-tickets-table tbody tr:hover {
+  background-color: #F4F5F7;
+}
+
+.webhook-tickets-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.webhook-tickets-table td {
+  padding: 12px 16px;
+  color: #172B4D;
+  vertical-align: top;
+}
+
+/* Issue Link Button */
+.issue-link-button {
+  background: none;
+  border: none;
+  color: #0052CC;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 0;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: color 0.2s ease;
+}
+
+.issue-link-button:hover {
+  color: #0747A6;
+  text-decoration: underline;
+}
+
+/* Badges */
+.category-badge,
+.audit-event-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.category-badge {
+  background-color: #DEEBFF;
+  color: #0747A6;
+}
+
+.audit-event-badge {
+  background-color: #E3FCEF;
+  color: #006644;
+}
+
+/* Status Badge */
+.status-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.status-badge.status-to-do,
+.status-badge.status-todo {
+  background-color: #DFE1E6;
+  color: #42526E;
+}
+
+.status-badge.status-in-progress {
+  background-color: #DEEBFF;
+  color: #0747A6;
+}
+
+.status-badge.status-done {
+  background-color: #E3FCEF;
+  color: #006644;
+}
+
+/* Cell Specific Styles */
+.monospace {
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'source-code-pro', monospace;
+  font-size: 12px;
+  color: #42526E;
+}
+
+.date-cell {
+  white-space: nowrap;
+  font-size: 13px;
+  color: #6B778C;
+}
+
+.description-cell {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #42526E;
+  font-size: 13px;
+}
+
+/* Search */
+.webhook-tickets-search {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.webhook-tickets-search-input {
+  width: 100%;
+  padding: 10px 40px 10px 12px;
+  border: 2px solid #DFE1E6;
+  border-radius: 3px;
+  font-size: 14px;
+  color: #172B4D;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.webhook-tickets-search-input:focus {
+  outline: none;
+  border-color: #0052CC;
+  box-shadow: 0 0 0 1px #0052CC;
+}
+
+.webhook-tickets-search-input::placeholder {
+  color: #6B778C;
+}
+
+.webhook-tickets-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #6B778C;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.webhook-tickets-search-clear:hover {
+  background-color: #EBECF0;
+  color: #172B4D;
+}
+
+.webhook-tickets-results-info {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background-color: #E3FCEF;
+  border-left: 3px solid #00875A;
+  color: #006644;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 3px;
+}
+
+/* Footer */
+.webhook-tickets-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+  border-top: 2px solid #DFE1E6;
+  background-color: #F4F5F7;
+  flex-wrap: wrap;
+}
+
+.tickets-count {
+  font-size: 14px;
+  color: #6B778C;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+/* Pagination */
+.webhook-tickets-pagination {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  justify-content: center;
+}
+
+.pagination-btn {
+  background: #FFFFFF;
+  color: #42526E;
+  border: 1px solid #DFE1E6;
+  padding: 6px 12px;
+  border-radius: 3px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 36px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pagination-btn:hover:not(:disabled):not(.active) {
+  background: #F4F5F7;
+  border-color: #B3BAC5;
+}
+
+.pagination-btn.active {
+  background: #0052CC;
+  color: #FFFFFF;
+  border-color: #0052CC;
+  cursor: default;
+}
+
+.pagination-btn:disabled {
+  background: #F4F5F7;
+  color: #A5ADBA;
+  border-color: #DFE1E6;
+  cursor: not-allowed;
+}
+
+.pagination-ellipsis {
+  padding: 6px 8px;
+  color: #6B778C;
+  font-size: 14px;
+}
+
+/* Footer Actions */
+.webhook-tickets-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.webhook-tickets-refresh,
+.webhook-tickets-close-btn {
+  padding: 8px 16px;
+  border-radius: 3px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.webhook-tickets-refresh {
+  background: #FFFFFF;
+  color: #42526E;
+  border: 1px solid #DFE1E6;
+}
+
+.webhook-tickets-refresh:hover {
+  background: #F4F5F7;
+  border-color: #B3BAC5;
+}
+
+.webhook-tickets-close-btn {
+  background: #0052CC;
+  color: #FFFFFF;
+}
+
+.webhook-tickets-close-btn:hover {
+  background: #0747A6;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .webhook-tickets-modal {
+    max-width: 100%;
+    max-height: 100vh;
+    width: 100%;
+    border-radius: 0;
+  }
+
+  .webhook-tickets-table {
+    font-size: 12px;
+  }
+
+  .webhook-tickets-table th,
+  .webhook-tickets-table td {
+    padding: 8px 12px;
+  }
+
+  .description-cell {
+    max-width: 150px;
+  }
+
+  .webhook-tickets-search-input {
+    font-size: 13px;
+  }
+
+  .webhook-tickets-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .webhook-tickets-pagination {
+    justify-content: center;
+    order: 2;
+  }
+
+  .tickets-count {
+    order: 1;
+    text-align: center;
+  }
+
+  .webhook-tickets-actions {
+    order: 3;
+    justify-content: center;
+  }
+
+  .pagination-btn {
+    min-width: 32px;
+    height: 28px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+}
+
