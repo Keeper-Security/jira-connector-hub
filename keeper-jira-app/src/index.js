@@ -4,6 +4,32 @@ import { storage, fetch, route, asApp, asUser, requestJira, webTrigger } from '@
 const resolver = new Resolver();
 
 /**
+ * Helper function to get current user information
+ * Reusable across all resolvers to avoid code duplication
+ */
+async function getCurrentUser() {
+  try {
+    const response = await asUser().requestJira(
+      route`/rest/api/3/myself`,
+      {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      }
+    );
+    
+    if (response.ok) {
+      return await response.json();
+    } else {
+      console.error('Failed to fetch current user info, status:', response.status);
+      return null;
+    }
+  } catch (error) {
+    console.error('Error fetching current user info:', error);
+    return null;
+  }
+}
+
+/**
  * Get Keeper config (called from frontend)
  */
 resolver.define('getConfig', async () => {
@@ -101,15 +127,45 @@ resolver.define('getIssueContext', async (req) => {
   
   const issueKey = context?.extension?.issue?.key;
   const projectKey = context?.extension?.project?.key;
+  const currentUserAccountId = context?.accountId;
   
   // Get current config
   const config = await storage.get('keeperConfig');
+  
+  // Fetch issue labels to determine if this is a webhook-created ticket
+  let labels = [];
+  if (issueKey) {
+    try {
+      const issueResponse = await asApp().requestJira(
+        route`/rest/api/3/issue/${issueKey}?fields=labels`,
+        {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        }
+      );
+      
+      if (issueResponse.ok) {
+        const issueData = await issueResponse.json();
+        labels = issueData.fields?.labels || [];
+      }
+    } catch (error) {
+      console.error('Failed to fetch issue labels:', error);
+      // Continue without labels if fetch fails
+    }
+  }
+  
+  // Fetch current user's email using helper function
+  const currentUser = await getCurrentUser();
+  const currentUserEmail = currentUser?.emailAddress || null;
   
   // Return simplified context - works with any project
   return {
     issueKey,
     projectKey,
-    hasConfig: !!config
+    hasConfig: !!config,
+    labels: labels,
+    currentUserAccountId,
+    currentUserEmail
   };
 });
 
@@ -1060,6 +1116,42 @@ resolver.define('executeKeeperAction', async (req) => {
     throw new Error('Command is required');
   }
   
+  // Check if this is a PEDM command and if the request is already expired or action was already taken
+  const isPedmCommand = command.startsWith('pedm approval action');
+  if (isPedmCommand) {
+    // Check if any action label already exists
+    try {
+      const issueResponse = await asApp().requestJira(
+        route`/rest/api/3/issue/${issueKey}?fields=labels`,
+        {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        }
+      );
+      
+      if (issueResponse.ok) {
+        const issueData = await issueResponse.json();
+        const labels = issueData.fields?.labels || [];
+        
+        if (labels.includes('pedm-approved')) {
+          throw new Error('This approval request has already been approved');
+        }
+        if (labels.includes('pedm-denied')) {
+          throw new Error('This approval request has already been denied');
+        }
+        if (labels.includes('pedm-expired')) {
+          throw new Error('This approval request has expired and can no longer be approved or denied');
+        }
+      }
+    } catch (error) {
+      // If it's our custom error, throw it
+      if (error.message.includes('approval request')) {
+        throw error;
+      }
+      // Otherwise, continue
+    }
+  }
+  
   const config = await storage.get('keeperConfig');
   if (!config) {
     throw new Error('Keeper configuration not found. Please configure the app first.');
@@ -1121,15 +1213,17 @@ resolver.define('executeKeeperAction', async (req) => {
       }
     }
 
+    // Check if this is a PEDM command
+    const isPedmCommand = command.startsWith('pedm approval action');
+    
     // Only add comment for main record creation, not for records created as references
     // Check if this is a main record creation (not just a reference record)
     // Records created as references will have skipComment: true parameter
     const isMainRecordCreation = !parameters.skipComment;
     
-    if (isMainRecordCreation) {
+    if (isMainRecordCreation || isPedmCommand) {
       // Get current user info for the comment
-      const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
-      const currentUser = await currentUserResponse.json();
+      const currentUser = await getCurrentUser();
       
       // Use the timestamp formatted on frontend with user's local time
       const timestamp = formattedTimestamp;
@@ -1145,17 +1239,27 @@ resolver.define('executeKeeperAction', async (req) => {
                  (data.data && data.data.data && data.data.data.record_uid);
       
       // Set command-specific messages
-      switch (command) {
-        case 'record-add':
-          actionMessage = 'Record created successfully';
-          break;
-        case 'record-update':
-          actionMessage = 'Record updated successfully';
-          break;
-        case 'record-permission':
-          actionMessage = 'Record permissions updated successfully';
-          break;
-        case 'share-record':
+      // Handle PEDM commands first
+      if (isPedmCommand) {
+        if (command.includes('--approve')) {
+          actionMessage = `Endpoint privilege approval request has been approved`;
+          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
+        } else if (command.includes('--deny')) {
+          actionMessage = `Endpoint privilege approval request has been denied`;
+          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
+        }
+      } else {
+        switch (command) {
+          case 'record-add':
+            actionMessage = 'Record created successfully';
+            break;
+          case 'record-update':
+            actionMessage = 'Record updated successfully';
+            break;
+          case 'record-permission':
+            actionMessage = 'Record permissions updated successfully';
+            break;
+          case 'share-record':
           // Build detailed action description
           actionDescription = `Share Record - ${parameters.action ? parameters.action.charAt(0).toUpperCase() + parameters.action.slice(1) : 'Grant'} access to ${parameters.user}`;
           
@@ -1212,15 +1316,25 @@ resolver.define('executeKeeperAction', async (req) => {
           }
           break;
           
-        default:
-          actionMessage = data.message || 'Keeper action executed successfully';
+          default:
+            actionMessage = data.message || 'Keeper action executed successfully';
+        }
       }
       
       // Build ADF content with panel (matching save/reject request format)
+      let panelTitle = 'Keeper Request Approved and Executed';
+      if (isPedmCommand) {
+        if (command.includes('--approve')) {
+          panelTitle = 'Endpoint Privilege Approval Request - Approved';
+        } else if (command.includes('--deny')) {
+          panelTitle = 'Endpoint Privilege Approval Request - Denied';
+        }
+      }
+      
       const contentArray = [
         {
           type: 'text',
-          text: 'Keeper Request Approved and Executed',
+          text: panelTitle,
           marks: [{ type: 'strong' }]
         },
         {
@@ -1268,6 +1382,12 @@ resolver.define('executeKeeperAction', async (req) => {
         marks: [{ type: 'em' }]
       });
       
+      // Use different panel types for PEDM commands
+      let panelType = 'success';
+      if (isPedmCommand && command.includes('--deny')) {
+        panelType = 'warning';
+      }
+      
       const adfBody = {
         version: 1,
         type: 'doc',
@@ -1275,7 +1395,7 @@ resolver.define('executeKeeperAction', async (req) => {
           {
             type: 'panel',
             attrs: {
-              panelType: 'success'
+              panelType: panelType
             },
             content: [
               {
@@ -1287,7 +1407,53 @@ resolver.define('executeKeeperAction', async (req) => {
         ]
       };
 
-      // Add comment back to Jira using ADF format
+      // For PEDM commands, add appropriate label FIRST (before comment) to prevent race conditions
+      if (isPedmCommand) {
+        try {
+          // Get current labels
+          const issueResponse = await asApp().requestJira(
+            route`/rest/api/3/issue/${issueKey}?fields=labels`,
+            {
+              method: 'GET',
+              headers: { 'Accept': 'application/json' }
+            }
+          );
+          
+          const issueData = await issueResponse.json();
+          const currentLabels = issueData.fields?.labels || [];
+          
+          // Determine which label to add
+          let newLabel = '';
+          if (command.includes('--approve')) {
+            newLabel = 'pedm-approved';
+          } else if (command.includes('--deny')) {
+            newLabel = 'pedm-denied';
+          }
+          
+          // Add new label if not already present
+          if (newLabel && !currentLabels.includes(newLabel)) {
+            const updatedLabels = [...currentLabels, newLabel];
+            
+            await asApp().requestJira(
+              route`/rest/api/3/issue/${issueKey}`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  fields: {
+                    labels: updatedLabels
+                  }
+                }),
+              }
+            );
+          }
+        } catch (labelErr) {
+          console.error('Failed to add PEDM label:', labelErr);
+          // Don't fail the entire operation if label update fails
+        }
+      }
+      
+      // Add comment back to Jira using ADF format (after label is set)
       await asApp().requestJira(
         route`/rest/api/3/issue/${issueKey}/comment`,
         {
@@ -1335,8 +1501,7 @@ resolver.define('rejectKeeperRequest', async (req) => {
 
   try {
     // Get current user info
-    const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
-    const currentUser = await currentUserResponse.json();
+    const currentUser = await getCurrentUser();
 
     // Create ADF (Atlassian Document Format) for the rejection comment
     const adfBody = {
@@ -1479,14 +1644,10 @@ resolver.define('getUserRole', async (req) => {
     
     // Get current user info
     try {
-      const response = await asUser().requestJira(route`/rest/api/3/myself`);
-      
-      if (response && response.ok) {
-        const userData = await response.json();
+      const userData = await getCurrentUser();
         
-        if (userData && Object.keys(userData).length > 0) {
-          userApiResponse = userData;
-        }
+      if (userData && Object.keys(userData).length > 0) {
+        userApiResponse = userData;
       }
     } catch (userErr) {
     }
@@ -1911,6 +2072,81 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
     
     const issue = await response.json();
     
+    // For PEDM approval requests (test or real), assign to a project admin
+    if (payload.category === 'endpoint_privilege_manager' && payload.audit_event === 'approval_request_created') {
+      try {
+        // Get project admins
+        const projectKey = config.projectKey;
+        
+        // Get project roles
+        const rolesResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role`);
+        const roles = await rolesResponse.json();
+        
+        // Find admin role
+        let adminRoleUrl = null;
+        const possibleAdminRoleNames = ['Administrators', 'Administrator', 'Admins', 'Project Administrators', 'administrators'];
+        
+        for (const roleName of possibleAdminRoleNames) {
+          if (roles && roles[roleName]) {
+            adminRoleUrl = roles[roleName];
+            break;
+          }
+        }
+        
+        if (adminRoleUrl) {
+          // Extract role ID
+          const roleIdMatch = adminRoleUrl.match(/role\/(\d+)/);
+          if (roleIdMatch) {
+            const roleId = roleIdMatch[1];
+            
+            // Get role details with actors
+            const roleDetailsResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role/${roleId}`);
+            const roleDetails = await roleDetailsResponse.json();
+            
+            // Find first active admin user
+            if (roleDetails && roleDetails.actors && roleDetails.actors.length > 0) {
+              let assigneeAccountId = null;
+              
+              for (const actor of roleDetails.actors) {
+                if (actor.actorUser && actor.actorUser.accountId) {
+                  assigneeAccountId = actor.actorUser.accountId;
+                  break;
+                } else if (actor.id) {
+                  assigneeAccountId = actor.id;
+                  break;
+                } else if (actor.accountId) {
+                  assigneeAccountId = actor.accountId;
+                  break;
+                }
+              }
+              
+              // Assign ticket to admin
+              if (assigneeAccountId) {
+                await asApp().requestJira(
+                  route`/rest/api/3/issue/${issue.key}`,
+                  {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      fields: {
+                        assignee: {
+                          accountId: assigneeAccountId
+                        }
+                      }
+                    })
+                  }
+                );
+                console.log(`Assigned PEDM ticket ${issue.key} to project admin`);
+              }
+            }
+          }
+        }
+      } catch (assignError) {
+        console.error('Failed to assign ticket to project admin:', assignError);
+        // Don't fail the entire test if assignment fails
+      }
+    }
+    
     return {
       success: true,
       message: 'Issue created successfully via webhook test',
@@ -2013,6 +2249,377 @@ resolver.define('getWebhookTickets', async (req) => {
 });
 
 /**
+ * Get webhook payload data from current issue description
+ */
+resolver.define('getWebhookPayload', async (req) => {
+  const issueKey = req.payload?.issueKey;
+  
+  if (!issueKey) {
+    throw new Error('Issue key is required');
+  }
+  
+  try {
+    // Fetch the issue with description field
+    const response = await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}?fields=description,labels`,
+      {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      }
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch issue: ${response.statusText}`);
+    }
+    
+    const issue = await response.json();
+    const description = issue.fields?.description;
+    const labels = issue.fields?.labels || [];
+    
+    // Extract JSON payload from description
+    let webhookPayload = null;
+    if (description && description.content) {
+      const codeBlock = description.content.find(
+        block => block.type === 'codeBlock' && block.attrs?.language === 'json'
+      );
+      if (codeBlock && codeBlock.content && codeBlock.content[0]?.text) {
+        try {
+          webhookPayload = JSON.parse(codeBlock.content[0].text);
+        } catch (e) {
+          console.error('Failed to parse webhook payload:', e);
+        }
+      }
+    }
+    
+    return {
+      success: true,
+      payload: webhookPayload,
+      labels: labels
+    };
+    
+  } catch (error) {
+    console.error('Error fetching webhook payload:', error);
+    throw new Error(`Failed to fetch webhook payload: ${error.message}`);
+  }
+});
+
+/**
+ * Check if PEDM request is already expired (has the issue property)
+ */
+resolver.define('checkPedmExpired', async (req) => {
+  const { issueKey } = req.payload;
+  
+  if (!issueKey) {
+    throw new Error('Issue key is required');
+  }
+  
+  try {
+    const propertyResponse = await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
+      {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      }
+    );
+    
+    // If property exists, it's expired
+    if (propertyResponse.ok) {
+      const propertyData = await propertyResponse.json();
+      return { 
+        success: true, 
+        isExpired: true,
+        expiredData: propertyData.value
+      };
+    }
+    
+    return { 
+      success: true, 
+      isExpired: false 
+    };
+  } catch (error) {
+    console.error('Error checking PEDM expiration:', error);
+    return { 
+      success: true, 
+      isExpired: false 
+    };
+  }
+});
+
+/**
+ * Add comment for expired PEDM approval request
+ */
+/**
+ * Check if PEDM action was already taken by checking labels
+ */
+resolver.define('checkPedmActionTaken', async (req) => {
+  const { issueKey } = req.payload;
+  
+  if (!issueKey) {
+    throw new Error('Issue key is required');
+  }
+  
+  try {
+    // Fetch issue labels
+    const issueResponse = await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}?fields=labels`,
+      {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      }
+    );
+    
+    if (!issueResponse.ok) {
+      throw new Error('Failed to fetch issue details');
+    }
+    
+    const issueData = await issueResponse.json();
+    const labels = issueData.fields?.labels || [];
+    
+    // Check for PEDM action labels
+    if (labels.includes('pedm-approved')) {
+      return { 
+        success: true, 
+        actionTaken: true, 
+        action: 'approved',
+        message: 'Request already approved'
+      };
+    }
+    
+    if (labels.includes('pedm-denied')) {
+      return { 
+        success: true, 
+        actionTaken: true, 
+        action: 'denied',
+        message: 'Request already denied'
+      };
+    }
+    
+    if (labels.includes('pedm-expired')) {
+      return { 
+        success: true, 
+        actionTaken: true, 
+        action: 'expired',
+        message: 'Request already expired'
+      };
+    }
+    
+    // No action label found
+    return { 
+      success: true, 
+      actionTaken: false,
+      action: null,
+      message: 'No action taken yet'
+    };
+    
+  } catch (err) {
+    console.error('Error checking PEDM action:', err);
+    return { 
+      success: false, 
+      actionTaken: false,
+      action: null,
+      message: err.message 
+    };
+  }
+});
+
+resolver.define('addPedmExpiredComment', async (req) => {
+  const { issueKey, formattedTimestamp } = req.payload;
+  
+  if (!issueKey) {
+    throw new Error('Issue key is required');
+  }
+  
+  try {
+    // FIRST: Try to set the issue property as a lock to prevent race conditions
+    // Check if property already exists
+    const propertyCheckResponse = await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
+      {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      }
+    );
+    
+    // If property already exists, someone else already processed this
+    if (propertyCheckResponse.ok) {
+      return { 
+        success: true, 
+        message: 'Expired comment already processed',
+        alreadyExpired: true
+      };
+    }
+    
+    // Check if any action label already exists (expired, approved, or denied)
+    const issueResponse = await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}?fields=labels`,
+      {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      }
+    );
+    
+    if (issueResponse.ok) {
+      const issueData = await issueResponse.json();
+      const labels = issueData.fields?.labels || [];
+      
+      if (labels.includes('pedm-approved') || 
+          labels.includes('pedm-denied') || 
+          labels.includes('pedm-expired')) {
+        return { 
+          success: true, 
+          message: 'Action already taken (label found)',
+          alreadyExpired: true
+        };
+      }
+    }
+    
+    // Set the property BEFORE adding comment (as a lock)
+    await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value: {
+            expired: true,
+            expiredAt: new Date().toISOString(),
+            processing: true // Mark as being processed
+          }
+        }),
+      }
+    );
+    
+    // Get current user info (the one viewing when it expired)
+    const currentUser = await getCurrentUser();
+    
+    const timestamp = formattedTimestamp || new Date().toLocaleString();
+    
+    // Create ADF for the expired comment
+    const adfBody = {
+      version: 1,
+      type: 'doc',
+      content: [
+        {
+          type: 'panel',
+          attrs: {
+            panelType: 'error'
+          },
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Endpoint Privilege Approval Request - Expired',
+                  marks: [{ type: 'strong' }]
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: 'This approval request has expired (30 minutes time limit exceeded)'
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: `Viewed by: ${currentUser.displayName}`,
+                  marks: [{ type: 'em' }]
+                },
+                {
+                  type: 'hardBreak'
+                },
+                {
+                  type: 'text',
+                  text: `Checked at: ${timestamp}`,
+                  marks: [{ type: 'em' }]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    
+    // Add 'pedm-expired' label FIRST (before comment) to prevent race conditions
+    try {
+      // Get current labels (we already fetched this earlier, but need fresh data)
+      const labelResponse = await asApp().requestJira(
+        route`/rest/api/3/issue/${issueKey}?fields=labels`,
+        {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        }
+      );
+      
+      const labelData = await labelResponse.json();
+      const currentLabels = labelData.fields?.labels || [];
+      
+      // Add expired label if not already present
+      if (!currentLabels.includes('pedm-expired')) {
+        const updatedLabels = [...currentLabels, 'pedm-expired'];
+        
+        await asApp().requestJira(
+          route`/rest/api/3/issue/${issueKey}`,
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fields: {
+                labels: updatedLabels
+              }
+            }),
+          }
+        );
+      }
+    } catch (labelErr) {
+      console.error('Failed to add pedm-expired label:', labelErr);
+      // Don't fail the entire operation if label update fails
+    }
+    
+    // Now add comment to Jira (after label is set)
+    await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}/comment`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          body: adfBody,
+        }),
+      }
+    );
+    
+    // Update issue property with final details
+    await asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value: {
+            expired: true,
+            expiredAt: new Date().toISOString(),
+            markedBy: currentUser.displayName,
+            processing: false // Mark as complete
+          }
+        }),
+      }
+    );
+    
+    return { 
+      success: true, 
+      message: 'Expired comment added successfully',
+      alreadyExpired: false
+    };
+  } catch (error) {
+    console.error('Error adding expired comment:', error);
+    throw new Error(`Failed to add expired comment: ${error.message}`);
+  }
+});
+
+/**
  * Check if current user has Administrator permissions
  * Checks for both Global Admin (ADMINISTER) and Project Admin (ADMINISTER_PROJECTS)
  * Returns true if user has either permission
@@ -2024,14 +2631,10 @@ resolver.define('getGlobalUserRole', async (req) => {
     
     // Get current user info
     try {
-      const response = await asUser().requestJira(route`/rest/api/3/myself`);
-      
-      if (response && response.ok) {
-        const userData = await response.json();
+      const userData = await getCurrentUser();
         
-        if (userData && Object.keys(userData).length > 0) {
-          userApiResponse = userData;
-        }
+      if (userData && Object.keys(userData).length > 0) {
+        userApiResponse = userData;
       }
     } catch (userErr) {
       // User API call failed - continue with permissions check
@@ -2225,7 +2828,7 @@ resolver.define('getProjectAdmins', async (req) => {
  * Store request data for admin approval
  */
 resolver.define('storeRequestData', async (req) => {
-  const { issueKey, requestData, formattedTimestamp, assigneeAccountId } = req.payload;
+  const { issueKey, requestData, formattedTimestamp } = req.payload;
   
   if (!issueKey) {
     throw new Error('Issue key is required');
@@ -2237,8 +2840,7 @@ resolver.define('storeRequestData', async (req) => {
   
   try {
     // Get current user info
-    const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
-    const currentUser = await currentUserResponse.json();
+    const currentUser = await getCurrentUser();
     
     // Check if there's already stored data to determine if this is an update
     const existingData = await storage.get(`keeper_request_${issueKey}`);
@@ -2259,26 +2861,85 @@ resolver.define('storeRequestData', async (req) => {
     
     await storage.set(`keeper_request_${issueKey}`, dataToStore);
     
-    // If assigneeAccountId is provided, assign the ticket to that admin
-    if (assigneeAccountId) {
-      try {
-        await asApp().requestJira(
-          route`/rest/api/3/issue/${issueKey}`,
-          {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              fields: {
-                assignee: {
-                  accountId: assigneeAccountId
+    // Automatically assign ticket to a random project admin
+    try {
+      // Extract project key from issue key
+      const projectKey = issueKey.split('-')[0];
+      
+      if (projectKey) {
+        // Get project roles
+        const rolesResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role`);
+        const roles = await rolesResponse.json();
+        
+        // Find admin role
+        let adminRoleUrl = null;
+        const possibleAdminRoleNames = ['Administrators', 'Administrator', 'Admins', 'Project Administrators', 'administrators'];
+        
+        for (const roleName of possibleAdminRoleNames) {
+          if (roles && roles[roleName]) {
+            adminRoleUrl = roles[roleName];
+            break;
+          }
+        }
+        
+        if (adminRoleUrl) {
+          // Extract role ID
+          const roleIdMatch = adminRoleUrl.match(/role\/(\d+)/);
+          if (roleIdMatch) {
+            const roleId = roleIdMatch[1];
+            
+            // Get role details with actors
+            const roleDetailsResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role/${roleId}`);
+            const roleDetails = await roleDetailsResponse.json();
+            
+            // Collect all admin users
+            if (roleDetails && roleDetails.actors && roleDetails.actors.length > 0) {
+              const adminAccountIds = [];
+              
+              for (const actor of roleDetails.actors) {
+                let accountId = null;
+                if (actor.actorUser && actor.actorUser.accountId) {
+                  accountId = actor.actorUser.accountId;
+                } else if (actor.id) {
+                  accountId = actor.id;
+                } else if (actor.accountId) {
+                  accountId = actor.accountId;
+                }
+                
+                if (accountId) {
+                  adminAccountIds.push(accountId);
                 }
               }
-            }),
+              
+              // Randomly select one admin
+              if (adminAccountIds.length > 0) {
+                const randomIndex = Math.floor(Math.random() * adminAccountIds.length);
+                const selectedAdminAccountId = adminAccountIds[randomIndex];
+                
+                // Assign ticket to randomly selected admin
+                await asApp().requestJira(
+                  route`/rest/api/3/issue/${issueKey}`,
+                  {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      fields: {
+                        assignee: {
+                          accountId: selectedAdminAccountId
+                        }
+                      }
+                    }),
+                  }
+                );
+                console.log(`Assigned ticket ${issueKey} to random project admin`);
+              }
+            }
           }
-        );
-      } catch (assignError) {
-        // Don't fail the entire operation if assignment fails
+        }
       }
+    } catch (assignError) {
+      console.error('Failed to assign ticket to project admin:', assignError);
+      // Don't fail the entire operation if assignment fails
     }
     
     // Add comment to JIRA ticket
@@ -2410,8 +3071,7 @@ resolver.define('clearStoredRequestData', async (req) => {
     await storage.delete(storageKey);
     
     // Get current user info for the comment
-    const currentUserResponse = await asUser().requestJira(route`/rest/api/3/myself`);
-    const currentUser = await currentUserResponse.json();
+    const currentUser = await getCurrentUser();
     
     // Format timestamp with user's local time (consistent with save/reject requests)
     const now = new Date();
@@ -2807,6 +3467,81 @@ export async function webTriggerHandler(request) {
     
     const issue = await response.json();
     
+    // For PEDM approval requests, assign to a project admin
+    if (payload.category === 'endpoint_privilege_manager' && payload.audit_event === 'approval_request_created') {
+      try {
+        // Get project admins
+        const projectKey = config.projectKey;
+        
+        // Get project roles
+        const rolesResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role`);
+        const roles = await rolesResponse.json();
+        
+        // Find admin role
+        let adminRoleUrl = null;
+        const possibleAdminRoleNames = ['Administrators', 'Administrator', 'Admins', 'Project Administrators', 'administrators'];
+        
+        for (const roleName of possibleAdminRoleNames) {
+          if (roles && roles[roleName]) {
+            adminRoleUrl = roles[roleName];
+            break;
+          }
+        }
+        
+        if (adminRoleUrl) {
+          // Extract role ID
+          const roleIdMatch = adminRoleUrl.match(/role\/(\d+)/);
+          if (roleIdMatch) {
+            const roleId = roleIdMatch[1];
+            
+            // Get role details with actors
+            const roleDetailsResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role/${roleId}`);
+            const roleDetails = await roleDetailsResponse.json();
+            
+            // Find first active admin user
+            if (roleDetails && roleDetails.actors && roleDetails.actors.length > 0) {
+              let assigneeAccountId = null;
+              
+              for (const actor of roleDetails.actors) {
+                if (actor.actorUser && actor.actorUser.accountId) {
+                  assigneeAccountId = actor.actorUser.accountId;
+                  break;
+                } else if (actor.id) {
+                  assigneeAccountId = actor.id;
+                  break;
+                } else if (actor.accountId) {
+                  assigneeAccountId = actor.accountId;
+                  break;
+                }
+              }
+              
+              // Assign ticket to admin
+              if (assigneeAccountId) {
+                await asApp().requestJira(
+                  route`/rest/api/3/issue/${issue.key}`,
+                  {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      fields: {
+                        assignee: {
+                          accountId: assigneeAccountId
+                        }
+                      }
+                    })
+                  }
+                );
+                console.log(`Assigned PEDM ticket ${issue.key} to project admin`);
+              }
+            }
+          }
+        }
+      } catch (assignError) {
+        console.error('Failed to assign ticket to project admin:', assignError);
+        // Don't fail the entire webhook if assignment fails
+      }
+    }
+    
     return {
       statusCode: 200,
       body: JSON.stringify({
@@ -2828,7 +3563,7 @@ export async function webTriggerHandler(request) {
   }
 }
 
-// Export resolver for frontend calls (getConfig, setConfig, testConnection, getIssueContext, executeKeeperCommand, executeKeeperAction, getKeeperRecords, getKeeperFolders, getRecordTypes, getRecordTypeTemplate, getKeeperRecordDetails, rejectKeeperRequest, getUserRole, getGlobalUserRole, getProjectAdmins, storeRequestData, getStoredRequestData, activateKeeperPanel, clearStoredRequestData, getWebTriggerUrl, getWebTriggerConfig, setWebTriggerConfig, getJiraProjects, getProjectIssueTypes, testWebTrigger, testWebTriggerWithPayload, getWebhookTickets)
+// Export resolver for frontend calls (getConfig, setConfig, testConnection, getIssueContext, executeKeeperCommand, executeKeeperAction, getKeeperRecords, getKeeperFolders, getRecordTypes, getRecordTypeTemplate, getKeeperRecordDetails, rejectKeeperRequest, getUserRole, getGlobalUserRole, getProjectAdmins, storeRequestData, getStoredRequestData, activateKeeperPanel, clearStoredRequestData, getWebTriggerUrl, getWebTriggerConfig, setWebTriggerConfig, getJiraProjects, getProjectIssueTypes, testWebTrigger, testWebTriggerWithPayload, getWebhookTickets, getWebhookPayload)
 export const handler = resolver.getDefinitions();
 
 // Export same resolver for issue panel - they can share the same functions

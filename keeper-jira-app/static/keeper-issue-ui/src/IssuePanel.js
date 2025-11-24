@@ -15,6 +15,7 @@ import { Loading, StatusMessage as Status, Modal } from "./components";
 import { KEEPER_ACTION_OPTIONS, PAGINATION_SETTINGS } from "./constants";
 import * as api from "./services/api";
 import { handleApiError } from "./utils/errorHandler";
+import PedmApprovalPanel from "./components/issue/PedmApprovalPanel";
 import "./styles/IssuePanel.css";
 
 // Keeper action options - using imported constant
@@ -103,6 +104,7 @@ const IssuePanel = () => {
   const [storedRequestData, setStoredRequestData] = useState(null); // Store user's saved request
   const [hasStoredData, setHasStoredData] = useState(false); // Track if data has been stored
   const [isUpdating, setIsUpdating] = useState(false); // Track update operation
+  const [isRestrictedWebhookTicket, setIsRestrictedWebhookTicket] = useState(false); // Track if ticket is admin-only webhook ticket
   
   // Admin selection modal and dropdown states
   const [showAdminModal, setShowAdminModal] = useState(false);
@@ -203,23 +205,31 @@ const IssuePanel = () => {
   const getKeeperActionOptions = () => {
     const dynamicRecordTypeOptions = recordTypes;
 
-    return keeperActionOptions.map(action => {
-      if (action.value === 'record-update' || action.value === 'record-add') {
-        return {
-          ...action,
-          fields: action.fields.map(field => {
-            if (field.name === 'recordType') {
-              return {
-                ...field,
-                options: dynamicRecordTypeOptions
-              };
-            }
-            return field;
-          })
-        };
-      }
-      return action;
-    });
+    return keeperActionOptions
+      .map(action => {
+        if (action.value === 'record-update' || action.value === 'record-add') {
+          return {
+            ...action,
+            fields: action.fields.map(field => {
+              if (field.name === 'recordType') {
+                return {
+                  ...field,
+                  options: dynamicRecordTypeOptions
+                };
+              }
+              return field;
+            })
+          };
+        }
+        return action;
+      })
+      .filter(action => {
+        // Hide "Create New Secret" (record-add) and "Update Record" (record-update) from non-admin users
+        if ((action.value === 'record-add' || action.value === 'record-update') && !isAdmin) {
+          return false;
+        }
+        return true;
+      });
   };
 
   // Filter and paginate options
@@ -776,8 +786,8 @@ const IssuePanel = () => {
     }
   };
   
-  // Save/Update form data (after admin selection)
-  const saveRequestDataWithAdmin = async (adminAccountId) => {
+  // Save/Update form data (no longer used but kept for compatibility)
+  const saveRequestDataWithAdmin = async () => {
     setIsUpdating(true);
     try {
       // Include temporary address data if present
@@ -815,8 +825,7 @@ const IssuePanel = () => {
       const result = await api.storeRequestData(
         issueContext.issueKey,
         requestData,
-        formattedTimestamp,
-        adminAccountId
+        formattedTimestamp
       );
       
       if (result.success) {
@@ -859,71 +868,65 @@ const IssuePanel = () => {
       return;
     }
     
-    // For non-admin users saving for the FIRST TIME, show admin selection modal
-    // For UPDATE requests (hasStoredData is true), skip admin selection as it's already assigned
-    if (!isAdmin && !hasStoredData) {
-      await fetchProjectAdmins();
-    } else {
-      // For admin users OR updating existing request, save directly without admin selection
-      setIsUpdating(true);
-      try {
-        // Include temporary address data if present
-        const tempAddressData = {};
-        if (formData.addressRef && formData.addressRef.startsWith('temp_addr_')) {
-          const tempAddressUid = formData.addressRef;
-          const addressDetails = resolvedAddresses[tempAddressUid];
-          if (addressDetails && addressDetails.isTemporary) {
-            tempAddressData[tempAddressUid] = addressDetails;
-          }
+    // Save directly for all users - backend will auto-assign to random project admin
+    setIsUpdating(true);
+    try {
+      // Include temporary address data if present
+      const tempAddressData = {};
+      if (formData.addressRef && formData.addressRef.startsWith('temp_addr_')) {
+        const tempAddressUid = formData.addressRef;
+        const addressDetails = resolvedAddresses[tempAddressUid];
+        if (addressDetails && addressDetails.isTemporary) {
+          tempAddressData[tempAddressUid] = addressDetails;
         }
-        
-        const now = new Date();
-        const requestData = {
-          selectedAction,
-          formData,
-          selectedRecord,
-          selectedRecordForUpdate,
-          selectedFolder,
-          tempAddressData, // Store temporary address data
-          timestamp: now.toISOString()
-        };
-        
-        // Format the same timestamp for the JIRA comment (same format used in UI)
-        const formattedTimestamp = now.toLocaleString('en-GB', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false
-        });
-        
-        const result = await api.storeRequestData(
-          issueContext.issueKey,
-          requestData,
-          formattedTimestamp
-        );
-        
-        if (result.success) {
-          setStoredRequestData(requestData);
-          setHasStoredData(true);
-          // Don't show success message - the "Request Saved" dialog box already shows this info
-        }
-      } catch (error) {
-        // Handle error
-        const errorMessage = handleApiError(error, "Failed to save request data. Please try again.");
-        
-        // Only show error messages - the "Request Saved" dialog handles success
-        setSaveRequestMessage({ 
-          type: 'error', 
-          message: errorMessage,
-          showTimestamp: false
-        });
-        setTimeout(() => setSaveRequestMessage(null), 5000);
-      } finally {
-        setIsUpdating(false);
       }
+      
+      const now = new Date();
+      const requestData = {
+        selectedAction,
+        formData,
+        selectedRecord,
+        selectedRecordForUpdate,
+        selectedFolder,
+        tempAddressData, // Store temporary address data
+        timestamp: now.toISOString()
+      };
+      
+      // Format the same timestamp for the JIRA comment (same format used in UI)
+      const formattedTimestamp = now.toLocaleString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+      
+      const result = await api.storeRequestData(
+        issueContext.issueKey,
+        requestData,
+        formattedTimestamp
+      );
+      
+      if (result.success) {
+        setStoredRequestData(requestData);
+        setHasStoredData(true);
+        // Don't show success message - the "Request Saved" dialog box already shows this info
+      }
+    } catch (error) {
+      // Handle error
+      const errorMessage = handleApiError(error, "Failed to save request data. Please try again.");
+      
+      // Only show error messages - the "Request Saved" dialog handles success
+      setSaveRequestMessage({ 
+        type: 'error', 
+        message: errorMessage,
+        showTimestamp: false
+      });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -3597,6 +3600,15 @@ const IssuePanel = () => {
     // Update previous action
     setPreviousAction(selectedAction);
     
+    // Auto-populate email field for non-admin users when share-record or share-folder is selected
+    if (selectedAction && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') && 
+        !isAdmin && issueContext?.currentUserEmail && actionActuallyChanged && !isLoadingStoredData) {
+      setFormData(prev => ({
+        ...prev,
+        user: issueContext.currentUserEmail
+      }));
+    }
+    
     // Fetch records when share-record or record-update is selected (but not when loading stored data)
     if (selectedAction && (selectedAction.value === 'share-record' || selectedAction.value === 'record-update') && !isLoadingStoredData) {
       fetchKeeperRecords();
@@ -3616,7 +3628,7 @@ const IssuePanel = () => {
     if (selectedAction && (selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) {
       fetchKeeperFolders();
     }
-  }, [selectedAction, isLoadingStoredData]);
+  }, [selectedAction, isLoadingStoredData, isAdmin, issueContext]);
 
   // Auto-dismiss workflow info dialog after 5 seconds
   useEffect(() => {
@@ -3771,6 +3783,15 @@ const IssuePanel = () => {
     
     // Special handling for share-record action
     if (selectedAction.value === 'share-record') {
+      // For non-admin users, requirements field is mandatory
+      if (!isAdmin) {
+        if (!formData['requirements'] || formData['requirements'].trim() === '') {
+          return false;
+        }
+        return true;
+      }
+      
+      // For admin users, check required fields
       // Check if record is selected
       if (!selectedRecord) {
         return false;
@@ -3803,6 +3824,15 @@ const IssuePanel = () => {
     
     // Special handling for share-folder action
     if (selectedAction.value === 'share-folder') {
+      // For non-admin users, requirements field is mandatory
+      if (!isAdmin) {
+        if (!formData['requirements'] || formData['requirements'].trim() === '') {
+          return false;
+        }
+        return true;
+      }
+      
+      // For admin users, check required fields
       // Check if folder is selected
       if (!selectedFolder) {
         return false;
@@ -3823,6 +3853,15 @@ const IssuePanel = () => {
     
     // Special handling for record-permission action
     if (selectedAction.value === 'record-permission') {
+      // For non-admin users, requirements field is mandatory
+      if (!isAdmin) {
+        if (!formData['requirements'] || formData['requirements'].trim() === '') {
+          return false;
+        }
+        return true;
+      }
+      
+      // For admin users, check required fields
       // Check if folder is selected
       if (!selectedFolder) {
         return false;
@@ -3913,7 +3952,16 @@ const IssuePanel = () => {
     
     // For record-update, show different border color when field has current value (either in form or in record)
     const hasCurrentValue = selectedAction?.value === 'record-update' && (value !== '' || currentRecordValue !== '');
-    const hasRequiredError = field.required && !value && selectedAction?.value !== 'record-update';
+    
+    // Don't show required error for non-admin users in share-record, share-folder, record-permission
+    const isNonAdminInSpecialActions = !isAdmin && 
+      (selectedAction?.value === 'share-record' || 
+       selectedAction?.value === 'share-folder' || 
+       selectedAction?.value === 'record-permission');
+    
+    const hasRequiredError = field.required && !value && 
+      selectedAction?.value !== 'record-update' && 
+      !isNonAdminInSpecialActions;
     
     // Generate className for input fields based on state
     const getInputClassName = (additionalClasses = '') => {
@@ -4576,14 +4624,21 @@ const IssuePanel = () => {
           );
         }
         
+        // Check if this is the user/email field in share-record or share-folder for non-admin users
+        const isUserFieldForNonAdmin = !isAdmin && 
+                                       field.name === 'user' && 
+                                       (selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder');
+        
         return (
           <input
             type={inputType}
             value={value}
             disabled={isFormDisabled}
+            readOnly={isUserFieldForNonAdmin}
             onChange={(e) => handleInputChange(field.name, e.target.value)}
             placeholder={field.placeholder}
-            className={getInputClassName()}
+            className={`${getInputClassName()} ${isUserFieldForNonAdmin ? 'readonly-field' : ''}`}
+            title={isUserFieldForNonAdmin ? 'This field is auto-populated with your email address' : ''}
           />
         );
     }
@@ -4594,8 +4649,14 @@ const IssuePanel = () => {
     setIsLoading(true);
     api.getIssueContext()
       .then((context) => {
-        
         setIssueContext(context);
+        
+        // Check if this is a restricted webhook ticket (endpoint_privilege_manager + approval_request_created)
+        const labels = context.labels || [];
+        const hasEndpointPrivilegeLabel = labels.includes('endpoint-privilege-manager');
+        const hasApprovalRequestLabel = labels.includes('approval-request-created');
+        const isRestricted = hasEndpointPrivilegeLabel && hasApprovalRequestLabel;
+        setIsRestrictedWebhookTicket(isRestricted);
         
         // Clear any previous stored data to ensure fresh start for new ticket
         setStoredRequestData(null);
@@ -5050,6 +5111,41 @@ const IssuePanel = () => {
     );
   }
 
+  // Restrict access for webhook-created tickets (endpoint_privilege_manager + approval_request_created)
+  // Only admins can access the panel for these tickets
+  if (isRestrictedWebhookTicket && !isAdmin) {
+    return (
+      <div className="issue-panel-container">
+        <div className="panel-header">
+          <div className="header-icon-wrapper">
+            <LockIcon size="medium" />
+          </div>
+          <div className="header-content">
+            <h1 className="panel-title">Keeper Security Integration</h1>
+            <p className="panel-subtitle">Access Restricted</p>
+          </div>
+        </div>
+
+        <div className="panel-body">
+          <SectionMessage appearance="warning" title="Administrator Access Required">
+            <p>
+              This ticket was automatically created from a Keeper Security Endpoint Privilege Manager approval request. 
+              Access to the Keeper integration panel for these tickets is restricted to Jira Administrators and Project Administrators only.
+            </p>
+            <p style={{ marginTop: '12px' }}>
+              If you need to perform actions on this request, please contact your Jira administrator.
+            </p>
+          </SectionMessage>
+        </div>
+      </div>
+    );
+  }
+
+  // Show custom PEDM UI for webhook-created tickets when user is admin
+  if (isRestrictedWebhookTicket && isAdmin) {
+    return <PedmApprovalPanel issueContext={issueContext} />;
+  }
+
   const rootClassName = `app-root ${
     (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown) 
       ? 'app-root-expanded'
@@ -5234,11 +5330,13 @@ const IssuePanel = () => {
                   {/* Records Selector for record-update action only */}
                   {selectedAction.value === 'record-update' && (
                     <div className="mb-16">
-                      <label className="label-block">
-                        Step 1: Select Record to Update <span className="text-error">*</span>
-                      </label>
-                      
-                      {/* Info about the record update process */}
+                      {isAdmin && (
+                        <>
+                          <label className="label-block">
+                            Step 1: Select Record to Update <span className="text-error">*</span>
+                          </label>
+                          
+                          {/* Info about the record update process */}
                       {!selectedRecordForUpdate && (
                         <div className="info-msg-success italic">
                           Select a record to update.
@@ -5400,16 +5498,19 @@ const IssuePanel = () => {
                         </div>
                       )}
 
-                      {keeperRecords.length > 0 && (
-                        <div className="item-count">
-                          {keeperRecords.length} total records available for update
-                        </div>
+                          {keeperRecords.length > 0 && (
+                            <div className="item-count">
+                              {keeperRecords.length} total records available for update
+                            </div>
+                          )}
+                        </>
                       )}
+
                     </div>
                   )}
 
                   {/* Records Selector for share-record action only */}
-                  {selectedAction.value === 'share-record' && (
+                  {selectedAction.value === 'share-record' && isAdmin && (
                     <div className="share-record-selector">
                       <label className="share-record-label">
                         Select Record:
@@ -5491,9 +5592,9 @@ const IssuePanel = () => {
                                           setRecordSearchTerm("");
                                           // Auto-populate the Record ID/Title field
                                           handleInputChange('record', record.record_uid);
-                                          // Auto-populate the Email field with issue creator's email
-                                          if (issueContext?.issueCreatorEmail) {
-                                            handleInputChange('user', issueContext.issueCreatorEmail);
+                                          // Auto-populate the Email field with current user's email
+                                          if (issueContext?.currentUserEmail) {
+                                            handleInputChange('user', issueContext.currentUserEmail);
                                           }
                                         }}
                                         className={`dropdown-item ${selectedRecord?.record_uid === record.record_uid ? 'selected' : ''}`}
@@ -5563,22 +5664,24 @@ const IssuePanel = () => {
                     </div>
                   )}
 
-                  {/* Folder Selector for share-record action only */}
+                  {/* Folder Selector for share-record action (dropdowns for admin only, text areas for all) */}
                   {selectedAction.value === 'share-record' && (
                     <div className="share-record-selector">
-                      <label className="share-record-label">
-                        Select Folder:
-                      </label>
-                      
-                      {/* Info message when folder is selected */}
-                      {selectedFolder && (
-                        <div className="share-record-selected-box">
-                          <div>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.folderPath}</span></div>
-                        </div>
-                      )}
+                      {isAdmin && (
+                        <>
+                          <label className="share-record-label">
+                            Select Folder:
+                          </label>
+                          
+                          {/* Info message when folder is selected */}
+                          {selectedFolder && (
+                            <div className="share-record-selected-box">
+                              <div>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.folderPath}</span></div>
+                            </div>
+                          )}
 
-                      {/* Folders Dropdown Container with search and pagination */}
-                      <div className="relative z-997">
+                          {/* Folders Dropdown Container with search and pagination */}
+                          <div className="relative z-997">
                         {loadingFolders ? (
                           <div className="loading-container">
                             Loading folders...
@@ -5721,24 +5824,28 @@ const IssuePanel = () => {
                         )}
                       </div>
 
-                      {(() => {
-                        const sharedFolders = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
-                        return sharedFolders.length > 0 && (
-                          <div className="share-record-count">
-                            {sharedFolders.length} shared folders available
-                          </div>
-                        );
-                      })()}
+                          {(() => {
+                            const sharedFolders = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
+                            return sharedFolders.length > 0 && (
+                              <div className="share-record-count">
+                                {sharedFolders.length} shared folders available
+                              </div>
+                            );
+                          })()}
+                        </>
+                      )}
 
                       {/* Info message and requirement text area */}
                       <div className="share-record-textarea-wrapper">
                         <div className="share-record-info-message">
-                          Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.
+                          {isAdmin 
+                            ? 'Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.'
+                            : 'Provide your requirement and justification for this request. An admin will review and process it.'}
                         </div>
 
                         <div>
                           <label className="share-record-label">
-                            Additional Requirements (Optional):
+                            Requirements {!isAdmin && <span className="text-error">*</span>}:
                           </label>
                           <textarea
                             value={formData.requirements || ''}
@@ -5768,12 +5875,14 @@ const IssuePanel = () => {
                   {/* Folders Selector for record-permission and share-folder actions */}
                   {(selectedAction.value === 'record-permission' || selectedAction.value === 'share-folder') && (
                     <div className="share-record-selector">
-                      <label className="share-record-label">
-                        Select Folder: <span className="text-error">*</span>
-                      </label>
+                      {isAdmin && (
+                        <>
+                          <label className="share-record-label">
+                            Select Folder: <span className="text-error">*</span>
+                          </label>
 
-                      {/* Folders Dropdown Container */}
-                      <div className="relative z-997">
+                          {/* Folders Dropdown Container */}
+                          <div className="relative z-997">
                         {loadingFolders ? (
                           <div className="loading-container">
                             Loading folders...
@@ -5908,23 +6017,29 @@ const IssuePanel = () => {
                         </div>
                       )}
 
-                      {getFilteredFolders().length > 0 && (
-                        <div className="share-record-count">
-                          {getFilteredFolders().length} shared folders available
-                        </div>
+                          {getFilteredFolders().length > 0 && (
+                            <div className="share-record-count">
+                              {getFilteredFolders().length} shared folders available
+                            </div>
+                          )}
+                        </>
                       )}
 
                       {/* Info message and requirement text area for share-folder and record-permission actions */}
                       <div className="share-record-textarea-wrapper">
                         <div className="share-record-info-message">
-                          {selectedAction.value === 'record-permission' 
-                            ? 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'
-                            : 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'}
+                          {isAdmin 
+                            ? (selectedAction.value === 'record-permission' 
+                                ? 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'
+                                : 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.')
+                            : (selectedAction.value === 'record-permission' 
+                                ? 'Provide your requirement and justification for changing folder permissions. An admin will review and process it.'
+                                : 'Provide your requirement and justification for accessing a folder. An admin will review and process it.')}
                         </div>
 
                         <div>
                           <label className="share-record-label">
-                            Additional Requirements (Optional):
+                            Requirements {!isAdmin && <span className="text-error">*</span>}:
                           </label>
                           <textarea
                             value={formData.requirements || ''}
@@ -6311,7 +6426,9 @@ const IssuePanel = () => {
                       >
                         <label className="label-record-add">
                           {field.label}
-                          {field.required && selectedAction.value !== 'record-update' && (
+                          {/* Don't show required asterisk for non-admin users in share-record, share-folder, record-permission */}
+                          {field.required && selectedAction.value !== 'record-update' && 
+                           !((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) && (
                             <span className="text-error ml-4">*</span>
                           )}
                         </label>
@@ -6320,7 +6437,9 @@ const IssuePanel = () => {
                           <div className="field-hint-text">
                           </div>
                         )}
-                        {field.required && !formData[field.name] && selectedAction.value !== 'record-update' && (
+                        {/* Don't show error message for non-admin users in share-record, share-folder, record-permission */}
+                        {field.required && !formData[field.name] && selectedAction.value !== 'record-update' && 
+                         !((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) && (
                           <div className="field-error-text">
                             This field is required
                           </div>

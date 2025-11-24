@@ -45,8 +45,8 @@ export const getStoredRequestData = async (issueKey) => {
   return await invoke("getStoredRequestData", { issueKey });
 };
 
-// Store request data
-export const storeRequestData = async (issueKey, requestData, formattedTimestamp = null, assigneeAccountId = null) => {
+// Store request data (backend handles auto-assignment to project admin)
+export const storeRequestData = async (issueKey, requestData, formattedTimestamp = null) => {
   const payload = {
     issueKey, 
     requestData
@@ -54,10 +54,6 @@ export const storeRequestData = async (issueKey, requestData, formattedTimestamp
   
   if (formattedTimestamp) {
     payload.formattedTimestamp = formattedTimestamp;
-  }
-  
-  if (assigneeAccountId) {
-    payload.assigneeAccountId = assigneeAccountId;
   }
   
   return await invoke("storeRequestData", payload);
@@ -100,4 +96,20 @@ export const rejectKeeperRequest = async (issueKey, rejectionReason) => {
   });
 };
 
+// Get webhook payload data from issue description
+export const getWebhookPayload = async (issueKey) => {
+  return await invoke("getWebhookPayload", { issueKey });
+};
+
+export const addPedmExpiredComment = async (issueKey, formattedTimestamp) => {
+  return await invoke("addPedmExpiredComment", { issueKey, formattedTimestamp });
+};
+
+export const checkPedmExpired = async (issueKey) => {
+  return await invoke("checkPedmExpired", { issueKey });
+};
+
+export const checkPedmActionTaken = async (issueKey) => {
+  return await invoke("checkPedmActionTaken", { issueKey });
+};
 

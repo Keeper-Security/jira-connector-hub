@@ -392,6 +392,14 @@
 
 .share-record-textarea:disabled {
   background-color: #F5F5F5;
+}
+
+/* Readonly field styling */
+.readonly-field {
+  background-color: #F4F5F7 !important;
+  cursor: not-allowed !important;
+  color: #505F79 !important;
+  border-color: #DFE1E6 !important;
   color: #999;
   cursor: not-allowed;
 }
@@ -3376,4 +3384,109 @@ textarea.input-field {
   box-sizing: border-box;
 }
 
+/* PEDM Approval Panel Styles */
+.app-body {
+  padding: 0;
+}
 
+.message-box-error {
+  background-color: #FFEBE6;
+  border: 2px solid #FF8F73;
+}
+
+.message-box-title-error {
+  font-weight: 600;
+  font-size: 16px;
+  color: #BF2600;
+  margin-bottom: 6px;
+  padding-right: 28px;
+}
+
+.message-box-warning {
+  background-color: #FFFAE6;
+  border: 2px solid #FFC400;
+}
+
+.message-box-title-warning {
+  font-weight: 600;
+  font-size: 16px;
+  color: #974F0C;
+  margin-bottom: 6px;
+  padding-right: 28px;
+}
+
+/* PEDM Timer */
+.pedm-timer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #B3D4FF;
+  font-size: 14px;
+  color: #0747A6;
+  font-weight: 500;
+}
+
+.pedm-timer strong {
+  font-weight: 700;
+  color: #172B4D;
+}
+
+/* PEDM Action Buttons */
+.pedm-approve-btn {
+  background-color: #5FAD56;
+  color: #FFFFFF;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  transition: all 0.2s ease;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.pedm-approve-btn:disabled {
+  cursor: not-allowed;
+}
+
+.pedm-btn-loading {
+  background-color: #4A8F45;
+  box-shadow: none;
+}
+
+.pedm-reject-btn {
+  background-color: #E85D54;
+  color: #FFFFFF;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  transition: all 0.2s ease;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.pedm-reject-btn:disabled {
+  cursor: not-allowed;
+}
+
+.textarea-resize {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.modal-uid {
+  background: #F4F5F7;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #5E6C84;
+  margin-top: 12px !important;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+}
+
+.modal-uid strong {
+  color: #172B4D;
+}

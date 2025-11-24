@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { router } from "@forge/bridge";
 
 // Modular components
-import { TabBar, ConfigTab, PedmTab, WebTriggerConfig } from "./components";
+import { TabBar, ConfigTab, WebTriggerConfig } from "./components";
 import SectionMessage from "@atlaskit/section-message";
 import StatusMessage from "./components/common/StatusMessage";
 
@@ -25,8 +25,6 @@ const App = () => {
   
   // Use custom hook for configuration management
   const configHook = useConfig();
-  
-  // No PEDM state here - it's all managed inside PedmTab component
 
   // Check admin permissions on mount
   useEffect(() => {
@@ -45,8 +43,6 @@ const App = () => {
 
     checkPermissions();
   }, []);
-
-  // No PEDM logic here - it's all managed inside PedmTab component
 
   return (
     <div className="app-container">
