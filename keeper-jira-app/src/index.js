@@ -613,33 +613,49 @@ function buildKeeperCommand(action, parameters, issueKey) {
       
     case 'share-record':
       // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R] [--expire-at|--expire-in] --force
-      if (parameters.record) {
+      // For cancel action: share-record -a cancel -e "EMAIL" [-e "EMAIL2" ...] -f
+      
+      // Add record UID only if not cancel action (cancel doesn't need record)
+      if (parameters.record && parameters.action !== 'cancel') {
         command += ` '${parameters.record}'`;
       }
+      
+      // Handle email addresses - support comma-separated values
       if (parameters.user) {
-        command += ` -e '${parameters.user}'`;
+        // Split by comma and trim whitespace
+        const emails = parameters.user.split(',').map(email => email.trim()).filter(email => email);
+        // Add each email with its own -e flag
+        emails.forEach(email => {
+          command += ` -e '${email}'`;
+        });
       }
+      
       if (parameters.action) {
         command += ` -a ${parameters.action}`;
       }
-      // Add optional permission flags
-      if (parameters.can_share === true) {
-        command += ` -s`;
+      
+      // Only add permission flags if action is NOT cancel
+      if (parameters.action !== 'cancel') {
+        // Add optional permission flags
+        if (parameters.can_share === true) {
+          command += ` -s`;
+        }
+        if (parameters.can_write === true) {
+          command += ` -w`;
+        }
+        if (parameters.recursive === true) {
+          command += ` -R`;
+        }
+        // Add expiration options
+        if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
+          // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
+          const expireAtFormatted = parameters.expire_at.replace('T', ' ');
+          command += ` --expire-at "${expireAtFormatted}"`;
+        } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
+          command += ` --expire-in ${parameters.expire_in}`;
+        }
       }
-      if (parameters.can_write === true) {
-        command += ` -w`;
-      }
-      if (parameters.recursive === true) {
-        command += ` -R`;
-      }
-      // Add expiration options
-      if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
-        // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
-        const expireAtFormatted = parameters.expire_at.replace('T', ' ');
-        command += ` --expire-at "${expireAtFormatted}"`;
-      } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-        command += ` --expire-in ${parameters.expire_in}`;
-      }
+      
       // Add force flag at the end
       command += ` -f`;
       break;
@@ -649,9 +665,17 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (parameters.folder) {
         command += ` '${parameters.folder}'`;
       }
+      
+      // Handle email addresses - support comma-separated values
       if (parameters.user) {
-        command += ` -e '${parameters.user}'`;
+        // Split by comma and trim whitespace
+        const emails = parameters.user.split(',').map(email => email.trim()).filter(email => email);
+        // Add each email with its own -e flag
+        emails.forEach(email => {
+          command += ` -e '${email}'`;
+        });
       }
+      
       if (parameters.action) {
         command += ` -a ${parameters.action}`;
       }
@@ -2861,8 +2885,9 @@ resolver.define('storeRequestData', async (req) => {
     
     await storage.set(`keeper_request_${issueKey}`, dataToStore);
     
-    // Automatically assign ticket to a random project admin
-    try {
+    // Automatically assign ticket to a random project admin ONLY on first save (not on updates)
+    if (!isUpdate) {
+      try {
       // Extract project key from issue key
       const projectKey = issueKey.split('-')[0];
       
@@ -2941,6 +2966,7 @@ resolver.define('storeRequestData', async (req) => {
       console.error('Failed to assign ticket to project admin:', assignError);
       // Don't fail the entire operation if assignment fails
     }
+    } // End of if (!isUpdate)
     
     // Add comment to JIRA ticket
     const actionLabel = requestData.selectedAction?.label || 'Keeper Action';

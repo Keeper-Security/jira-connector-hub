@@ -868,7 +868,7 @@ const IssuePanel = () => {
       return;
     }
     
-    // Save directly for all users - backend will auto-assign to random project admin
+    // Save directly for all users - backend will auto-assign to random project admin only on first save (not on updates)
     setIsUpdating(true);
     try {
       // Include temporary address data if present
@@ -3792,11 +3792,6 @@ const IssuePanel = () => {
       }
       
       // For admin users, check required fields
-      // Check if record is selected
-      if (!selectedRecord) {
-        return false;
-      }
-      
       // Check if action is selected
       if (!formData['action'] || formData['action'].trim() === '') {
         return false;
@@ -3804,6 +3799,16 @@ const IssuePanel = () => {
       
       // Check if user/email is entered
       if (!formData['user'] || formData['user'].trim() === '') {
+        return false;
+      }
+      
+      // For "cancel" action, only email and action are required (no record/folder needed)
+      if (formData['action'] === 'cancel') {
+        return true;
+      }
+      
+      // For other actions (grant, revoke, owner), check if record or folder is selected
+      if (!selectedRecord && !selectedFolder) {
         return false;
       }
       
@@ -3977,7 +3982,8 @@ const IssuePanel = () => {
     switch (field.type) {
       case 'record-select':
         // Render record dropdown for share-record action
-        const isRecordFieldDisabled = isFormDisabled || formData.sharedFolder || selectedFolder;
+        const isCancelSelected = selectedAction?.value === 'share-record' && formData.action === 'cancel';
+        const isRecordFieldDisabled = isFormDisabled || formData.sharedFolder || selectedFolder || isCancelSelected;
         return (
           <div className="relative">
             <input
@@ -4026,7 +4032,8 @@ const IssuePanel = () => {
       
       case 'folder-select':
         // Render folder dropdown for share-record action with search and pagination
-        const isFolderFieldDisabled = isFormDisabled || formData.record || selectedRecord;
+        const isCancelSelectedForFolder = selectedAction?.value === 'share-record' && formData.action === 'cancel';
+        const isFolderFieldDisabled = isFormDisabled || formData.record || selectedRecord || isCancelSelectedForFolder;
         return (
           <div className="relative">
             <input
@@ -4158,10 +4165,25 @@ const IssuePanel = () => {
         if (field.name === 'recordType') {
         }
         
+        // Filter options for share-record action dropdown for non-admin users
+        let filteredOptions = field.options || [];
+        if (selectedAction?.value === 'share-record' && field.name === 'action' && !isAdmin) {
+          // Remove 'cancel' and 'revoke' options for non-admin users
+          filteredOptions = filteredOptions.filter(option => {
+            const optionValue = typeof option === 'string' ? option : option.value;
+            return optionValue !== 'cancel' && optionValue !== 'revoke';
+          });
+        }
+        
+        // Disable expiration_type dropdown when cancel action is selected for share-record
+        const isExpirationDisabledForCancel = selectedAction?.value === 'share-record' && 
+                                               field.name === 'expiration_type' && 
+                                               formData.action === 'cancel';
+        
         return (
           <select
             value={value}
-            disabled={isFormDisabled}
+            disabled={isFormDisabled || isExpirationDisabledForCancel}
             onChange={(e) => {
               const newValue = e.target.value;
               handleInputChange(field.name, newValue);
@@ -4184,11 +4206,31 @@ const IssuePanel = () => {
                   setDynamicCustomFields([]);
                 }
               }
+              
+              // Special handling for share-record action field when "cancel" is selected
+              if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'cancel') {
+                // Clear and disable all checkboxes, clear record/folder selections when cancel is selected
+                setFormData(prev => ({
+                  ...prev,
+                  action: newValue,
+                  can_share: false,
+                  can_write: false,
+                  recursive: false,
+                  expiration_type: 'none',
+                  expire_at: '',
+                  expire_in: '',
+                  record: null,
+                  sharedFolder: null
+                }));
+                // Also clear selected record and folder states
+                setSelectedRecord(null);
+                setSelectedFolder(null);
+              }
             }}
             className={getInputClassName()}
           >
             <option value="">{field.placeholder}</option>
-            {field.options?.map(option => {
+            {filteredOptions.map(option => {
               // Handle both string options and object options {label, value}
               if (typeof option === 'string') {
                 return <option key={option} value={option}>{option}</option>;
@@ -4239,8 +4281,13 @@ const IssuePanel = () => {
                                        formData.expiration_type && 
                                        formData.expiration_type !== 'none';
         
+        // Disable all checkboxes when "cancel" action is selected for share-record
+        const isCancelActionDisabled = selectedAction?.value === 'share-record' && 
+                                        formData.action === 'cancel' &&
+                                        (field.name === 'can_share' || field.name === 'can_write' || field.name === 'recursive');
+        
         const isExpirationDisabled = isCanShareDisabled || isManageUsersDisabled;
-        const checkboxDisabled = isFormDisabled || isExpirationDisabled || isRecursiveDisabled;
+        const checkboxDisabled = isFormDisabled || isExpirationDisabled || isRecursiveDisabled || isCancelActionDisabled;
         
         return (
           <div className={`checkbox-container ${(checkboxDisabled || isExpirationDisabled) ? 'disabled' : ''}`}>
@@ -5528,35 +5575,37 @@ const IssuePanel = () => {
                             <input
                               id="keeper-records-input"
                               type="text"
-                              disabled={isFormDisabled || selectedFolder}
+                              disabled={isFormDisabled || selectedFolder || formData.action === 'cancel'}
                               placeholder={
-                                (isFormDisabled || selectedFolder) ? (selectedFolder ? "Disabled (folder selected)" : "Form disabled...") :
+                                (isFormDisabled || selectedFolder || formData.action === 'cancel') ? 
+                                  (formData.action === 'cancel' ? "Disabled (cancel action selected)" : 
+                                    (selectedFolder ? "Disabled (folder selected)" : "Form disabled...")) :
                                 showRecordDropdown ? "Type to search records..." : 
                                 (selectedRecord ? selectedRecord.title : "Click to select record...")
                               }
                               value={showRecordDropdown ? recordSearchTerm : (selectedRecord ? selectedRecord.title : "")}
                               onChange={(e) => {
-                                if (!isFormDisabled && !selectedFolder) {
+                                if (!isFormDisabled && !selectedFolder && formData.action !== 'cancel') {
                                   setRecordSearchTerm(e.target.value);
                                   setShowRecordDropdown(true);
                                 }
                               }}
                               onClick={() => {
-                                if (!isFormDisabled && !selectedFolder) {
+                                if (!isFormDisabled && !selectedFolder && formData.action !== 'cancel') {
                                   setShowRecordDropdown(!showRecordDropdown);
                                 }
                               }}
                               onFocus={(e) => {
-                                if (!isFormDisabled && !selectedFolder) {
+                                if (!isFormDisabled && !selectedFolder && formData.action !== 'cancel') {
                                   setRecordSearchTerm("");
                                   setShowRecordDropdown(true);
                                 }
                               }}
-                              className={`action-select-input ${(isFormDisabled || selectedFolder) ? 'action-select-input-disabled' : (showRecordDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
+                              className={`action-select-input ${(isFormDisabled || selectedFolder || formData.action === 'cancel') ? 'action-select-input-disabled' : (showRecordDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
                             />
                             
                             {/* Records Dropdown Arrow */}
-                            {!isFormDisabled && !selectedFolder && (
+                            {!isFormDisabled && !selectedFolder && formData.action !== 'cancel' && (
                               <div
                                 onClick={() => {
                                   if (!isFormDisabled && !selectedFolder) {
@@ -5570,7 +5619,7 @@ const IssuePanel = () => {
                             )}
 
                             {/* Records Dropdown Menu */}
-                            {showRecordDropdown && !isFormDisabled && !selectedFolder && (
+                            {showRecordDropdown && !isFormDisabled && !selectedFolder && formData.action !== 'cancel' && (
                               <div className="record-update-dropdown">
 
                                 {/* Records Search Hint */}
@@ -5691,22 +5740,23 @@ const IssuePanel = () => {
                             {/* Folder Search Input */}
                             <input
                               type="text"
-                              disabled={isFormDisabled || selectedRecord}
+                              disabled={isFormDisabled || selectedRecord || formData.action === 'cancel'}
                               placeholder={
-                                (isFormDisabled || selectedRecord) ? "Disabled (record selected)" :
+                                (isFormDisabled || selectedRecord || formData.action === 'cancel') ? 
+                                  (formData.action === 'cancel' ? "Disabled (cancel action selected)" : "Disabled (record selected)") :
                                 showFolderDropdown ? "Type to search folders..." : 
                                 (selectedFolder ? selectedFolder.name || selectedFolder.folderPath : "Click to select folder...")
                               }
                               value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? selectedFolder.name || selectedFolder.folderPath : "")}
                               onChange={(e) => {
-                                if (!isFormDisabled && !selectedRecord) {
+                                if (!isFormDisabled && !selectedRecord && formData.action !== 'cancel') {
                                   setFolderSearchTerm(e.target.value);
                                   setFolderCurrentPage(1);
                                   setShowFolderDropdown(true);
                                 }
                               }}
                               onClick={() => {
-                                if (!isFormDisabled && !selectedRecord) {
+                                if (!isFormDisabled && !selectedRecord && formData.action !== 'cancel') {
                                   setShowFolderDropdown(!showFolderDropdown);
                                   if (!showFolderDropdown) {
                                     setFolderSearchTerm("");
@@ -5715,13 +5765,13 @@ const IssuePanel = () => {
                                 }
                               }}
                               onFocus={(e) => {
-                                if (!isFormDisabled && !selectedRecord) {
+                                if (!isFormDisabled && !selectedRecord && formData.action !== 'cancel') {
                                   setFolderSearchTerm("");
                                   setShowFolderDropdown(true);
                                 }
                               }}
                               className={`folder-select-input ${
-                                (isFormDisabled || selectedRecord) ? 'folder-select-input-disabled' : 
+                                (isFormDisabled || selectedRecord || formData.action === 'cancel') ? 'folder-select-input-disabled' : 
                                 showFolderDropdown ? 'folder-select-input-focused' :
                                 selectedFolder ? 'folder-select-input-selected' :
                                 'folder-select-input-default'
@@ -5729,14 +5779,14 @@ const IssuePanel = () => {
                             />
                             
                             {/* Dropdown arrow icon */}
-                            {!isFormDisabled && !selectedRecord && (
+                            {!isFormDisabled && !selectedRecord && formData.action !== 'cancel' && (
                               <div className="dropdown-arrow-positioned">
                                 ▼
                               </div>
                             )}
                             
                             {/* Folder Dropdown with search results */}
-                            {showFolderDropdown && !isFormDisabled && !selectedRecord && (() => {
+                            {showFolderDropdown && !isFormDisabled && !selectedRecord && formData.action !== 'cancel' && (() => {
                               // Filter shared folders
                               const sharedFolders = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
                               
@@ -5836,39 +5886,45 @@ const IssuePanel = () => {
                       )}
 
                       {/* Info message and requirement text area */}
-                      <div className="share-record-textarea-wrapper">
-                        <div className="share-record-info-message">
-                          {isAdmin 
-                            ? 'Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.'
-                            : 'Provide your requirement and justification for this request. An admin will review and process it.'}
-                        </div>
-
-                        <div>
-                          <label className="share-record-label">
-                            Requirements {!isAdmin && <span className="text-error">*</span>}:
-                          </label>
-                          <textarea
-                            value={formData.requirements || ''}
-                            onChange={(e) => handleInputChange('requirements', e.target.value)}
-                            placeholder="Describe your requirements if you're not sure which record or folder to select..."
-                            disabled={isFormDisabled}
-                            className="share-record-textarea"
-                          />
-                        </div>
-
+                      {/* Hide Requirements and Justification when admin selects cancel action */}
+                      {!(isAdmin && formData.action === 'cancel') && (
                         <div className="share-record-textarea-wrapper">
-                          <label className="share-record-label">
-                            Justification for this Request:
-                          </label>
-                          <textarea
-                            value={formData.justification || ''}
-                            onChange={(e) => handleInputChange('justification', e.target.value)}
-                            placeholder="Explain why you need access to this record or folder..."
-                            disabled={isFormDisabled}
-                            className="share-record-textarea"
-                          />
+                          {/* Only show info message if cancel is NOT selected */}
+                          {formData.action !== 'cancel' && (
+                            <div className="share-record-info-message">
+                              {isAdmin 
+                                ? 'Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.'
+                                : 'Provide your requirement and justification for this request. An admin will review and process it.'}
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="share-record-label">
+                              Requirements {!isAdmin && <span className="text-error">*</span>}:
+                            </label>
+                            <textarea
+                              value={formData.requirements || ''}
+                              onChange={(e) => handleInputChange('requirements', e.target.value)}
+                              placeholder="Describe your requirements if you're not sure which record or folder to select..."
+                              disabled={isFormDisabled}
+                              className="share-record-textarea"
+                            />
+                          </div>
+
+                          <div className="share-record-textarea-wrapper">
+                            <label className="share-record-label">
+                              Justification for this Request:
+                            </label>
+                            <textarea
+                              value={formData.justification || ''}
+                              onChange={(e) => handleInputChange('justification', e.target.value)}
+                              placeholder="Explain why you need access to this record or folder..."
+                              disabled={isFormDisabled}
+                              className="share-record-textarea"
+                            />
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
@@ -6548,6 +6604,40 @@ const IssuePanel = () => {
                        !selectedAction ? "Select Action to Enable" :
                        !validateForm() ? "Complete Required Fields" :
                        "Approve & Execute"}
+                    </Button>
+                  )}
+                  
+                  {/* Execute Button - show when there's NO stored data (admin executing directly) */}
+                  {!hasStoredData && (
+                    <Button
+                      appearance="primary"
+                      onClick={executeKeeperAction}
+                      isLoading={isExecuting}
+                      isDisabled={isExecuting || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
+                      style={{
+                        backgroundColor: isFormDisabled ? "#D0D0D0" : 
+                          (loadingTemplate || loadingRecordTypes) ? "#F0F0F0" :
+                          (selectedAction && validateForm() && !isExecuting ? "#5FAD56" : isExecuting ? "#4A8F45" : "#E0E0E0"),
+                        color: isFormDisabled ? "#777" : 
+                          (loadingTemplate || loadingRecordTypes) ? "#999" :
+                          ((selectedAction && validateForm()) || isExecuting ? "#FFFFFF" : "#999"),
+                        fontWeight: "600",
+                        fontSize: "14px",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        border: "none",
+                        cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isExecuting) ? "not-allowed" : "pointer",
+                        boxShadow: (selectedAction && validateForm() && !isExecuting) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
+                        transition: "all 0.2s ease"
+                      }}
+                    >
+                      {isFormDisabled ? "Form Disabled (Re-enabling...)" :
+                       isExecuting ? "Executing..." :
+                       loadingTemplate ? "Loading Template Fields..." :
+                       loadingRecordTypes ? "Loading Record Types..." :
+                       !selectedAction ? "Select Action to Enable" :
+                       !validateForm() ? "Complete Required Fields" :
+                       "Execute"}
                     </Button>
                   )}
                   
