@@ -34,8 +34,7 @@ export const KEEPER_ACTION_OPTIONS = [
       { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'revoke'], placeholder: 'Select action' },
       { name: 'can_share', label: 'Can Share Records', type: 'checkbox', required: false, description: 'Allow sharing records' },
       { name: 'can_edit', label: 'Can Edit Records', type: 'checkbox', required: false, description: 'Allow modifying records in the folder' },
-      { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply permission changes to all sub folders' },
-      { name: 'dry_run', label: 'Dry Run', type: 'checkbox', required: false, description: 'Display permission changes without actually changing them' }
+      { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply permission changes to all sub folders' }
     ]
   },
   { 

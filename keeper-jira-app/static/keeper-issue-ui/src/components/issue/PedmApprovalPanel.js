@@ -169,7 +169,12 @@ const PedmApprovalPanel = ({ issueContext }) => {
   };
 
   const handleApprove = async () => {
-    if (!webhookPayload?.request_uid) {
+    // Check both fields because:
+    // - Tickets created with webhook payload fallback have: request_uid
+    // - Tickets created with Keeper API enriched data have: approval_uid
+    const requestUid = webhookPayload?.request_uid || webhookPayload?.approval_uid;
+    
+    if (!requestUid) {
       setActionResult({ success: false, message: "Request UID not found" });
       return;
     }
@@ -178,11 +183,11 @@ const PedmApprovalPanel = ({ issueContext }) => {
     setActionResult(null);
 
     try {
-      const command = `pedm approval action --approve ${webhookPayload.request_uid}`;
+      const command = `pedm approval action --approve ${requestUid}`;
       const result = await api.executeKeeperAction(
         issueContext.issueKey,
         command,
-        `PEDM Approval: Approved request ${webhookPayload.request_uid}`,
+        `PEDM Approval: Approved request ${requestUid}`,
         { cliCommand: command },
         new Date().toLocaleString('en-GB', {
           day: '2-digit',
@@ -213,7 +218,12 @@ const PedmApprovalPanel = ({ issueContext }) => {
   };
 
   const handleDeny = async () => {
-    if (!webhookPayload?.request_uid) {
+    // Check both fields because:
+    // - Tickets created with webhook payload fallback have: request_uid
+    // - Tickets created with Keeper API enriched data have: approval_uid
+    const requestUid = webhookPayload?.request_uid || webhookPayload?.approval_uid;
+    
+    if (!requestUid) {
       setActionResult({ success: false, message: "Request UID not found" });
       return;
     }
@@ -222,11 +232,11 @@ const PedmApprovalPanel = ({ issueContext }) => {
     setActionResult(null);
 
     try {
-      const command = `pedm approval action --deny ${webhookPayload.request_uid}`;
+      const command = `pedm approval action --deny ${requestUid}`;
       const result = await api.executeKeeperAction(
         issueContext.issueKey,
         command,
-        `PEDM Approval: Denied request ${webhookPayload.request_uid}`,
+        `PEDM Approval: Denied request ${requestUid}`,
         { cliCommand: command },
         new Date().toLocaleString('en-GB', {
           day: '2-digit',

@@ -263,21 +263,21 @@ const App = () => {
                     Basic Deployment:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status' -f json -rm foreground -q n --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q n --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-subtitle-spacing">
                     With Ngrok Tunneling:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status' -f json -rm foreground -q n -ng &lt;ngrok-auth-token&gt; -cd &lt;custom-domain&gt; --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q n -ng &lt;ngrok-auth-token&gt; -cd &lt;custom-domain&gt; --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-subtitle-spacing">
                     With Cloudflare Tunneling:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status' -f json -rm foreground -q n -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q n -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-note">
@@ -309,21 +309,21 @@ this-device timeout 30d`}
                     Basic Service Creation:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status" -rm="foreground" -q=n -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=n -f=json
                   </code>
                   
                   <p className="setup-cli-subtitle-bold">
                     With Ngrok Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status" -rm="foreground" -q=n -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=n -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-subtitle-bold">
                     With Cloudflare Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pam,service-status" -rm="foreground" -q=n -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=n -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-note">
@@ -373,10 +373,10 @@ this-device timeout 30d`}
 
                 <div className="about-feature-block">
                   <p className="about-feature-title">
-                    PEDM (Privileged Enterprise Data Management)
+                    Endpoint Privilege Management (Administrator Only)
                   </p>
                   <p className="about-feature-text">
-                    Monitor and manage privilege elevation requests with real-time approval workflows. View pending access requests, approve or deny privilege escalation, track approval timeouts with live countdowns, and maintain complete visibility over privileged access across your organization.
+                    The Endpoint Privilege Manager tab provides administrators with the ability to configure automated ticket creation for Keeper Security PEDM (Privileged Endpoint Data Management) alerts through webhooks. This feature enables real-time monitoring and approval workflows for privileged access requests across your organization.
                   </p>
                 </div>
 
@@ -424,26 +424,8 @@ this-device timeout 30d`}
                   Integration Capabilities
                 </h3>
                 <p className="setup-text-spacing">
-                  Once configured, this integration provides five core capabilities for managing Keeper vault operations directly from Jira issues. Each action corresponds to specific Commander CLI commands and enables different vault management scenarios.
+                  Once configured, this integration provides comprehensive capabilities for managing Keeper vault operations directly from Jira issues. Each action corresponds to specific Commander CLI commands and enables different vault management scenarios. Some features are available to all users, while advanced operations require administrator permissions.
                 </p>
-
-                <div className="about-capability-box">
-                  <p className="about-capability-title">
-                    Create New Secret
-                  </p>
-                  <p className="about-capability-text">
-                    Add new records to your Keeper vault with customizable fields and record types. Uses the <code className="about-code">record-add</code> command to create login credentials, secure notes, payment cards, and other record types. Ideal for onboarding workflows where new accounts need to be provisioned and credentials stored securely.
-                  </p>
-                </div>
-
-                <div className="about-capability-box">
-                  <p className="about-capability-title">
-                    Update Record
-                  </p>
-                  <p className="about-capability-text">
-                    Modify existing record fields including passwords, usernames, URLs, and custom fields. Leverages the <code className="about-code">record-update</code> command to keep credentials current and accurate. Perfect for password rotation workflows and credential lifecycle management.
-                  </p>
-                </div>
 
                 <div className="about-capability-box">
                   <p className="about-capability-title">
@@ -472,20 +454,38 @@ this-device timeout 30d`}
                   </p>
                 </div>
 
+                <div className="about-capability-box-last" style={{marginBottom: '16px'}}>
+                  <p className="about-capability-title">
+                    Create New Secret (Administrator Only)
+                  </p>
+                  <p className="about-capability-text">
+                    Add new records to your Keeper vault with customizable fields and record types. Uses the <code className="about-code">record-add</code> command to create login credentials, secure notes, payment cards, and other record types. Ideal for onboarding workflows where new accounts need to be provisioned and credentials stored securely.
+                  </p>
+                </div>
+
+                <div className="about-capability-box-last" style={{marginBottom: '16px'}}>
+                  <p className="about-capability-title">
+                    Update Record (Administrator Only)
+                  </p>
+                  <p className="about-capability-text">
+                    Modify existing record fields including passwords, usernames, URLs, and custom fields. Leverages the <code className="about-code">record-update</code> command to keep credentials current and accurate. Perfect for password rotation workflows and credential lifecycle management.
+                  </p>
+                </div>
+
                 <div className="about-capability-box-last">
-                  <p className="about-capability-title-green">
-                    PEDM Management (Administrator Only)
+                  <p className="about-capability-title">
+                    Endpoint Privilege Management (Administrator Only)
                   </p>
-                  <p className="about-capability-text-green">
-                    For Global Jira Administrators or Project Administrators, the integration provides advanced Endpoint Privilege Manager capabilities through the dedicated PEDM tab. Monitor and manage privileged access requests across your organization with real-time approval workflows.
+                  <p className="about-capability-text">
+                    For Global Jira Administrators or Project Administrators, the integration provides advanced Endpoint Privilege Management capabilities through the dedicated tab. Monitor and manage privileged access requests across your organization with real-time approval workflows.
                   </p>
-                  <p className="about-capability-text-green-last">
-                    <strong className="about-strong">Available Commands:</strong> <code className="about-code">pedm approval list</code> to retrieve pending requests, <code className="about-code">pedm approval action --approve</code> to grant privilege elevation, and <code className="about-code">pedm approval action --deny</code> to reject requests. All approvals include live countdown timers, user details, application context, and justification messages for informed decision-making.
+                  <p className="about-capability-text">
+                    <strong className="about-strong">How it works:</strong> Approval requests automatically create Jira tickets via webhooks. Each ticket includes Approve/Deny action buttons with live countdown timers, user details, application context, and justification messages. Commands used: <code className="about-code">pedm approval view</code> to fetch enriched request details, and <code className="about-code">pedm approval action --approve/--deny</code> to process approval decisions directly from Jira.
                   </p>
                 </div>
 
                 <p className="about-reference">
-                  Reference: <span onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/command-reference")} className="setup-link-subtle">Commander CLI Command Reference</span> | <span onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/command-reference/endpoint-privilege-manager-commands")} className="setup-link-subtle">PEDM Commands</span>
+                  Reference: <span onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/command-reference")} className="setup-link-subtle">Commander CLI Command Reference</span> | <span onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/command-reference/endpoint-privilege-manager-commands")} className="setup-link-subtle">Endpoint Privilege Management Commands</span>
                 </p>
               </div>
 

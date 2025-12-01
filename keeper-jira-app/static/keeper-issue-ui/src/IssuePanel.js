@@ -119,6 +119,8 @@ const IssuePanel = () => {
   const [showExpirationWarningModal, setShowExpirationWarningModal] = useState(false);
   const [pendingExpirationValue, setPendingExpirationValue] = useState(null);
   
+  // Email validation state
+  const [emailValidationError, setEmailValidationError] = useState(null);
   
   // Pagination settings - using imported constants
   const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
@@ -3246,6 +3248,36 @@ const IssuePanel = () => {
     };
   };
 
+  // Validate email addresses (supports comma-separated multiple emails)
+  const validateEmails = (emailString) => {
+    if (!emailString || emailString.trim() === '') {
+      return { isValid: false, errors: ['Email is required'] };
+    }
+
+    // Split by comma and trim each email
+    const emails = emailString.split(',').map(email => email.trim());
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const invalidEmails = [];
+
+    emails.forEach(email => {
+      if (!emailRegex.test(email)) {
+        invalidEmails.push(email);
+      }
+    });
+
+    if (invalidEmails.length > 0) {
+      return {
+        isValid: false,
+        errors: [`Invalid email format: ${invalidEmails.join(', ')}`]
+      };
+    }
+
+    return {
+      isValid: true,
+      errors: []
+    };
+  };
+
   // Helper function to enhance field labels for better UX
   const enhanceFieldLabel = (fieldType, currentLabel) => {
     const labelMap = {
@@ -3595,17 +3627,21 @@ const IssuePanel = () => {
       setRecordTypeTemplate({});
       setTemplateFields([]);
       setLoadingTemplate(false);
+      
+      // Clear email validation error
+      setEmailValidationError(null);
     }
     
     // Update previous action
     setPreviousAction(selectedAction);
     
     // Auto-populate email field for non-admin users when share-record or share-folder is selected
+    // BUT don't overwrite if email already exists (from stored data or previous input)
     if (selectedAction && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') && 
-        !isAdmin && issueContext?.currentUserEmail && actionActuallyChanged && !isLoadingStoredData) {
+        !isAdmin && issueContext?.currentUserEmail && actionActuallyChanged && !isLoadingStoredData && !hasStoredData) {
       setFormData(prev => ({
         ...prev,
-        user: issueContext.currentUserEmail
+        user: prev.user || issueContext.currentUserEmail  // Only set if user field is empty
       }));
     }
     
@@ -3643,6 +3679,16 @@ const IssuePanel = () => {
 
   // Handle form input changes
   const handleInputChange = (fieldName, value) => {
+    // Validate email field for admin users
+    if (fieldName === 'user' && isAdmin && (selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder')) {
+      const validation = validateEmails(value);
+      if (!validation.isValid) {
+        setEmailValidationError(validation.errors[0]);
+      } else {
+        setEmailValidationError(null);
+      }
+    }
+    
     // Special handling for share-record action: mutual exclusivity between record and sharedFolder
     if (selectedAction?.value === 'share-record') {
       if (fieldName === 'record' && value) {
@@ -3783,9 +3829,12 @@ const IssuePanel = () => {
     
     // Special handling for share-record action
     if (selectedAction.value === 'share-record') {
-      // For non-admin users, requirements field is mandatory
+      // For non-admin users, requirements and action fields are mandatory
       if (!isAdmin) {
         if (!formData['requirements'] || formData['requirements'].trim() === '') {
+          return false;
+        }
+        if (!formData['action'] || formData['action'].trim() === '') {
           return false;
         }
         return true;
@@ -3797,8 +3846,14 @@ const IssuePanel = () => {
         return false;
       }
       
-      // Check if user/email is entered
+      // Check if user/email is entered and valid
       if (!formData['user'] || formData['user'].trim() === '') {
+        return false;
+      }
+      
+      // Validate email format (single or comma-separated)
+      const emailValidation = validateEmails(formData['user']);
+      if (!emailValidation.isValid) {
         return false;
       }
       
@@ -3829,9 +3884,12 @@ const IssuePanel = () => {
     
     // Special handling for share-folder action
     if (selectedAction.value === 'share-folder') {
-      // For non-admin users, requirements field is mandatory
+      // For non-admin users, requirements and action fields are mandatory
       if (!isAdmin) {
         if (!formData['requirements'] || formData['requirements'].trim() === '') {
+          return false;
+        }
+        if (!formData['action'] || formData['action'].trim() === '') {
           return false;
         }
         return true;
@@ -3848,8 +3906,14 @@ const IssuePanel = () => {
         return false;
       }
       
-      // Check if user/email is entered
+      // Check if user/email is entered and valid
       if (!formData['user'] || formData['user'].trim() === '') {
+        return false;
+      }
+      
+      // Validate email format (single or comma-separated)
+      const emailValidation = validateEmails(formData['user']);
+      if (!emailValidation.isValid) {
         return false;
       }
       
@@ -3937,6 +4001,11 @@ const IssuePanel = () => {
   const renderFormInput = (field) => {
     let value = formData[field.name] || '';
     
+    // Default expiration_type to 'none' if not set
+    if (field.name === 'expiration_type' && !value) {
+      value = 'none';
+    }
+    
     // Special formatting for card number display
     if (field.name === 'paymentCard_cardNumber') {
       value = formatCardNumber(value);
@@ -3959,14 +4028,19 @@ const IssuePanel = () => {
     const hasCurrentValue = selectedAction?.value === 'record-update' && (value !== '' || currentRecordValue !== '');
     
     // Don't show required error for non-admin users in share-record, share-folder, record-permission
+    // EXCEPT for the action field which is now required
     const isNonAdminInSpecialActions = !isAdmin && 
       (selectedAction?.value === 'share-record' || 
        selectedAction?.value === 'share-folder' || 
        selectedAction?.value === 'record-permission');
     
+    const isActionFieldRequired = field.name === 'action' && 
+      !isAdmin && 
+      (selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder');
+    
     const hasRequiredError = field.required && !value && 
       selectedAction?.value !== 'record-update' && 
-      !isNonAdminInSpecialActions;
+      (!isNonAdminInSpecialActions || isActionFieldRequired);
     
     // Generate className for input fields based on state
     const getInputClassName = (additionalClasses = '') => {
@@ -4229,7 +4303,8 @@ const IssuePanel = () => {
             }}
             className={getInputClassName()}
           >
-            <option value="">{field.placeholder}</option>
+            {/* Don't show placeholder option for expiration_type field */}
+            {field.name !== 'expiration_type' && <option value="">{field.placeholder}</option>}
             {filteredOptions.map(option => {
               // Handle both string options and object options {label, value}
               if (typeof option === 'string') {
@@ -4811,7 +4886,7 @@ const IssuePanel = () => {
       
       if (selectedAction.value === 'record-permission' && selectedFolder) {
         // For record-permission command, format follows CLI pattern:
-        // record-permission <folder_uid> --action <grant|revoke> [--user <email>] [--can-share] [--can-edit] [--recursive] [--force] [--dry-run]
+        // record-permission <folder_uid> --action <grant|revoke> [--user <email>] [--can-share] [--can-edit] [--recursive] [--force]
         
         // Build the CLI command format
         let commandParts = [
@@ -4830,7 +4905,6 @@ const IssuePanel = () => {
         if (finalParameters.can_share) commandParts.push('--can-share');
         if (finalParameters.can_edit) commandParts.push('--can-edit');
         if (finalParameters.recursive) commandParts.push('--recursive');
-        if (finalParameters.dry_run) commandParts.push('--dry-run');
         
         // Always add --force flag for API execution (no interactive prompts possible)
         commandParts.push('--force');
@@ -6483,8 +6557,10 @@ const IssuePanel = () => {
                         <label className="label-record-add">
                           {field.label}
                           {/* Don't show required asterisk for non-admin users in share-record, share-folder, record-permission */}
+                          {/* EXCEPT for the action field which is now required */}
                           {field.required && selectedAction.value !== 'record-update' && 
-                           !((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) && (
+                           (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
+                            (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
                             <span className="text-error ml-4">*</span>
                           )}
                         </label>
@@ -6493,9 +6569,23 @@ const IssuePanel = () => {
                           <div className="field-hint-text">
                           </div>
                         )}
+                        {/* Show hint for email field for admin users */}
+                        {field.name === 'user' && isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') && (
+                          <div className="field-hint-text">
+                            Tip: You can enter multiple email addresses separated by commas (e.g., user1@example.com, user2@example.com)
+                          </div>
+                        )}
+                        {/* Show email validation error for admin users */}
+                        {field.name === 'user' && isAdmin && emailValidationError && (
+                          <div className="field-error-text">
+                            {emailValidationError}
+                          </div>
+                        )}
                         {/* Don't show error message for non-admin users in share-record, share-folder, record-permission */}
+                        {/* EXCEPT for the action field which is now required */}
                         {field.required && !formData[field.name] && selectedAction.value !== 'record-update' && 
-                         !((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) && (
+                         (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
+                          (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
                           <div className="field-error-text">
                             This field is required
                           </div>
