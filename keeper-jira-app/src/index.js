@@ -614,11 +614,21 @@ function buildKeeperCommand(action, parameters, issueKey) {
       
     case 'share-record':
       // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R] [--expire-at|--expire-in] --force
-      // For cancel action: share-record -a cancel -e "EMAIL" [-e "EMAIL2" ...] -f
+      // For cancel action with record: share-record "RECORD_UID" -a cancel -e "EMAIL" [-e "EMAIL2" ...] -f
+      // For cancel action with folder: share-record "FOLDER_UID" -a cancel -e "EMAIL" [-e "EMAIL2" ...] -f
       
-      // Add record UID only if not cancel action (cancel doesn't need record)
+      // Add record UID for all non-cancel actions
       if (parameters.record && parameters.action !== 'cancel') {
         command += ` '${parameters.record}'`;
+      }
+      
+      // For cancel action, add either record UID or folder UID (admin can select either)
+      if (parameters.action === 'cancel') {
+        if (parameters.record) {
+          command += ` '${parameters.record}'`;
+        } else if (parameters.sharedFolder) {
+          command += ` '${parameters.sharedFolder}'`;
+        }
       }
       
       // Handle email addresses - support comma-separated values

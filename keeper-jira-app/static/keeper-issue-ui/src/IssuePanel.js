@@ -38,6 +38,10 @@ const IssuePanel = () => {
       // Fetch records for the update record dropdown
       fetchKeeperRecords();
     }
+    if (selectedAction?.value === 'share-record') {
+      // Fetch shared folders for share-record command (for cancel action)
+      fetchKeeperFolders();
+    }
   }, [selectedAction]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -3857,8 +3861,12 @@ const IssuePanel = () => {
         return false;
       }
       
-      // For "cancel" action, only email and action are required (no record/folder needed)
+      // For "cancel" action, email and action are required, plus either record OR folder
       if (formData['action'] === 'cancel') {
+        // Must have either record or folder selected
+        if (!selectedRecord && !selectedFolder) {
+          return false;
+        }
         return true;
       }
       
@@ -4107,13 +4115,23 @@ const IssuePanel = () => {
       case 'folder-select':
         // Render folder dropdown for share-record action with search and pagination
         const isCancelSelectedForFolder = selectedAction?.value === 'share-record' && formData.action === 'cancel';
-        const isFolderFieldDisabled = isFormDisabled || formData.record || selectedRecord || isCancelSelectedForFolder;
+        // For cancel action, only enable folder dropdown for admin users
+        // For other actions, disable if record is selected
+        const isFolderFieldDisabled = isFormDisabled || 
+          (formData.record || selectedRecord) || 
+          (isCancelSelectedForFolder && !isAdmin);
         return (
           <div className="relative">
             <input
               type="text"
               value={selectedFolder ? (selectedFolder.name || selectedFolder.folderPath) : ''}
-              placeholder={isFolderFieldDisabled ? 'Disabled (record selected)' : field.placeholder}
+              placeholder={
+                isFolderFieldDisabled 
+                  ? (isCancelSelectedForFolder && !isAdmin 
+                      ? 'Folder selection available for admin users only' 
+                      : 'Disabled (record selected)') 
+                  : field.placeholder
+              }
               disabled={isFolderFieldDisabled}
               readOnly
               onClick={() => {
@@ -4283,7 +4301,8 @@ const IssuePanel = () => {
               
               // Special handling for share-record action field when "cancel" is selected
               if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'cancel') {
-                // Clear and disable all checkboxes, clear record/folder selections when cancel is selected
+                // Clear and disable all checkboxes when cancel is selected
+                // Keep both record and folder selections for admin users (they need to select one)
                 setFormData(prev => ({
                   ...prev,
                   action: newValue,
@@ -4292,13 +4311,9 @@ const IssuePanel = () => {
                   recursive: false,
                   expiration_type: 'none',
                   expire_at: '',
-                  expire_in: '',
-                  record: null,
-                  sharedFolder: null
+                  expire_in: ''
                 }));
-                // Also clear selected record and folder states
-                setSelectedRecord(null);
-                setSelectedFolder(null);
+                // Don't clear record or folder - admin can select either one
               }
             }}
             className={getInputClassName()}
@@ -5634,7 +5649,7 @@ const IssuePanel = () => {
                   {selectedAction.value === 'share-record' && isAdmin && (
                     <div className="share-record-selector">
                       <label className="share-record-label">
-                        Select Record:
+                        Select Record {formData.action === 'cancel' ? '(Required - Record or Folder):' : ':'}
                       </label>
                       
                       {/* Records Dropdown Container */}
@@ -5649,37 +5664,36 @@ const IssuePanel = () => {
                             <input
                               id="keeper-records-input"
                               type="text"
-                              disabled={isFormDisabled || selectedFolder || formData.action === 'cancel'}
+                              disabled={isFormDisabled || selectedFolder}
                               placeholder={
-                                (isFormDisabled || selectedFolder || formData.action === 'cancel') ? 
-                                  (formData.action === 'cancel' ? "Disabled (cancel action selected)" : 
-                                    (selectedFolder ? "Disabled (folder selected)" : "Form disabled...")) :
+                                (isFormDisabled || selectedFolder) ? 
+                                  (selectedFolder ? "Disabled (folder selected)" : "Form disabled...") :
                                 showRecordDropdown ? "Type to search records..." : 
                                 (selectedRecord ? selectedRecord.title : "Click to select record...")
                               }
                               value={showRecordDropdown ? recordSearchTerm : (selectedRecord ? selectedRecord.title : "")}
                               onChange={(e) => {
-                                if (!isFormDisabled && !selectedFolder && formData.action !== 'cancel') {
+                                if (!isFormDisabled && !selectedFolder) {
                                   setRecordSearchTerm(e.target.value);
                                   setShowRecordDropdown(true);
                                 }
                               }}
                               onClick={() => {
-                                if (!isFormDisabled && !selectedFolder && formData.action !== 'cancel') {
+                                if (!isFormDisabled && !selectedFolder) {
                                   setShowRecordDropdown(!showRecordDropdown);
                                 }
                               }}
                               onFocus={(e) => {
-                                if (!isFormDisabled && !selectedFolder && formData.action !== 'cancel') {
+                                if (!isFormDisabled && !selectedFolder) {
                                   setRecordSearchTerm("");
                                   setShowRecordDropdown(true);
                                 }
                               }}
-                              className={`action-select-input ${(isFormDisabled || selectedFolder || formData.action === 'cancel') ? 'action-select-input-disabled' : (showRecordDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
+                              className={`action-select-input ${(isFormDisabled || selectedFolder) ? 'action-select-input-disabled' : (showRecordDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
                             />
                             
                             {/* Records Dropdown Arrow */}
-                            {!isFormDisabled && !selectedFolder && formData.action !== 'cancel' && (
+                            {!isFormDisabled && !selectedFolder && (
                               <div
                                 onClick={() => {
                                   if (!isFormDisabled && !selectedFolder) {
@@ -5693,7 +5707,7 @@ const IssuePanel = () => {
                             )}
 
                             {/* Records Dropdown Menu */}
-                            {showRecordDropdown && !isFormDisabled && !selectedFolder && formData.action !== 'cancel' && (
+                            {showRecordDropdown && !isFormDisabled && !selectedFolder && (
                               <div className="record-update-dropdown">
 
                                 {/* Records Search Hint */}
@@ -5793,7 +5807,7 @@ const IssuePanel = () => {
                       {isAdmin && (
                         <>
                           <label className="share-record-label">
-                            Select Folder:
+                            Select Folder {formData.action === 'cancel' ? '(Required - Record or Folder):' : ':'}
                           </label>
                           
                           {/* Info message when folder is selected */}
@@ -5814,23 +5828,23 @@ const IssuePanel = () => {
                             {/* Folder Search Input */}
                             <input
                               type="text"
-                              disabled={isFormDisabled || selectedRecord || formData.action === 'cancel'}
+                              disabled={isFormDisabled || selectedRecord || (formData.action === 'cancel' && !isAdmin)}
                               placeholder={
-                                (isFormDisabled || selectedRecord || formData.action === 'cancel') ? 
-                                  (formData.action === 'cancel' ? "Disabled (cancel action selected)" : "Disabled (record selected)") :
+                                (isFormDisabled || selectedRecord || (formData.action === 'cancel' && !isAdmin)) ? 
+                                  ((formData.action === 'cancel' && !isAdmin) ? "Folder selection available for admin users only" : "Disabled (record selected)") :
                                 showFolderDropdown ? "Type to search folders..." : 
                                 (selectedFolder ? selectedFolder.name || selectedFolder.folderPath : "Click to select folder...")
                               }
                               value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? selectedFolder.name || selectedFolder.folderPath : "")}
                               onChange={(e) => {
-                                if (!isFormDisabled && !selectedRecord && formData.action !== 'cancel') {
+                                if (!isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin)) {
                                   setFolderSearchTerm(e.target.value);
                                   setFolderCurrentPage(1);
                                   setShowFolderDropdown(true);
                                 }
                               }}
                               onClick={() => {
-                                if (!isFormDisabled && !selectedRecord && formData.action !== 'cancel') {
+                                if (!isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin)) {
                                   setShowFolderDropdown(!showFolderDropdown);
                                   if (!showFolderDropdown) {
                                     setFolderSearchTerm("");
@@ -5839,13 +5853,13 @@ const IssuePanel = () => {
                                 }
                               }}
                               onFocus={(e) => {
-                                if (!isFormDisabled && !selectedRecord && formData.action !== 'cancel') {
+                                if (!isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin)) {
                                   setFolderSearchTerm("");
                                   setShowFolderDropdown(true);
                                 }
                               }}
                               className={`folder-select-input ${
-                                (isFormDisabled || selectedRecord || formData.action === 'cancel') ? 'folder-select-input-disabled' : 
+                                (isFormDisabled || selectedRecord || (formData.action === 'cancel' && !isAdmin)) ? 'folder-select-input-disabled' : 
                                 showFolderDropdown ? 'folder-select-input-focused' :
                                 selectedFolder ? 'folder-select-input-selected' :
                                 'folder-select-input-default'
@@ -5853,14 +5867,14 @@ const IssuePanel = () => {
                             />
                             
                             {/* Dropdown arrow icon */}
-                            {!isFormDisabled && !selectedRecord && formData.action !== 'cancel' && (
+                            {!isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin) && (
                               <div className="dropdown-arrow-positioned">
                                 ▼
                               </div>
                             )}
                             
                             {/* Folder Dropdown with search results */}
-                            {showFolderDropdown && !isFormDisabled && !selectedRecord && formData.action !== 'cancel' && (() => {
+                            {showFolderDropdown && !isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin) && (() => {
                               // Filter shared folders
                               const sharedFolders = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
                               
@@ -6533,11 +6547,11 @@ const IssuePanel = () => {
                     .filter((field) => {
                       // Remove record field from UI when share-record is selected
                       // Remove folder field from UI when share-folder is selected  
-                      // Remove sharedFolder field from UI when record-permission is selected
+                      // Remove sharedFolder field from UI when record-permission or share-record is selected
                       // Keep user/email fields visible for manual input
                       const shouldRemoveRecordField = selectedAction.value === 'share-record' && field.name === 'record';
                       const shouldRemoveFolderField = selectedAction.value === 'share-folder' && field.name === 'folder';
-                      const shouldRemoveSharedFolderField = selectedAction.value === 'record-permission' && field.name === 'sharedFolder';
+                      const shouldRemoveSharedFolderField = (selectedAction.value === 'record-permission' || selectedAction.value === 'share-record') && field.name === 'sharedFolder';
                       
                       // Handle conditional field visibility
                       if (field.conditionalOn && field.conditionalValue) {

@@ -41,9 +41,11 @@ export const KEEPER_ACTION_OPTIONS = [
     value: 'share-record', 
     label: 'Share Record', 
     description: 'Grant or revoke user access to record(s).',
+    requiresSharedFolderSelection: true,
     fields: [
       { name: 'user', label: 'Email', type: 'email', required: true, placeholder: 'Email of account to edit permissions for' },
       { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'revoke', 'owner', 'cancel'], placeholder: 'Select action' },
+      { name: 'sharedFolder', label: 'Record Folder', type: 'folder-select', required: false, placeholder: 'Select record folder (optional for cancel action)' },
       { name: 'can_share', label: 'Allow Sharing', type: 'checkbox', required: false, description: 'Allow user to share record' },
       { name: 'can_write', label: 'Allow Writing', type: 'checkbox', required: false, description: 'Allow user to modify record' },
       { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply to all records in folder and subfolders (only for shared folder selection)' },
