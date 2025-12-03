@@ -5729,8 +5729,9 @@ const IssuePanel = () => {
                                           setRecordSearchTerm("");
                                           // Auto-populate the Record ID/Title field
                                           handleInputChange('record', record.record_uid);
-                                          // Auto-populate the Email field with current user's email
-                                          if (issueContext?.currentUserEmail) {
+                                          // Auto-populate the Email field with current user's email only if not already set
+                                          // This prevents overwriting the non-admin user's email when admin is viewing saved request
+                                          if (issueContext?.currentUserEmail && !formData.user) {
                                             handleInputChange('user', issueContext.currentUserEmail);
                                           }
                                         }}
