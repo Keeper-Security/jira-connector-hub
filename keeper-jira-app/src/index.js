@@ -216,22 +216,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
         'address': ['street1', 'street2', 'city', 'state', 'zip', 'country'],
         'name': ['first', 'middle', 'last'],
         'phone': ['region', 'number', 'ext', 'type'],
-        'securityQuestion': ['question', 'answer'],
-        'host': ['hostName', 'port'],
-        'paymentCard': ['cardNumber', 'cardExpirationDate', 'cardSecurityCode'],
-        'bankAccount': ['accountNumber', 'routingNumber', 'accountType', 'otherType']
-      };
-      
-      // Check if we have reference fields that should exclude their corresponding JSON fields
-      const hasAddressRef = parameters.addressRef;
-      const hasCardRef = parameters.cardRef;
-      const hasFileRef = parameters.fileRef;
-      
-      // Define reference field mappings to their corresponding JSON field types
-      const referenceFieldMappings = {
-        'addressRef': 'address',
-        'cardRef': 'paymentCard',
-        'fileRef': 'file'
+        'host': ['hostName', 'port']
       };
       
       // First pass: Group fields that need JSON formatting
@@ -242,17 +227,6 @@ function buildKeeperCommand(action, parameters, issueKey) {
         
         const value = parameters[key].toString().trim();
         if (!value) return;
-        
-        // Skip fields if we have corresponding reference fields
-        Object.keys(referenceFieldMappings).forEach(refField => {
-          if (parameters[refField]) {
-            const jsonFieldType = referenceFieldMappings[refField];
-            if (jsonFieldTypes[jsonFieldType] && 
-                (key.startsWith(`${jsonFieldType}_`) || jsonFieldTypes[jsonFieldType].includes(key))) {
-              return;
-            }
-          }
-        });
         
         // Check for grouped fields (like address_street1, name_first, phone_Work_number)
         if (key.includes('_')) {
@@ -279,26 +253,6 @@ function buildKeeperCommand(action, parameters, issueKey) {
               jsonFields[`phone.${phoneType}`] = {};
             }
             jsonFields[`phone.${phoneType}`][phoneField] = value;
-            addProcessedFields.add(key);
-            return;
-          }
-          
-          // Handle securityQuestion pattern (securityQuestion_Mother_question, securityQuestion_Mother_answer)
-          if (prefix === 'securityQuestion' && parts.length === 3) {
-            const questionType = parts[1]; // Mother, Pet, etc.
-            const questionField = parts[2]; // question, answer
-            
-            if (!jsonFields[`securityQuestion.${questionType}`]) {
-              jsonFields[`securityQuestion.${questionType}`] = [];
-            }
-            
-            // Find existing question object or create new one
-            let questionObj = jsonFields[`securityQuestion.${questionType}`].find(q => q[questionField]);
-            if (!questionObj) {
-              questionObj = {};
-              jsonFields[`securityQuestion.${questionType}`].push(questionObj);
-            }
-            questionObj[questionField] = value;
             addProcessedFields.add(key);
             return;
           }
@@ -329,7 +283,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
           if (key.startsWith('c.')) {
               command += ` ${key}='${value}'`;
           }
-          // Handle grouped fields that don't need JSON (like paymentCard_cardNumber)
+          // Handle grouped fields that don't need JSON
           else if (key.includes('_')) {
             const [prefix, suffix] = key.split('_', 2);
             command += ` ${suffix}='${value}'`;
@@ -550,43 +504,6 @@ function buildKeeperCommand(action, parameters, issueKey) {
             command += ` c.text.${customFieldName}='${customValue}'`;
           }
         }
-      });
-      
-      // Handle security questions format (if any securityQuestion fields)
-      const securityQuestions = {};
-      Object.keys(parameters).forEach(key => {
-        if (key.startsWith('securityQuestion_') && parameters[key] && parameters[key].trim() !== '') {
-          const questionType = key.replace('securityQuestion_', '');
-          const answerValue = parameters[key].toString().trim();
-          
-          // Create question based on common types
-          let questionText = '';
-          switch (questionType.toLowerCase()) {
-            case 'mother':
-              questionText = "What is your mother's maiden name?";
-              break;
-            case 'pet':
-              questionText = "What was your first pet's name?";
-              break;
-            case 'school':
-              questionText = "What was the name of your first school?";
-              break;
-            case 'city':
-              questionText = "In what city were you born?";
-              break;
-            default:
-              questionText = `What is your ${questionType}?`;
-              break;
-          }
-          
-          securityQuestions[questionType] = [{ question: questionText, answer: answerValue }];
-        }
-      });
-      
-      // Add security questions to command
-      Object.keys(securityQuestions).forEach(questionType => {
-        const questionArray = securityQuestions[questionType];
-        command += ` securityQuestion.${questionType}='$JSON:${JSON.stringify(questionArray)}'`;
       });
       
       // Force flag to ignore warnings
@@ -875,134 +792,6 @@ resolver.define('getKeeperFolders', async (req) => {
     }
 
     return { success: true, folders: folders || [] };
-  } catch (err) {
-    throw err;
-  }
-});
-
-/**
- * Get record types list from Keeper API (called from issue panel)
- */
-resolver.define('getRecordTypes', async (req) => {
-  const config = await storage.get('keeperConfig');
-  if (!config) {
-    throw new Error('Keeper configuration not found. Please configure the app first.');
-  }
-
-  const { apiUrl, apiKey } = config;
-  
-  // Construct the full API endpoint
-  // Use the complete API URL as provided by the user
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-
-  try {
-    const response = await fetch(fullApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        command: 'record-type-info --format=json',
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Keeper API error: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-
-    if (data.success === false || data.error) {
-      throw new Error(`Keeper API error: ${data.error || data.message || 'Unknown error'}`);
-    }
-
-    // Handle the response data - it might be already parsed or a JSON string
-    let recordTypes = [];
-    if (data.data) {
-      try {
-        // First check if data.data is already an array/object (already parsed)
-        if (Array.isArray(data.data)) {
-          recordTypes = data.data;
-        } else if (typeof data.data === 'object') {
-          recordTypes = data.data;
-        } else {
-          // If it's a string, try to parse it as JSON
-          recordTypes = JSON.parse(data.data);
-        }
-      } catch (parseError) {
-        throw new Error('Failed to process record types data');
-      }
-    }
-
-    return { success: true, data: recordTypes || [] };
-  } catch (err) {
-    throw err;
-  }
-});
-
-/**
- * Get record type template from Keeper API (called from issue panel when record type is changed)
- */
-resolver.define('getRecordTypeTemplate', async (req) => {
-  const { recordType } = req.payload || {};
-  
-  if (!recordType) {
-    throw new Error('Record type is required to fetch template');
-  }
-
-  const config = await storage.get('keeperConfig');
-  if (!config) {
-    throw new Error('Keeper configuration not found. Please configure the app first.');
-  }
-
-  const { apiUrl, apiKey } = config;
-  
-  // Construct the full API endpoint
-  // Use the complete API URL as provided by the user
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-
-  try {
-    const response = await fetch(fullApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        command: `record-type-info -lr='${recordType}' -e --format=json`,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Keeper API error: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-
-    if (data.success === false || data.error) {
-      throw new Error(`Keeper API error: ${data.error || data.message || 'Unknown error'}`);
-    }
-
-    // Handle the response data - it might be already parsed or a JSON string
-    let template = {};
-    if (data.data) {
-      try {
-        // First check if data.data is already an object (already parsed)
-        if (typeof data.data === 'object') {
-          template = data.data;
-        } else {
-          // If it's a string, try to parse it as JSON
-          template = JSON.parse(data.data);
-        }
-      } catch (parseError) {
-        throw new Error('Failed to process record type template data');
-      }
-    }
-
-    return { success: true, template: template || {} };
   } catch (err) {
     throw err;
   }

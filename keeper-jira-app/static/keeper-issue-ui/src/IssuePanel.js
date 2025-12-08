@@ -10,11 +10,8 @@ import ErrorIcon from "@atlaskit/icon/glyph/error";
 import LockIcon from "@atlaskit/icon/glyph/lock";
 import CrossIcon from "@atlaskit/icon/glyph/cross";
 
-// Modular imports
-import { Loading, StatusMessage as Status, Modal } from "./components";
 import { KEEPER_ACTION_OPTIONS, PAGINATION_SETTINGS } from "./constants";
 import * as api from "./services/api";
-import { handleApiError } from "./utils/errorHandler";
 import PedmApprovalPanel from "./components/issue/PedmApprovalPanel";
 import "./styles/IssuePanel.css";
 
@@ -74,10 +71,6 @@ const IssuePanel = () => {
   
   // Record-update specific states
   const [selectedRecordForUpdate, setSelectedRecordForUpdate] = useState(null);
-  
-  useEffect(() => {
-    // Handle selectedRecordForUpdate changes
-  }, [selectedRecordForUpdate]);
   const [recordForUpdateSearchTerm, setRecordForUpdateSearchTerm] = useState("");
   const [showRecordForUpdateDropdown, setShowRecordForUpdateDropdown] = useState(false);
   const [recordForUpdateCurrentPage, setRecordForUpdateCurrentPage] = useState(1);
@@ -86,20 +79,17 @@ const IssuePanel = () => {
   const [resolvedAddresses, setResolvedAddresses] = useState({}); // Cache for resolved address references
   const [loadingAddresses, setLoadingAddresses] = useState(new Set()); // Track loading address references
   const [showPinCode, setShowPinCode] = useState(false); // Toggle for PIN code visibility
-  const [showAddressDropdown, setShowAddressDropdown] = useState(false); // Address dropdown visibility
-  const [showNewAddressModal, setShowNewAddressModal] = useState(false); // New address modal visibility
-  const [newAddressFormData, setNewAddressFormData] = useState({}); // Form data for new address
-  const [addressTemplate, setAddressTemplate] = useState({});
-  const [addressRecords, setAddressRecords] = useState([]); // Existing address records
-  const [loadingAddressRecords, setLoadingAddressRecords] = useState(false); // Loading state for address records // Template for address record type
-  const [loadingAddressTemplate, setLoadingAddressTemplate] = useState(false); // Loading state for address template
-  const [dynamicCustomFields, setDynamicCustomFields] = useState([]);
-  const [manualCustomFields, setManualCustomFields] = useState([]);
+  const [showSecureNote, setShowSecureNote] = useState(false); // Toggle for secure note visibility
+  const [showLicenseKey, setShowLicenseKey] = useState(false); // Toggle for license key visibility
+  const [showPrivateKey, setShowPrivateKey] = useState(false); // Toggle for SSH private key visibility
+  const [showPublicKey, setShowPublicKey] = useState(false); // Toggle for SSH public key visibility
+  const [showPassword, setShowPassword] = useState(false); // Toggle for password visibility
   const [recordTypes, setRecordTypes] = useState([]);
   const [loadingRecordTypes, setLoadingRecordTypes] = useState(false);
   const [recordTypeTemplate, setRecordTypeTemplate] = useState({});
   const [loadingTemplate, setLoadingTemplate] = useState(false);
   const [templateFields, setTemplateFields] = useState([]);
+  const [templateError, setTemplateError] = useState(null); // Track template loading errors
   const [originalRecordType, setOriginalRecordType] = useState(null); // Track original record type
   const [originalFormData, setOriginalFormData] = useState({}); // Store original form data
   
@@ -110,14 +100,6 @@ const IssuePanel = () => {
   const [isUpdating, setIsUpdating] = useState(false); // Track update operation
   const [isRestrictedWebhookTicket, setIsRestrictedWebhookTicket] = useState(false); // Track if ticket is admin-only webhook ticket
   
-  // Admin selection modal and dropdown states
-  const [showAdminModal, setShowAdminModal] = useState(false);
-  const [showAdminDropdown, setShowAdminDropdown] = useState(false);
-  const [projectAdmins, setProjectAdmins] = useState([]);
-  const [loadingAdmins, setLoadingAdmins] = useState(false);
-  const [selectedAdmin, setSelectedAdmin] = useState(null);
-  const [adminSearchTerm, setAdminSearchTerm] = useState("");
-  const [adminCurrentPage, setAdminCurrentPage] = useState(1);
   
   // Expiration warning modal for share-record action
   const [showExpirationWarningModal, setShowExpirationWarningModal] = useState(false);
@@ -130,12 +112,8 @@ const IssuePanel = () => {
   const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
   const recordsPerPage = PAGINATION_SETTINGS.RECORDS_PER_PAGE;
   const foldersPerPage = PAGINATION_SETTINGS.FOLDERS_PER_PAGE;
-  const adminsPerPage = PAGINATION_SETTINGS.ADMINS_PER_PAGE;
 
-  // Centralized error handler for API calls - using imported function
-  const handleError = (error, defaultMessage = "An error occurred") => handleApiError(error, defaultMessage);
-  
-  // Keep old function name for compatibility
+  // Centralized error handler for API calls
   const handleApiError = (error, defaultMessage = "An error occurred") => {
     // Helper function to check if content contains HTML
     const containsHtml = (text) => {
@@ -409,15 +387,6 @@ const IssuePanel = () => {
                 }
               }
             }
-            // Handle other complex field types as custom fields
-            else if (field.type === 'bankAccount' && field.value && field.value.length > 0) {
-              const bankData = field.value[0];
-              if (bankData && typeof bankData === 'object') {
-                if (bankData.accountNumber) existingValues.custom_accountNumber = bankData.accountNumber;
-                if (bankData.routingNumber) existingValues.custom_routingNumber = bankData.routingNumber;
-                if (bankData.accountType) existingValues.custom_accountType = bankData.accountType;
-              }
-            }
           });
         }
         
@@ -430,52 +399,14 @@ const IssuePanel = () => {
         
         // Create dynamic custom fields based on actual record data from fields array
         const customFields = [];
-        const standardFieldTypes = ['title', 'login', 'password', 'url', 'email', 'notes', 'name', 'cardRef', 'fileRef', 'oneTimeCode'];
+        const standardFieldTypes = ['title', 'login', 'password', 'url', 'email', 'notes', 'name', 'oneTimeCode'];
         
         if (details.fields && Array.isArray(details.fields)) {
           details.fields.forEach(field => {
             // Skip standard field types and empty fields
             if (!standardFieldTypes.includes(field.type) && field.value && field.value.length > 0) {
-              // Handle complex field types (like bankAccount) as custom fields
-              if (field.type === 'bankAccount' && field.value[0] && typeof field.value[0] === 'object') {
-                const bankData = field.value[0];
-                
-                // Create separate custom fields for each bank account property
-                if (bankData.accountNumber) {
-                  customFields.push({
-                    name: 'custom_accountNumber',
-                    displayName: 'Account Number',
-                    value: bankData.accountNumber,
-                    label: 'Account Number',
-                    type: 'text',
-                    placeholder: `Current: ${bankData.accountNumber}`
-                  });
-                }
-                
-                if (bankData.routingNumber) {
-                  customFields.push({
-                    name: 'custom_routingNumber',
-                    displayName: 'Routing Number',
-                    value: bankData.routingNumber,
-                    label: 'Routing Number',
-                    type: 'text',
-                    placeholder: `Current: ${bankData.routingNumber}`
-                  });
-                }
-                
-                if (bankData.accountType) {
-                  customFields.push({
-                    name: 'custom_accountType',
-                    displayName: 'Account Type',
-                    value: bankData.accountType,
-                    label: 'Account Type',
-                    type: 'text',
-                    placeholder: `Current: ${bankData.accountType}`
-                  });
-                }
-              }
-              // Handle other field types as simple custom fields
-              else if (typeof field.value[0] === 'string') {
+              // Handle field types as simple custom fields
+              if (typeof field.value[0] === 'string') {
                 customFields.push({
                   name: field.type,
                   displayName: field.type,
@@ -519,13 +450,6 @@ const IssuePanel = () => {
           required: false, // For update, no fields are required - only fill what you want to change
           placeholder: `Enter new ${field.displayName.toLowerCase()} (leave blank to keep current)`
         }));
-        
-        // Only set initial custom fields if template processing isn't happening yet
-        if (!loadingTemplate && !loadingRecordTypes) {
-          setDynamicCustomFields(blankCustomFields);
-        } else {
-          setDynamicCustomFields([]);
-        }
         
         // For record-update action, keep fields blank by default
         // If user has previously saved data for this record, restore their values
@@ -601,41 +525,121 @@ const IssuePanel = () => {
       });
       
       setRecordDetails({});
-      setDynamicCustomFields([]);
     } finally {
       setLoadingRecordDetails(false);
     }
   };
 
-  // Fetch Keeper record types
-  const fetchRecordTypes = async () => {
+  // Fetch Keeper record types - using static list
+  const fetchRecordTypes = () => {
     setLoadingRecordTypes(true);
-    try {
-      const result = await api.getRecordTypes();
-      
-      // Transform the response to match the select options format
-      if (result && result.data && Array.isArray(result.data)) {
-        const transformedOptions = result.data.map(recordType => ({
-          label: recordType.content,
-          value: recordType.content
-        }));
-        setRecordTypes(transformedOptions);
-      } else {
-        setRecordTypes([]);
-      }
-    } catch (error) {
-      // Handle error
-      const errorMessage = handleApiError(error, "Failed to fetch record types");
-      
-      setLastResult({ 
-        success: false, 
-        message: errorMessage
-      });
-      
-      setRecordTypes([]);
-    } finally {
+    
+    // Static list of record types
+    const staticRecordTypes = [
+      { label: 'Contact', value: 'contact' },
+      { label: 'Database', value: 'databaseCredentials' },
+      { label: 'Secure Note', value: 'encryptedNotes' },
+      { label: 'Login', value: 'login' },
+      { label: 'Membership', value: 'membership' },
+      { label: 'Server', value: 'serverCredentials' },
+      { label: 'Software License', value: 'softwareLicense' },
+      { label: 'SSH Keys', value: 'sshKeys' }
+    ];
+    
+    setRecordTypes(staticRecordTypes);
       setLoadingRecordTypes(false);
-    }
+  };
+
+  // Static field templates for each record type
+  const getStaticRecordTypeTemplate = (recordType) => {
+    const templates = {
+      'login': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Enter record title' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username or email' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://example.com' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'contact': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Enter contact name' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: true, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: true, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'company', label: 'Company', type: 'text', required: false, placeholder: 'Company name' },
+          { name: 'email', label: 'Email', type: 'email', required: false, placeholder: 'email@example.com' },
+          { name: 'phone_number', label: 'Phone Number', type: 'tel', required: false, placeholder: '+1 (555) 123-4567', parentType: 'phone', subField: 'number' },
+          { name: 'phone_ext', label: 'Extension', type: 'text', required: false, placeholder: 'Ext', parentType: 'phone', subField: 'ext' },
+          { name: 'phone_type', label: 'Phone Type', type: 'select', required: false, options: [{ value: '', label: 'Select Type' }, { value: 'Home', label: 'Home' }, { value: 'Work', label: 'Work' }, { value: 'Mobile', label: 'Mobile' }], parentType: 'phone', subField: 'type' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'databaseCredentials': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Database name' },
+          { name: 'type', label: 'Type', type: 'text', required: false, placeholder: 'Database type (e.g., MySQL, PostgreSQL)' },
+          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'host', subField: 'hostName' },
+          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number', parentType: 'host', subField: 'port' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Database username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'encryptedNotes': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Note title' },
+          { name: 'note', label: 'Secured Note', type: 'secureTextarea', required: false, placeholder: 'Enter your secured note content...' },
+          { name: 'date', label: 'Date', type: 'dateMMDDYYYY', required: false, placeholder: 'MM/DD/YYYY' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'membership': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Membership name' },
+          { name: 'accountNumber', label: 'Account Number', type: 'text', required: false, placeholder: 'Membership account number' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'serverCredentials': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Server name' },
+          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'host', subField: 'hostName' },
+          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number', parentType: 'host', subField: 'port' },
+          { name: 'login', label: 'Username', type: 'text', required: false, placeholder: 'Server username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'softwareLicense': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Software name' },
+          { name: 'licenseNumber', label: 'License Key', type: 'secureText', required: false, placeholder: 'License key or serial number' },
+          { name: 'activationDate', label: 'Activation Date', type: 'dateMMDDYYYY', required: false, placeholder: 'MM/DD/YYYY' },
+          { name: 'expirationDate', label: 'Expiration Date', type: 'dateMMDDYYYY', required: false, placeholder: 'MM/DD/YYYY' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'sshKeys': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'SSH key name' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'SSH username' },
+          { name: 'keyPair_privateKey', label: 'Private Key', type: 'secureTextareaPrivateKey', required: false, placeholder: 'Paste private key here...', parentType: 'keyPair', subField: 'privateKey' },
+          { name: 'keyPair_publicKey', label: 'Public Key', type: 'secureTextareaPublicKey', required: false, placeholder: 'Paste public key here...', parentType: 'keyPair', subField: 'publicKey' },
+          { name: 'passphrase', label: 'Passphrase', type: 'password', required: false, placeholder: 'Key passphrase' },
+          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'host', subField: 'hostName' },
+          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port (default: 22)', parentType: 'host', subField: 'port' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      }
+    };
+    
+    return templates[recordType] || { fields: [] };
   };
 
   // Check user role and load stored data
@@ -753,110 +757,6 @@ const IssuePanel = () => {
     } finally {
       // Clear the loading flag after data is loaded (or failed to load)
       setTimeout(() => setIsLoadingStoredData(false), 200);
-    }
-  };
-
-  // Fetch project admins
-  const fetchProjectAdmins = async () => {
-    if (!issueContext?.issueKey) {
-      setSaveRequestMessage({ type: 'error', message: 'Issue context not loaded. Please refresh the page.' });
-      setTimeout(() => setSaveRequestMessage(null), 5000);
-      return;
-    }
-    
-    setLoadingAdmins(true);
-    try {
-      const result = await api.getProjectAdmins(issueContext.projectKey, issueContext.issueKey);
-      
-      if (result.success && result.admins && result.admins.length > 0) {
-        setProjectAdmins(result.admins);
-        setShowAdminModal(true);
-      } else {
-        setSaveRequestMessage({ 
-          type: 'error', 
-          message: 'No project administrators found. Please contact your system administrator.',
-          showTimestamp: false
-        });
-        setTimeout(() => setSaveRequestMessage(null), 5000);
-      }
-    } catch (error) {
-      const errorMessage = handleApiError(error, "Failed to fetch project administrators. Please try again.");
-      setSaveRequestMessage({ 
-        type: 'error', 
-        message: errorMessage,
-        showTimestamp: false
-      });
-      setTimeout(() => setSaveRequestMessage(null), 5000);
-    } finally {
-      setLoadingAdmins(false);
-    }
-  };
-  
-  // Save/Update form data (no longer used but kept for compatibility)
-  const saveRequestDataWithAdmin = async () => {
-    setIsUpdating(true);
-    try {
-      // Include temporary address data if present
-      const tempAddressData = {};
-      if (formData.addressRef && formData.addressRef.startsWith('temp_addr_')) {
-        const tempAddressUid = formData.addressRef;
-        const addressDetails = resolvedAddresses[tempAddressUid];
-        if (addressDetails && addressDetails.isTemporary) {
-          tempAddressData[tempAddressUid] = addressDetails;
-        }
-      }
-      
-      const now = new Date();
-      const requestData = {
-        selectedAction,
-        formData,
-        selectedRecord,
-        selectedRecordForUpdate,
-        selectedFolder,
-        tempAddressData, // Store temporary address data
-        timestamp: now.toISOString()
-      };
-      
-      // Format the same timestamp for the JIRA comment (same format used in UI)
-      const formattedTimestamp = now.toLocaleString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      });
-      
-      const result = await api.storeRequestData(
-        issueContext.issueKey,
-        requestData,
-        formattedTimestamp
-      );
-      
-      if (result.success) {
-        setStoredRequestData(requestData);
-        setHasStoredData(true);
-        setShowAdminModal(false);
-        setShowAdminDropdown(false);
-        setSelectedAdmin(null);
-        setAdminSearchTerm("");
-        setAdminCurrentPage(1);
-        // Don't show success message - the "Request Saved" dialog box already shows this info
-      }
-    } catch (error) {
-      // Handle error
-      const errorMessage = handleApiError(error, "Failed to save request data. Please try again.");
-      
-      // Only show error messages - the "Request Saved" dialog handles success
-      setSaveRequestMessage({ 
-        type: 'error', 
-        message: errorMessage,
-        showTimestamp: false
-      });
-      setTimeout(() => setSaveRequestMessage(null), 5000);
-    } finally {
-      setIsUpdating(false);
     }
   };
 
@@ -1072,103 +972,6 @@ const IssuePanel = () => {
     }
   };
 
-  // Get display value for address reference
-  const getAddressDisplayValue = (addressUid) => {
-    if (!addressUid) {
-      return "No address selected";
-    }
-    
-    // First, check if we have temporary address data in form data (regardless of UID)
-    const hasTemporaryAddressData = formData.street1 || formData.street2 || formData.city || 
-                                   formData.state || formData.zip || formData.country;
-    
-    if (hasTemporaryAddressData) {
-      // Show the full address details from form data
-      const addressParts = [];
-      if (formData.street1) addressParts.push(formData.street1);
-      if (formData.street2) addressParts.push(formData.street2);
-      if (formData.city) addressParts.push(formData.city);
-      if (formData.state) addressParts.push(formData.state);
-      if (formData.zip) addressParts.push(formData.zip);
-      if (formData.country) addressParts.push(formData.country);
-      
-      if (addressParts.length > 0) {
-        const fullAddress = addressParts.join(', ');
-        return ` ${fullAddress} (Pending Creation)`;
-      }
-    }
-    
-    // Check if this is a temporary address first (before checking cache)
-    if (addressUid.startsWith('temp_addr_')) {
-      const addressDetails = resolvedAddresses[addressUid];
-      if (addressDetails && addressDetails.isTemporary) {
-        // Show the full address details for temporary addresses
-        const addressParts = [];
-        if (addressDetails.tempData) {
-          if (addressDetails.tempData.street1) addressParts.push(addressDetails.tempData.street1);
-          if (addressDetails.tempData.street2) addressParts.push(addressDetails.tempData.street2);
-          if (addressDetails.tempData.city) addressParts.push(addressDetails.tempData.city);
-          if (addressDetails.tempData.state) addressParts.push(addressDetails.tempData.state);
-          if (addressDetails.tempData.zip) addressParts.push(addressDetails.tempData.zip);
-          if (addressDetails.tempData.country) addressParts.push(addressDetails.tempData.country);
-        }
-        
-        const fullAddress = addressParts.length > 0 ? addressParts.join(', ') : addressDetails.title;
-        return ` ${fullAddress} (Pending Creation)`;
-      }
-      
-      // Fallback to generic message for temporary addresses
-      return " Address (Pending Creation)";
-    }
-    
-    // Handle old/invalid address UIDs that might cause errors
-    if (addressUid.startsWith('addr_') && !addressUid.startsWith('temp_addr_')) {
-      const addressDetails = resolvedAddresses[addressUid];
-      if (addressDetails) {
-        // Check error state
-        if (addressDetails.hasError) {
-          return `Error: ${addressDetails.error}`;
-        }
-        if (addressDetails.notFound) {
-          return `Address not found: ${addressUid}`;
-        }
-        return formatAddressDisplay(addressDetails);
-      }
-      
-      // For old address UIDs, only show invalid message if no temporary data is available
-      if (!hasTemporaryAddressData) {
-        return ` Invalid Address Reference: ${addressUid}`;
-      }
-      // If we have temporary data, show that instead
-      return "No address selected";
-    }
-    
-    const addressDetails = resolvedAddresses[addressUid];
-    
-    // Prioritize cached result over loading state
-    if (addressDetails) {
-      // Check error state
-      if (addressDetails.hasError) {
-        return `Error: ${addressDetails.error}`;
-      }
-      if (addressDetails.notFound) {
-        return `Address not found: ${addressUid}`;
-      }
-      return formatAddressDisplay(addressDetails);
-    }
-    
-    if (loadingAddresses.has(addressUid)) {
-      return "Loading address...";
-    }
-    
-    // Try to trigger resolution if not already loading (only for real addresses)
-    if (!loadingAddresses.has(addressUid)) {
-      resolveAndCacheAddress(addressUid);
-    }
-    
-    // Return UID as fallback while loading
-    return addressUid;
-  };
 
   // Clear stored data from backend
   const clearStoredData = async () => {
@@ -1193,12 +996,6 @@ const IssuePanel = () => {
       setSelectedFolder(null);
       setResolvedAddresses({});
       setLoadingAddresses(new Set());
-      setShowNewAddressModal(false);
-      setNewAddressFormData({});
-      setAddressTemplate(null);
-      setLoadingAddressTemplate(false);
-      setDynamicCustomFields([]);
-      
       // Clear stored request data states
       setStoredRequestData(null);
       setHasStoredData(false);
@@ -1208,7 +1005,6 @@ const IssuePanel = () => {
       setRecordDetails({});
       setRecordTypeTemplate({});
       setTemplateFields([]);
-      setManualCustomFields([]);
       
       // Show success message
       setSaveRequestMessage({ 
@@ -1231,185 +1027,12 @@ const IssuePanel = () => {
   };
 
 
-  // Fetch address records for dropdown
-  const fetchAddressRecords = async () => {
-    setLoadingAddressRecords(true);
-    try {
-      const result = await api.getKeeperRecords();
-      
-      // Filter for address type records
-      const addressRecords = (result.records || []).filter(record => {
-        const recordType = record.record_type || record.type || '';
-        return recordType === 'address';
-      });
-      
-      setAddressRecords(addressRecords);
-    } catch (error) {
-      // Handle error
-      const errorMessage = handleApiError(error, "Failed to fetch address records");
-      
-      setLastResult({ 
-        success: false, 
-        message: errorMessage
-      });
-      
-      setAddressRecords([]);
-    } finally {
-      setLoadingAddressRecords(false);
-    }
-  };
-
-  // Fetch address template for new address creation
-  const fetchAddressTemplate = async () => {
-    setLoadingAddressTemplate(true);
-    try {
-      const result = await api.getRecordTypeTemplate("address");
-      
-      if (result && result.data) {
-        setAddressTemplate(result.data);
-        
-        // Process template fields to initialize form data dynamically
-        const initialFormData = {
-          title: ''
-        };
-        
-        // Initialize address fields if they exist in the template
-        if (result.data.fields && Array.isArray(result.data.fields)) {
-          result.data.fields.forEach(field => {
-            if (field.type === 'address' && field.value && Array.isArray(field.value) && field.value.length > 0) {
-              const addressFields = field.value[0];
-              // Initialize all address sub-fields
-              if (addressFields.street1) initialFormData.street1 = '';
-              if (addressFields.street2) initialFormData.street2 = '';
-              if (addressFields.city) initialFormData.city = '';
-              if (addressFields.state) initialFormData.state = '';
-              if (addressFields.zip) initialFormData.zip = '';
-              if (addressFields.country) initialFormData.country = '';
-            }
-          });
-        }
-        
-        // Initialize notes field if available
-        if (result.data.notes) {
-          initialFormData.notes = '';
-        }
-        
-        setNewAddressFormData(initialFormData);
-      }
-    } catch (error) {
-      // Handle error
-      const errorMessage = handleApiError(error, "Failed to fetch address template");
-      
-      setLastResult({ 
-        success: false, 
-        message: errorMessage
-      });
-    } finally {
-      setLoadingAddressTemplate(false);
-    }
-  };
-
-  // Handle new address creation
-  const handleNewAddress = async () => {
-    setShowAddressDropdown(false);
-    // Show modal immediately for instant response
-    setShowNewAddressModal(true);
-    // Fetch template in background - modal will show loading state
-    await fetchAddressTemplate();
-  };
-
-  // Handle address form field changes
-  const handleAddressFieldChange = (fieldName, value) => {
-    setNewAddressFormData(prev => ({
-      ...prev,
-      [fieldName]: value
-    }));
-  };
-
-  // Save new address record
-  const saveNewAddress = async () => {
-    try {
-      // Generate a temporary UID for the address (will be replaced with real UID during approval)
-      const tempAddressUid = `temp_addr_${Date.now()}`;
-      
-      // Create temporary address record for display purposes
-      const tempAddressRecord = {
-        record_uid: tempAddressUid,
-        type: 'address',
-        title: newAddressFormData.title,
-        fields: [
-          {
-            type: 'address',
-            value: [{
-              street1: newAddressFormData.street1 || '',
-              street2: newAddressFormData.street2 || '',
-              city: newAddressFormData.city || '',
-              state: newAddressFormData.state || '',
-              zip: newAddressFormData.zip || '',
-              country: newAddressFormData.country || ''
-            }]
-          }
-        ],
-        notes: newAddressFormData.notes || '',
-        isTemporary: true, // Mark as temporary
-        tempData: {
-          title: newAddressFormData.title,
-          street1: newAddressFormData.street1 || '',
-          street2: newAddressFormData.street2 || '',
-          city: newAddressFormData.city || '',
-          state: newAddressFormData.state || '',
-          zip: newAddressFormData.zip || '',
-          country: newAddressFormData.country || '',
-          notes: newAddressFormData.notes || ''
-        }
-      };
-      
-      // Cache the temporary address for immediate display
-      setResolvedAddresses(prev => ({
-        ...prev,
-        [tempAddressUid]: tempAddressRecord
-      }));
-      
-      // Update the addressRef field with temporary address UID
-      handleInputChange('addressRef', tempAddressUid);
-      
-      // Also store the individual address fields in form data for display purposes
-      // This ensures we can reconstruct the full address even if cache is not available
-      const addressFields = {
-        addressRef: tempAddressUid,
-        street1: newAddressFormData.street1 || '',
-        street2: newAddressFormData.street2 || '',
-        city: newAddressFormData.city || '',
-        state: newAddressFormData.state || '',
-        zip: newAddressFormData.zip || '',
-        country: newAddressFormData.country || '',
-        addressNotes: newAddressFormData.notes || ''
-      };
-      
-      // Update form data with all address fields
-      setFormData(prev => ({
-        ...prev,
-        ...addressFields
-      }));
-      
-      // Close modal
-      setShowNewAddressModal(false);
-      
-      // Clear the form data
-      setNewAddressFormData({});
-      
-      
-    } catch (error) {
-      const errorMessage = handleApiError(error, "Error saving address. Please try again.");
-      alert(errorMessage);
-    }
-  };
-
   // Fetch record type template when record type is changed
-  const fetchRecordTypeTemplate = async (recordType, recordDetailsForMapping = null) => {
+  // Now using static templates instead of API call
+  const fetchRecordTypeTemplate = (recordType, recordDetailsForMapping = null) => {
     
-    // Clear custom fields immediately when template processing starts
-    setDynamicCustomFields([]);
+    // Clear custom fields and error immediately when template processing starts
+    setTemplateError(null);
     
     if (!recordType) {
       setRecordTypeTemplate({});
@@ -1419,514 +1042,40 @@ const IssuePanel = () => {
 
     setLoadingTemplate(true);
     
-    try {
-      const result = await api.getRecordTypeTemplate(recordType);
-        
-        if (result && result.template) {
-          setRecordTypeTemplate(result.template);
-        
-        // Extract template fields for rendering
-        const fields = result.template.fields || [];
-        
-        
-        const processedFields = [];
-        
-        // First, add top-level fields from template (title, notes)
-        if (result.template.title !== undefined) {
-          processedFields.push({
-            name: 'title',
-            label: 'Title',
-            type: 'text',
-            required: true, // Title is typically required for new records
-            placeholder: 'Enter record title',
-            templateField: true,
-            isTopLevel: true
-          });
-        }
-        
-        if (result.template.notes !== undefined) {
-          processedFields.push({
-            name: 'notes',
-            label: 'Notes',
-            type: 'textarea',
-            required: false,
-            placeholder: 'Enter notes (optional)',
-            templateField: true,
-            isTopLevel: true
-          });
-        }
-        
-        // Process fields - handle both $ref and type properties
-        fields
-          .forEach((field, index) => {
-            // Try to determine field type from available properties
-            let fieldType = field.$ref || field.type || null;
-            
-            // If no clear field type, skip
-            if (!fieldType) {
-              return;
-            }
-            
-            // Handle reference fields with proper labels
-            
-            let fieldLabel = fieldType.charAt(0).toUpperCase() + fieldType.slice(1);
-            
-            // Use custom label if provided
-            if (field.label) {
-              fieldLabel = field.label.charAt(0).toUpperCase() + field.label.slice(1);
-            }
-            
-            // Enhance labels for complex field types
-            fieldLabel = enhanceFieldLabel(fieldType, fieldLabel);
-            
-            // Handle complex field types based on their schema or value structure
-            if (fieldType === 'name') {
-              // Create separate fields for name components
-              // If no value structure, create default name structure
-              const nameStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                ? field.value[0] 
-                : { first: "text", middle: "text", last: "text" };
-              if (nameStructure.first !== undefined) {
-                processedFields.push({
-                  name: 'name_first',
-                  label: 'First Name',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'First Name',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'name',
-                  subField: 'first'
-                });
-              }
-              if (nameStructure.middle !== undefined) {
-                processedFields.push({
-                  name: 'name_middle',
-                  label: 'Middle Name',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Middle Name',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'name',
-                  subField: 'middle'
-                });
-              }
-              if (nameStructure.last !== undefined) {
-                processedFields.push({
-                  name: 'name_last',
-                  label: 'Last Name',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'Last Name',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'name',
-                  subField: 'last'
-                });
-              }
-            } else if (fieldType === 'phone') {
-              // Create separate fields for phone components
-              // If no value structure, create default phone structure
-              const phoneStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object'
-                ? field.value[0]
-                : { number: "text", ext: "text", type: "", region: "US" };
-              if (phoneStructure.number !== undefined) {
-                processedFields.push({
-                  name: 'phone_number',
-                  label: 'Phone Number',
-                  type: 'tel',
-                  required: field.required || false,
-                  placeholder: '+1 (555) 123-4567',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'phone',
-                  subField: 'number'
-                });
-              }
-              if (phoneStructure.ext !== undefined) {
-                processedFields.push({
-                  name: 'phone_ext',
-                  label: 'Extension',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Ext',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'phone',
-                  subField: 'ext'
-                });
-              }
-              if (phoneStructure.type !== undefined) {
-                processedFields.push({
-                  name: 'phone_type',
-                  label: 'Phone Type',
-                  type: 'select',
-                  required: false,
-                  options: [
-                    { value: '', label: 'Select Type' },
-                    { value: 'Home', label: 'Home' },
-                    { value: 'Work', label: 'Work' },
-                    { value: 'Mobile', label: 'Mobile' },
-                    { value: 'Other', label: 'Other' }
-                  ],
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'phone',
-                  subField: 'type'
-                });
-              }
-            } else if (fieldType === 'address') {
-              // Create separate fields for address components based on API response
-              // API shows: city, country, state, street1, street2, zip
-              const addressStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                ? field.value[0] 
-                : { street1: "text", street2: "text", city: "text", state: "text", zip: "text", country: "text" };
-              
-              if (addressStructure.street1 !== undefined) {
-                processedFields.push({
-                  name: 'address_street1',
-                  label: 'Street Address 1',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'Enter street address',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'street1'
-                });
-              }
-              if (addressStructure.street2 !== undefined) {
-                processedFields.push({
-                  name: 'address_street2',
-                  label: 'Street Address 2',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Apartment, suite, etc. (optional)',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'street2'
-                });
-              }
-              if (addressStructure.city !== undefined) {
-                processedFields.push({
-                  name: 'address_city',
-                  label: 'City',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'Enter city',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'city'
-                });
-              }
-              if (addressStructure.state !== undefined) {
-                processedFields.push({
-                  name: 'address_state',
-                  label: 'State/Province',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Enter state or province',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'state'
-                });
-              }
-              if (addressStructure.zip !== undefined) {
-                processedFields.push({
-                  name: 'address_zip',
-                  label: 'ZIP/Postal Code',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Enter ZIP or postal code',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'zip'
-                });
-              }
-              if (addressStructure.country !== undefined) {
-                processedFields.push({
-                  name: 'address_country',
-                  label: 'Country',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Enter country',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'country'
-                });
-              }
-            } else if (fieldType === 'paymentCard') {
-              // Create separate fields for payment card components based on API response
-              // API shows: cardNumber, cardExpirationDate, cardSecurityCode
-              const cardStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                ? field.value[0] 
-                : { cardNumber: "text", cardExpirationDate: "text", cardSecurityCode: "text" };
-              
-              if (cardStructure.cardNumber !== undefined) {
-                processedFields.push({
-                  name: 'paymentCard_cardNumber',
-                  label: 'Card Number',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: '•••• •••• •••• 1234',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'paymentCard',
-                  subField: 'cardNumber'
-                });
-              }
-              if (cardStructure.cardExpirationDate !== undefined) {
-                // Split expiration date into month and year fields (stored as MM/YYYY format)
-                processedFields.push({
-                  name: 'paymentCard_cardExpirationMonth',
-                  label: 'Expiration Month',
-                  type: 'select',
-                  required: field.required || false,
-                  options: [
-                    { value: '', label: 'Month' },
-                    { value: '01', label: '01 - January' },
-                    { value: '02', label: '02 - February' },
-                    { value: '03', label: '03 - March' },
-                    { value: '04', label: '04 - April' },
-                    { value: '05', label: '05 - May' },
-                    { value: '06', label: '06 - June' },
-                    { value: '07', label: '07 - July' },
-                    { value: '08', label: '08 - August' },
-                    { value: '09', label: '09 - September' },
-                    { value: '10', label: '10 - October' },
-                    { value: '11', label: '11 - November' },
-                    { value: '12', label: '12 - December' }
-                  ],
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'paymentCard',
-                  subField: 'cardExpirationMonth'
-                });
-                
-                processedFields.push({
-                  name: 'paymentCard_cardExpirationYear',
-                  label: 'Expiration Year',
-                  type: 'select',
-                  required: field.required || false,
-                  options: [
-                    { value: '', label: 'Year' },
-                    ...Array.from({ length: 20 }, (_, i) => {
-                      const year = new Date().getFullYear() + i;
-                      return { value: year.toString(), label: year.toString() };
-                    })
-                  ],
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'paymentCard',
-                  subField: 'cardExpirationYear'
-                });
-              }
-              if (cardStructure.cardSecurityCode !== undefined) {
-                processedFields.push({
-                  name: 'paymentCard_cardSecurityCode',
-                  label: 'Security Code (CVV)',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: '123',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'paymentCard',
-                  subField: 'cardSecurityCode'
-                });
-              }
-            } else if (fieldType === 'addressRef') {
-              // Handle address reference field
-              processedFields.push({
-                name: 'addressRef',
-                label: 'Address',
-                type: 'addressRef', // Special type for address reference
-                required: field.required || false,
-                placeholder: 'Select or add address...',
-                templateField: true,
-                originalField: field,
-                isComplexType: false,
-                parentType: 'addressRef'
-              });
-            } else if (fieldType === 'fileRef') {
-              // Handle file reference field
-              processedFields.push({
-                name: 'fileRef',
-                label: 'Files',
-                type: 'fileRef', // Special type for file reference
-                required: field.required || false,
-                placeholder: 'Select files...',
-                templateField: true,
-                originalField: field,
-                isComplexType: false,
-                parentType: 'fileRef'
-              });
-            } else if (fieldType === 'cardRef') {
-              // Handle payment card reference field
-              processedFields.push({
-                name: 'cardRef',
-                label: 'Payment Card',
-                type: 'cardRef', // Special type for card reference
-                required: field.required || false,
-                placeholder: 'Select payment card...',
-                templateField: true,
-                originalField: field,
-                isComplexType: false,
-                parentType: 'cardRef'
-              });
-            } else if (fieldType === 'bankAccount') {
-              // Create separate fields for bank account components
-              // If no value structure, create default bank account structure
-              const bankStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object'
-                ? field.value[0]
-                : { accountNumber: "text", accountType: "", otherType: "text", routingNumber: "text" };
-                
-              if (bankStructure.accountNumber !== undefined) {
-                processedFields.push({
-                  name: 'bankAccount_accountNumber',
-                  label: 'Account Number',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'Enter account number',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'bankAccount',
-                  subField: 'accountNumber'
-                });
-              }
-              if (bankStructure.routingNumber !== undefined) {
-                processedFields.push({
-                  name: 'bankAccount_routingNumber',
-                  label: 'Routing Number',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Enter routing number',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'bankAccount',
-                  subField: 'routingNumber'
-                });
-              }
-              if (bankStructure.accountType !== undefined) {
-                processedFields.push({
-                  name: 'bankAccount_accountType',
-                  label: 'Account Type',
-                  type: 'select',
-                  required: false,
-                  options: [
-                    { value: '', label: 'Select Account Type' },
-                    { value: 'checking', label: 'Checking' },
-                    { value: 'savings', label: 'Savings' },
-                    { value: 'other', label: 'Other' }
-                  ],
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'bankAccount',
-                  subField: 'accountType'
-                });
-              }
-              if (bankStructure.otherType !== undefined) {
-                processedFields.push({
-                  name: 'bankAccount_otherType',
-                  label: 'Other Account Type',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Specify other account type',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'bankAccount',
-                  subField: 'otherType'
-                });
-              }
-            } else {
-              // Handle simple field types
-              processedFields.push({
-                name: fieldType,
-                label: fieldLabel,
-                type: getInputTypeForField(fieldType),
-                required: field.required || false,
-                placeholder: getPlaceholderForField(fieldType, fieldLabel),
-                templateField: true,
-                originalField: field, // Keep reference to original field for complex types
-                isComplexType: isComplexFieldType(fieldType)
-              });
-            }
-          });
+    // Use static template instead of API call
+    const staticTemplate = getStaticRecordTypeTemplate(recordType);
+    
+    if (staticTemplate && staticTemplate.fields && staticTemplate.fields.length > 0) {
+      setRecordTypeTemplate(staticTemplate);
+      
+      // Process static fields directly - they're already in the correct format
+      const processedFields = staticTemplate.fields.map(field => ({
+        ...field,
+        templateField: true
+      }));
         
         setTemplateFields(processedFields);
-        
-        // Map existing record values to template fields
-        const detailsToUse = recordDetailsForMapping || recordDetails;
-        if (detailsToUse && Object.keys(detailsToUse).length > 0) {
-        // Clear existing form data for template fields to start fresh, but preserve recordType
-        const clearedFormData = { ...formData };
-        processedFields.forEach(field => {
-          delete clearedFormData[field.name];
-        });
-        
-        // Ensure recordType is preserved in cleared data to avoid losing user selection
-        if (formData.recordType) {
-          clearedFormData.recordType = formData.recordType;
-        } else if (detailsToUse && detailsToUse.type) {
-          // If no user selection, use the original record type
-          clearedFormData.recordType = detailsToUse.type;
-        }
-        
-        // Call mapping function with cleared form data and provided record details
-        mapExistingValuesToTemplateWithClearedData(processedFields, clearedFormData, detailsToUse);
-        } else {
-        }
-        
+      setTemplateError(null);
+      
+      // Map existing record values to template fields if provided
+      if (recordDetailsForMapping && Object.keys(recordDetailsForMapping).length > 0) {
+        mapExistingValuesToTemplateWithClearedData(processedFields, { ...formData }, recordDetailsForMapping);
+      }
       } else {
         setRecordTypeTemplate({});
         setTemplateFields([]);
-      }
-    } catch (error) {
-      // Handle error
-      const errorMessage = handleApiError(error, "Failed to fetch record type template");
-      
-      setLastResult({ 
-        success: false, 
-        message: errorMessage
-      });
-      
-      setRecordTypeTemplate({});
-      setTemplateFields([]);
+      setTemplateError(`No template found for record type: ${recordType}`);
     }
     
     setLoadingTemplate(false);
   };
 
   // Enhanced template fetching function that preserves and maps current form data
-  const fetchRecordTypeTemplateWithFormMapping = async (recordType, currentFormData) => {
+  // Now using static templates instead of API call
+  const fetchRecordTypeTemplateWithFormMapping = (recordType, currentFormData) => {
     
-    // Clear custom fields immediately when template processing starts
-    setDynamicCustomFields([]);
+    // Clear custom fields and error immediately when template processing starts
+    setTemplateError(null);
     
     if (!recordType) {
       setRecordTypeTemplate({});
@@ -1936,404 +1085,27 @@ const IssuePanel = () => {
 
     setLoadingTemplate(true);
     
-    try {
-      const result = await api.getRecordTypeTemplate(recordType);
-        
-        if (result && result.template) {
-          const template = result.template;
-          setRecordTypeTemplate(template);
-          
-          // Process fields from template
-          const fields = template.fields || [];
-          
-          
-          const processedFields = [];
-          
-          // First, add top-level fields from template (title, notes)
-          if (template.title !== undefined) {
-            processedFields.push({
-              name: 'title',
-              label: 'Title',
-              type: 'text',
-              required: true, // Title is typically required for new records
-              placeholder: 'Enter record title',
-              templateField: true,
-              isTopLevel: true
-            });
-          }
-          
-          if (template.notes !== undefined) {
-            processedFields.push({
-              name: 'notes',
-              label: 'Notes',
-              type: 'textarea',
-              required: false,
-              placeholder: 'Enter notes (optional)',
-              templateField: true,
-              isTopLevel: true
-            });
-          }
-          
-          // Process fields - handle both $ref and type properties
-          fields
-            .forEach((field, index) => {
-              // Try to determine field type from available properties
-              let fieldType = null;
-              
-              // Check for $ref first
-              if (field['$ref']) {
-                fieldType = field['$ref'];
-              } else if (field.type) {
-                fieldType = field.type;
-              } else {
-                return; // Skip fields without identifiable types
-              }
-              
-              
-              // Handle complex field types that need to be broken down into sub-fields
-              if (fieldType === 'name') {
-                // If no value structure, create default name structure
-                const nameStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                  ? field.value[0] 
-                  : { first: "text", middle: "text", last: "text" };
-                if (nameStructure.first !== undefined) {
-                  processedFields.push({
-                    name: 'name_first',
-                    label: 'First Name',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'First Name',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'name',
-                    subField: 'first'
-                  });
-                }
-                if (nameStructure.middle !== undefined) {
-                  processedFields.push({
-                    name: 'name_middle',
-                    label: 'Middle Name',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Middle Name',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'name',
-                    subField: 'middle'
-                  });
-                }
-                if (nameStructure.last !== undefined) {
-                  processedFields.push({
-                    name: 'name_last',
-                    label: 'Last Name',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Last Name',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'name',
-                    subField: 'last'
-                  });
-                }
-              } else if (fieldType === 'phone') {
-                // If no value structure, create default phone structure
-                const phoneStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object'
-                  ? field.value[0]
-                  : { number: "text", ext: "text", type: "", region: "US" };
-                if (phoneStructure.number !== undefined) {
-                  processedFields.push({
-                    name: 'phone_number',
-                    label: 'Phone Number',
-                    type: 'tel',
-                    required: field.required || false,
-                    placeholder: '+1 (555) 123-4567',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'phone',
-                    subField: 'number'
-                  });
-                }
-                if (phoneStructure.ext !== undefined) {
-                  processedFields.push({
-                    name: 'phone_ext',
-                    label: 'Extension',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Ext',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'phone',
-                    subField: 'ext'
-                  });
-                }
-                if (phoneStructure.type !== undefined) {
-                  processedFields.push({
-                    name: 'phone_type',
-                    label: 'Phone Type',
-                    type: 'select',
-                    required: false,
-                    options: [
-                      { value: 'Home', label: 'Home' },
-                      { value: 'Work', label: 'Work' },
-                      { value: 'Mobile', label: 'Mobile' },
-                      { value: 'Main', label: 'Main' },
-                      { value: 'Other', label: 'Other' }
-                    ],
-                    placeholder: 'Phone Type',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'phone',
-                    subField: 'type'
-                  });
-                }
-              } else if (fieldType === 'address') {
-                // If no value structure, create default address structure
-                const addressStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                  ? field.value[0] 
-                  : { street1: "text", street2: "text", city: "text", state: "text", zip: "text", country: "text" };
-                
-                if (addressStructure.street1 !== undefined) {
-                  processedFields.push({
-                    name: 'address_street1',
-                    label: 'Street Address 1',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Enter street address',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'street1'
-                  });
-                }
-                if (addressStructure.street2 !== undefined) {
-                  processedFields.push({
-                    name: 'address_street2',
-                    label: 'Street Address 2',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Apartment, suite, etc. (optional)',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'street2'
-                  });
-                }
-                if (addressStructure.city !== undefined) {
-                  processedFields.push({
-                    name: 'address_city',
-                    label: 'City',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Enter city',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'city'
-                  });
-                }
-                if (addressStructure.state !== undefined) {
-                  processedFields.push({
-                    name: 'address_state',
-                    label: 'State/Province',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Enter state or province',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'state'
-                  });
-                }
-                if (addressStructure.zip !== undefined) {
-                  processedFields.push({
-                    name: 'address_zip',
-                    label: 'ZIP/Postal Code',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Enter ZIP or postal code',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'zip'
-                  });
-                }
-                if (addressStructure.country !== undefined) {
-                  processedFields.push({
-                    name: 'address_country',
-                    label: 'Country',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Enter country',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'country'
-                  });
-                }
-              } else if (fieldType === 'paymentCard') {
-                // If no value structure, create default card structure
-                const cardStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                  ? field.value[0] 
-                  : { cardNumber: "text", cardExpirationDate: "text", cardSecurityCode: "text" };
-                
-                if (cardStructure.cardNumber !== undefined) {
-                  processedFields.push({
-                    name: 'paymentCard_cardNumber',
-                    label: 'Card Number',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: '•••• •••• •••• 1234',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'paymentCard',
-                    subField: 'cardNumber'
-                  });
-                }
-                if (cardStructure.cardExpirationDate !== undefined) {
-                  // Split expiration date into month and year fields (stored as MM/YYYY format)
-                  processedFields.push({
-                    name: 'paymentCard_cardExpirationMonth',
-                    label: 'Expiration Month',
-                    type: 'select',
-                    required: field.required || false,
-                    options: [
-                      { value: '01', label: '01 - January' },
-                      { value: '02', label: '02 - February' },
-                      { value: '03', label: '03 - March' },
-                      { value: '04', label: '04 - April' },
-                      { value: '05', label: '05 - May' },
-                      { value: '06', label: '06 - June' },
-                      { value: '07', label: '07 - July' },
-                      { value: '08', label: '08 - August' },
-                      { value: '09', label: '09 - September' },
-                      { value: '10', label: '10 - October' },
-                      { value: '11', label: '11 - November' },
-                      { value: '12', label: '12 - December' }
-                    ],
-                    placeholder: 'Month',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'paymentCard',
-                    subField: 'cardExpirationMonth'
-                  });
-                  
-                  processedFields.push({
-                    name: 'paymentCard_cardExpirationYear',
-                    label: 'Expiration Year',
-                    type: 'select',
-                    required: field.required || false,
-                    options: [
-                      { value: '2024', label: '2024' },
-                      { value: '2025', label: '2025' },
-                      { value: '2026', label: '2026' },
-                      { value: '2027', label: '2027' },
-                      { value: '2028', label: '2028' },
-                      { value: '2029', label: '2029' },
-                      { value: '2030', label: '2030' },
-                      { value: '2031', label: '2031' },
-                      { value: '2032', label: '2032' },
-                      { value: '2033', label: '2033' },
-                      { value: '2034', label: '2034' }
-                    ],
-                    placeholder: 'Year',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'paymentCard',
-                    subField: 'cardExpirationYear'
-                  });
-                }
-                if (cardStructure.cardSecurityCode !== undefined) {
-                  processedFields.push({
-                    name: 'paymentCard_cardSecurityCode',
-                    label: 'Security Code (CVV)',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: '123',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'paymentCard',
-                    subField: 'cardSecurityCode'
-                  });
-                }
-              } else if (fieldType === 'bankAccount') {
-                // If no value structure, create default bank account structure
-                const bankStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                  ? field.value[0] 
-                  : { accountNumber: "text", routingNumber: "text", accountType: "text" };
-                
-                if (bankStructure.accountNumber !== undefined) {
-                  processedFields.push({
-                    name: 'bankAccount_accountNumber',
-                    label: 'Account Number',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Account number',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'bankAccount',
-                    subField: 'accountNumber'
-                  });
-                }
-                if (bankStructure.routingNumber !== undefined) {
-                  processedFields.push({
-                    name: 'bankAccount_routingNumber',
-                    label: 'Routing Number',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Routing number',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'bankAccount',
-                    subField: 'routingNumber'
-                  });
-                }
-                if (bankStructure.accountType !== undefined) {
-                  processedFields.push({
-                    name: 'bankAccount_accountType',
-                    label: 'Account Type',
-                    type: 'select',
-                    required: false,
-                    options: [
-                      { value: 'checking', label: 'Checking' },
-                      { value: 'savings', label: 'Savings' },
-                      { value: 'other', label: 'Other' }
-                    ],
-                    placeholder: 'Account type',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'bankAccount',
-                    subField: 'accountType'
-                  });
-                }
-              } else {
-                // Handle simple field types directly
-                const inputType = getInputTypeForField(fieldType);
-                const enhancedLabel = enhanceFieldLabel(fieldType, field.label || fieldType);
-                const placeholder = getPlaceholderForField(fieldType, enhancedLabel);
-                
-                processedFields.push({
-                  name: fieldType,
-                  label: enhancedLabel,
-                  type: inputType,
-                  required: field.required || false,
-                  placeholder: placeholder,
-                  originalType: fieldType
-                });
-              }
-            });
+    // Use static template instead of API call
+    const staticTemplate = getStaticRecordTypeTemplate(recordType);
+    
+    if (staticTemplate && staticTemplate.fields && staticTemplate.fields.length > 0) {
+      setRecordTypeTemplate(staticTemplate);
+      
+      // Process static fields directly - they're already in the correct format
+      const processedFields = staticTemplate.fields.map(field => ({
+        ...field,
+        templateField: true
+      }));
           
           setTemplateFields(processedFields);
+      setTemplateError(null);
           
           // Map current form data to new template fields
           mapCurrentFormDataToTemplate(processedFields, currentFormData, recordType);
-          
         } else {
           setRecordTypeTemplate({});
           setTemplateFields([]);
-        }
-      } catch (error) {
-        setRecordTypeTemplate({});
-        setTemplateFields([]);
+      setTemplateError(`No template found for record type: ${recordType}`);
       }
     
     setLoadingTemplate(false);
@@ -2345,13 +1117,28 @@ const IssuePanel = () => {
     const selectedRecordType = currentFormData.recordType;
     const actualOriginalRecordType = originalRecordType; // Always use the true original record type
     const isReturningToOriginalType = selectedRecordType === actualOriginalRecordType;
+    const isRecordUpdateAction = selectedAction?.value === 'record-update';
     
     
     const templateFieldNames = templateFields.map(f => f.name);
     
     // SIMPLE LOGIC: Handle the three main scenarios
     if (isReturningToOriginalType) {
-      // Scenario 3: Returning to original record type - reset completely
+      // For record-update action: keep fields blank when returning to original type
+      // User should only fill in fields they want to update
+      if (isRecordUpdateAction) {
+        const blankFormData = {
+          record: currentFormData.record,
+          recordType: selectedRecordType
+        };
+        
+        if (!isPreservingStoredDataRef.current) {
+          setFormData(blankFormData);
+        }
+        return;
+      }
+      
+      // Scenario 3: Returning to original record type - reset completely (for non-update actions)
       const restoredFormData = { ...originalFormData, recordType: selectedRecordType };
       
       // Ensure address is resolved for UI consistency
@@ -2385,8 +1172,6 @@ const IssuePanel = () => {
           return cleanRestoredData;
         });
       }
-      setDynamicCustomFields([]);
-      
       // Verify form data update
       setTimeout(() => {
       }, 50);
@@ -2419,6 +1204,20 @@ const IssuePanel = () => {
       return;
     }
     
+    // For record-update action: keep fields blank when switching record types
+    // User should only fill in fields they want to update
+    if (isRecordUpdateAction) {
+      const blankFormData = {
+        record: currentFormData.record,
+        recordType: selectedRecordType
+      };
+      
+      if (!isPreservingStoredDataRef.current) {
+        setFormData(blankFormData);
+      }
+      return;
+    }
+    
     // Build new form data starting with core fields
     const newFormData = {
       record: currentFormData.record,
@@ -2431,18 +1230,9 @@ const IssuePanel = () => {
     // Get ALL fields with values (current form data + original form data)
     const allFieldsWithValues = { ...originalFormData, ...currentFormData };
     
-    // Filter out fields from current custom fields to prevent nesting
-    const currentCustomFieldNames = dynamicCustomFields.map(cf => cf.originalFieldName || cf.id);
-    const oldCustomFields = Object.keys(allFieldsWithValues).filter(key => 
-      currentCustomFieldNames.includes(key) && !templateFieldNames.includes(key)
-    );
-    if (oldCustomFields.length > 0) {
-    }
-    
     const fieldsWithValues = Object.keys(allFieldsWithValues).filter(key => 
       allFieldsWithValues[key] && allFieldsWithValues[key] !== '' && 
       !['record', 'recordType', 'title'].includes(key) &&
-      !(currentCustomFieldNames.includes(key) && !templateFieldNames.includes(key)) && // Exclude old custom fields from processing
       !key.startsWith('_lastAddressUpdate') && !key.startsWith('_addressRefresh') // Exclude artificial UI fields
     );
     
@@ -2450,17 +1240,12 @@ const IssuePanel = () => {
     Object.keys(allFieldsWithValues).forEach(fieldName => {
       const fieldValue = allFieldsWithValues[fieldName];
       
-        // Skip core fields, empty values, OLD CUSTOM FIELDS, and ARTIFICIAL UI FIELDS
-        const isOldCustomField = currentCustomFieldNames.includes(fieldName) && !templateFieldNames.includes(fieldName);
+        // Skip core fields, empty values, and ARTIFICIAL UI FIELDS
         const isArtificialField = fieldName.startsWith('_lastAddressUpdate') || fieldName.startsWith('_addressRefresh');
         
         if (['record', 'recordType', 'title'].includes(fieldName) || 
             !fieldValue || fieldValue === '' || 
-            isOldCustomField || isArtificialField) {
-          if (isOldCustomField) {
-          }
-          if (isArtificialField) {
-          }
+            isArtificialField) {
           return;
         }
       
@@ -2483,7 +1268,7 @@ const IssuePanel = () => {
         return;
       }
       
-      // Check for partial matches (e.g., accountNumber -> bankAccount_accountNumber)
+      // Check for partial matches (e.g., fieldName -> parentType_fieldName)
       const partialMatch = templateFields.find(tf => 
         tf.name.includes(fieldName) || 
         tf.name.endsWith('_' + fieldName) ||
@@ -2513,15 +1298,15 @@ const IssuePanel = () => {
     if (unmatchedFields.length > 0) {
       
       const customFields = unmatchedFields.map((field, index) => {
-        // Clean the field name by removing prefixes (e.g., paymentCard_cardNumber -> cardNumber)
+        // Clean the field name by removing prefixes (e.g., parentType_fieldName -> fieldName)
         let cleanFieldName = field.originalFieldName;
         
         // Extract base field name from prefixed names
         if (cleanFieldName.includes('_')) {
           const parts = cleanFieldName.split('_');
           if (parts.length === 2) {
-            // For patterns like paymentCard_cardNumber, bankAccount_accountNumber
-            cleanFieldName = parts[1]; // Take the last part (cardNumber, accountNumber, etc.)
+            // For patterns like parentType_fieldName
+            cleanFieldName = parts[1]; // Take the last part
           } else {
             // For more complex patterns, take the last part
             cleanFieldName = parts[parts.length - 1];
@@ -2561,9 +1346,6 @@ const IssuePanel = () => {
         };
       });
       
-      setDynamicCustomFields(customFields);
-    } else {
-      setDynamicCustomFields([]);
     }
     
     // Update form data
@@ -2608,19 +1390,8 @@ const IssuePanel = () => {
       case 'passkey':
       case 'oneTimeCode':
       case 'otp':
-      case 'accountNumber':
-      case 'groupNumber':
       case 'host':
-      case 'paymentCard':
-      case 'bankAccount':
-      case 'securityQuestion':
         return 'text';
-      case 'addressRef':
-        return 'addressRef';
-      case 'fileRef':
-        return 'fileRef';
-      case 'cardRef':
-        return 'cardRef';
       default:
         return 'text';
     }
@@ -2641,8 +1412,6 @@ const IssuePanel = () => {
 
     
     // Clear existing custom fields first
-    setDynamicCustomFields([]);
-
     // Map top-level fields (title, etc.)
     if (detailsToUse.title && templateFieldTypes.includes('title')) {
       updatedFormData.title = detailsToUse.title;
@@ -2707,55 +1476,6 @@ const IssuePanel = () => {
           }
           if (fieldValue.country && templateFields.find(tf => tf.name === 'address_country')) {
             updatedFormData.address_country = fieldValue.country;
-          }
-        } else if (fieldType === 'paymentCard' && typeof fieldValue === 'object' && fieldValue !== null) {
-          // Map payment card components to separate template fields
-          if (fieldValue.cardNumber && templateFields.find(tf => tf.name === 'paymentCard_cardNumber')) {
-            updatedFormData.paymentCard_cardNumber = fieldValue.cardNumber;
-            mappedFieldTypes.add('paymentCard');
-          }
-          if (fieldValue.cardExpirationDate) {
-            // Parse MM/YYYY format into separate month and year fields
-            const expirationParts = fieldValue.cardExpirationDate.split('/');
-            if (expirationParts.length === 2) {
-              const [month, year] = expirationParts;
-              if (templateFields.find(tf => tf.name === 'paymentCard_cardExpirationMonth')) {
-                updatedFormData.paymentCard_cardExpirationMonth = month;
-              }
-              if (templateFields.find(tf => tf.name === 'paymentCard_cardExpirationYear')) {
-                updatedFormData.paymentCard_cardExpirationYear = year;
-              }
-            } else {
-            }
-          }
-          if (fieldValue.cardSecurityCode && templateFields.find(tf => tf.name === 'paymentCard_cardSecurityCode')) {
-            updatedFormData.paymentCard_cardSecurityCode = fieldValue.cardSecurityCode;
-          }
-        } else if (fieldType === 'addressRef') {
-          // Handle address reference field - value comes as array with UID
-          const addressUid = Array.isArray(fieldValue) ? fieldValue[0] : fieldValue;
-          
-          if (addressUid && typeof addressUid === 'string' && templateFields.find(tf => tf.name === 'addressRef')) {
-            updatedFormData.addressRef = addressUid; // Store the address UID
-            mappedFieldTypes.add('addressRef');
-            
-            // Resolve the address reference asynchronously
-            resolveAndCacheAddress(addressUid);
-          }
-        } else if (fieldType === 'bankAccount' && typeof fieldValue === 'object' && fieldValue !== null) {
-          // Map bank account components to separate template fields
-          if (fieldValue.accountNumber && templateFields.find(tf => tf.name === 'bankAccount_accountNumber')) {
-            updatedFormData.bankAccount_accountNumber = fieldValue.accountNumber;
-            mappedFieldTypes.add('bankAccount');
-          }
-          if (fieldValue.routingNumber && templateFields.find(tf => tf.name === 'bankAccount_routingNumber')) {
-            updatedFormData.bankAccount_routingNumber = fieldValue.routingNumber;
-          }
-          if (fieldValue.accountType && templateFields.find(tf => tf.name === 'bankAccount_accountType')) {
-            updatedFormData.bankAccount_accountType = fieldValue.accountType;
-          }
-          if (fieldValue.otherType && templateFields.find(tf => tf.name === 'bankAccount_otherType')) {
-            updatedFormData.bankAccount_otherType = fieldValue.otherType;
           }
         } else {
           // Handle simple field types
@@ -2866,8 +1586,8 @@ const IssuePanel = () => {
         if (cleanFieldName.includes('_')) {
           const parts = cleanFieldName.split('_');
           if (parts.length === 2) {
-            // For patterns like paymentCard_cardNumber, bankAccount_accountNumber
-            cleanFieldName = parts[1]; // Take the last part (cardNumber, accountNumber, etc.)
+            // For patterns like parentType_fieldName
+            cleanFieldName = parts[1]; // Take the last part
           } else {
             // For more complex patterns, take the last part
             cleanFieldName = parts[parts.length - 1];
@@ -2883,9 +1603,6 @@ const IssuePanel = () => {
         };
       });
       
-      setDynamicCustomFields(cleanedCustomFields);
-    } else {
-      setDynamicCustomFields([]);
     }
 
   };
@@ -2904,8 +1621,6 @@ const IssuePanel = () => {
 
     
     // Clear existing custom fields first
-    setDynamicCustomFields([]);
-
     // Map top-level fields (title, etc.)
     if (recordDetails.title && templateFieldTypes.includes('title')) {
       updatedFormData.title = recordDetails.title;
@@ -2970,55 +1685,6 @@ const IssuePanel = () => {
           }
           if (fieldValue.country && templateFields.find(tf => tf.name === 'address_country')) {
             updatedFormData.address_country = fieldValue.country;
-          }
-        } else if (fieldType === 'paymentCard' && typeof fieldValue === 'object' && fieldValue !== null) {
-          // Map payment card components to separate template fields
-          if (fieldValue.cardNumber && templateFields.find(tf => tf.name === 'paymentCard_cardNumber')) {
-            updatedFormData.paymentCard_cardNumber = fieldValue.cardNumber;
-            mappedFieldTypes.add('paymentCard');
-          }
-          if (fieldValue.cardExpirationDate) {
-            // Parse MM/YYYY format into separate month and year fields
-            const expirationParts = fieldValue.cardExpirationDate.split('/');
-            if (expirationParts.length === 2) {
-              const [month, year] = expirationParts;
-              if (templateFields.find(tf => tf.name === 'paymentCard_cardExpirationMonth')) {
-                updatedFormData.paymentCard_cardExpirationMonth = month;
-              }
-              if (templateFields.find(tf => tf.name === 'paymentCard_cardExpirationYear')) {
-                updatedFormData.paymentCard_cardExpirationYear = year;
-              }
-            } else {
-            }
-          }
-          if (fieldValue.cardSecurityCode && templateFields.find(tf => tf.name === 'paymentCard_cardSecurityCode')) {
-            updatedFormData.paymentCard_cardSecurityCode = fieldValue.cardSecurityCode;
-          }
-        } else if (fieldType === 'addressRef') {
-          // Handle address reference field - value comes as array with UID
-          const addressUid = Array.isArray(fieldValue) ? fieldValue[0] : fieldValue;
-          
-          if (addressUid && typeof addressUid === 'string' && templateFields.find(tf => tf.name === 'addressRef')) {
-            updatedFormData.addressRef = addressUid; // Store the address UID
-            mappedFieldTypes.add('addressRef');
-            
-            // Resolve the address reference asynchronously
-            resolveAndCacheAddress(addressUid);
-          }
-        } else if (fieldType === 'bankAccount' && typeof fieldValue === 'object' && fieldValue !== null) {
-          // Map bank account components to separate template fields
-          if (fieldValue.accountNumber && templateFields.find(tf => tf.name === 'bankAccount_accountNumber')) {
-            updatedFormData.bankAccount_accountNumber = fieldValue.accountNumber;
-            mappedFieldTypes.add('bankAccount');
-          }
-          if (fieldValue.routingNumber && templateFields.find(tf => tf.name === 'bankAccount_routingNumber')) {
-            updatedFormData.bankAccount_routingNumber = fieldValue.routingNumber;
-          }
-          if (fieldValue.accountType && templateFields.find(tf => tf.name === 'bankAccount_accountType')) {
-            updatedFormData.bankAccount_accountType = fieldValue.accountType;
-          }
-          if (fieldValue.otherType && templateFields.find(tf => tf.name === 'bankAccount_otherType')) {
-            updatedFormData.bankAccount_otherType = fieldValue.otherType;
           }
         } else {
           // Handle simple field types
@@ -3115,8 +1781,8 @@ const IssuePanel = () => {
         if (cleanFieldName.includes('_')) {
           const parts = cleanFieldName.split('_');
           if (parts.length === 2) {
-            // For patterns like paymentCard_cardNumber, bankAccount_accountNumber
-            cleanFieldName = parts[1]; // Take the last part (cardNumber, accountNumber, etc.)
+            // For patterns like parentType_fieldName
+            cleanFieldName = parts[1]; // Take the last part
           } else {
             // For more complex patterns, take the last part
             cleanFieldName = parts[parts.length - 1];
@@ -3132,9 +1798,6 @@ const IssuePanel = () => {
         };
       });
       
-      setDynamicCustomFields(cleanedCustomFields);
-    } else {
-      setDynamicCustomFields([]);
     }
 
   };
@@ -3166,23 +1829,6 @@ const IssuePanel = () => {
           if (value.hostName) hostParts.push(value.hostName);
           if (value.port) hostParts.push(`:${value.port}`);
           return hostParts.join('');
-        }
-        return String(value);
-        
-      case 'paymentCard':
-        // Handle payment card object structure: {cardNumber, expirationDate, securityCode}
-        if (typeof value === 'object' && value !== null) {
-          return value.cardNumber ? `****-****-****-${String(value.cardNumber).slice(-4)}` : '';
-        }
-        return String(value);
-        
-      case 'bankAccount':
-        // Handle bank account object structure
-        if (typeof value === 'object' && value !== null) {
-          const parts = [];
-          if (value.accountNumber) parts.push(`Account: ${value.accountNumber}`);
-          if (value.accountType) parts.push(`Type: ${value.accountType}`);
-          return parts.length > 0 ? parts.join(' | ') : '';
         }
         return String(value);
         
@@ -3282,140 +1928,32 @@ const IssuePanel = () => {
     };
   };
 
-  // Helper function to enhance field labels for better UX
-  const enhanceFieldLabel = (fieldType, currentLabel) => {
-    const labelMap = {
-      'login': 'Username/Login',
-      'password': 'Password',
-      'url': 'Website URL',
-      'email': 'Email Address',
-      'phone': 'Phone Number',
-      'name': 'Full Name',
-      'company': 'Company Name',
-      'title': 'Title',
-      'notes': 'Notes',
-      'note': 'Notes',
-      'address': 'Address Information',
-      'birthDate': 'Birth Date',
-      'expirationDate': 'Expiration Date',
-      'paymentCard': 'Payment Card Information',
-      'bankAccount': 'Bank Account Information',
-      'host': 'Host/Server',
-      'securityQuestion': 'Security Question',
-      'pinCode': 'PIN Code',
-      'oneTimeCode': 'Two-Factor Code',
-      'otp': 'One-Time Password',
-      'passkey': 'Passkey',
-      'keyPair': 'Key Pair',
-      'licenseNumber': 'License Number',
-      'multiline': 'Text Area',
-      'accountNumber': 'Account Number',
-      'groupNumber': 'Group Number',
-      'addressRef': 'Address',
-      'fileRef': 'Files',
-      'cardRef': 'Payment Card'
-    };
-    
-    return labelMap[fieldType] || currentLabel;
-  };
-
-  // Helper function to get appropriate placeholders for field types
-  const getPlaceholderForField = (fieldType, fieldLabel) => {
-    const placeholderMap = {
-      'login': 'Enter username or email',
-      'password': 'Enter password',
-      'url': 'https://example.com',
-      'email': 'user@example.com',
-      'phone': '+1 (555) 123-4567',
-      'name': 'First Middle Last',
-      'company': 'Company name',
-      'title': 'Record title',
-      'notes': 'Enter additional notes...',
-      'note': 'Enter notes...',
-      'address': 'Street, City, State, ZIP',
-      'birthDate': 'MM/DD/YYYY',
-      'expirationDate': 'MM/DD/YYYY',
-      'paymentCard': '•••• •••• •••• 1234',
-      'bankAccount': 'Bank account details',
-      'host': 'hostname:port',
-      'securityQuestion': 'Question and answer',
-      'pinCode': 'Enter PIN',
-      'oneTimeCode': 'TOTP code',
-      'otp': 'One-time password',
-      'passkey': 'Passkey information',
-      'keyPair': 'Private key',
-      'licenseNumber': 'License number',
-      'multiline': 'Enter multiple lines of text...',
-      'accountNumber': 'Account number',
-      'groupNumber': 'Group number'
-    };
-    
-    return placeholderMap[fieldType] || `Enter ${fieldLabel.toLowerCase()}`;
-  };
-
-  // Helper function to identify complex field types
-  const isComplexFieldType = (fieldType) => {
-    const complexTypes = [
-      'name', 'paymentCard', 'bankAccount', 'host', 'address', 
-      'securityQuestion', 'keyPair', 'phone', 'email'
-    ];
-    return complexTypes.includes(fieldType);
-  };
-
-  // Remove a custom field
-  const removeCustomField = (fieldIdentifier) => {
-    
-    // Remove from dynamic custom fields array - handle both 'name' and 'id' properties
-    setDynamicCustomFields(prev => prev.filter(field => 
-      (field.name !== fieldIdentifier) && 
-      (field.id !== fieldIdentifier)
-    ));
-    
-    // Remove from form data
-    setFormData(prev => {
-      const newFormData = { ...prev };
-      delete newFormData[fieldIdentifier];
-      return newFormData;
-    });
-    
-  };
-
   // Render grouped template fields with sophisticated UI like Keeper vault
   const renderGroupedTemplateFields = (templateFields) => {
     if (!templateFields || templateFields.length === 0) {
       return null;
     }
 
-    // Group fields by their parent type (name, phone) or treat as individual
-    const fieldGroups = {};
-    const individualFields = [];
-
-    
-    templateFields.forEach((field) => {
-      if (field.parentType) {
-        // This is a complex field component (name_first, phone_number, etc.)
-        if (!fieldGroups[field.parentType]) {
-          fieldGroups[field.parentType] = [];
-        }
-        fieldGroups[field.parentType].push(field);
-      } else {
-        // This is an individual field
-        if (field.name === 'addressRef') {
-        }
-        individualFields.push(field);
-      }
-    });
-
-
     const renderElements = [];
+    const renderedGroups = new Set(); // Track which groups have been rendered
 
-    // Render grouped complex fields
-    Object.keys(fieldGroups).forEach((groupType) => {
-      const groupFields = fieldGroups[groupType];
+    // Render fields in order, grouping related fields when encountered
+    templateFields.forEach((field, index) => {
+      if (field.parentType) {
+        // This is a complex field component - check if we've already rendered this group
+        if (renderedGroups.has(field.parentType)) {
+          return; // Skip - already rendered as part of group
+        }
+        
+        // Mark group as rendered
+        renderedGroups.add(field.parentType);
+        
+        // Get all fields for this group
+        const groupFields = templateFields.filter(f => f.parentType === field.parentType);
+        const groupType = field.parentType;
       const groupLabel = groupType === 'name' ? 'Name' : 
                         groupType === 'phone' ? 'Phone Number' : 
-                        groupType === 'bankAccount' ? 'Bank Account' : 
-                        groupType;
+                          null; // Don't show header for host and other groups
 
       if (groupType === 'name') {
         // Render Name group with First/Middle/Last layout
@@ -3425,9 +1963,7 @@ const IssuePanel = () => {
 
         renderElements.push(
           <div key={`group-${groupType}`} className="field-group">
-            <div className="field-group-header">
-              {groupLabel}
-            </div>
+              {groupLabel && <div className="field-group-header">{groupLabel}</div>}
             
             {/* First and Middle Name Row */}
             <div className="field-row">
@@ -3468,9 +2004,7 @@ const IssuePanel = () => {
 
         renderElements.push(
           <div key={`group-${groupType}`} className="field-group">
-            <div className="field-group-header">
-              {groupLabel}
-            </div>
+              {groupLabel && <div className="field-group-header">{groupLabel}</div>}
             
             {/* Phone Number */}
             {numberField && (
@@ -3503,93 +2037,59 @@ const IssuePanel = () => {
             </div>
           </div>
         );
-      } else if (groupType === 'bankAccount') {
-        // Render Bank Account group with Account Number/Routing Number/Account Type layout
-        const accountNumberField = groupFields.find(f => f.subField === 'accountNumber');
-        const routingNumberField = groupFields.find(f => f.subField === 'routingNumber');
-        const accountTypeField = groupFields.find(f => f.subField === 'accountType');
-        const otherTypeField = groupFields.find(f => f.subField === 'otherType');
+        } else if (groupType === 'host') {
+          // Render Host group without header - just Host and Port fields inline
+          const hostNameField = groupFields.find(f => f.subField === 'hostName');
+          const portField = groupFields.find(f => f.subField === 'port');
 
         renderElements.push(
           <div key={`group-${groupType}`} className="field-group">
-            <div className="field-group-header">
-              {groupLabel}
-            </div>
-            
-            {/* Account Number */}
-            {accountNumberField && (
-              <div className="mb-12">
-                <label className="form-label">
-                  {accountNumberField.label} {accountNumberField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
-                </label>
-                {renderFormInput(accountNumberField)}
-              </div>
-            )}
-            
-            {/* Routing Number and Account Type Row */}
             <div className="field-row">
-              {routingNumberField && (
-                <div className="field-col">
+                {hostNameField && (
+                  <div className="field-col field-col-flex-2">
                   <label className="form-label">
-                    {routingNumberField.label}
+                      {hostNameField.label} {hostNameField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                   </label>
-                  {renderFormInput(routingNumberField)}
+                    {renderFormInput(hostNameField)}
                 </div>
               )}
-              {accountTypeField && (
-                <div className="field-col">
+                {portField && (
+                  <div className="field-col field-col-flex-1">
                   <label className="form-label">
-                    {accountTypeField.label}
+                      {portField.label}
                   </label>
-                  {renderFormInput(accountTypeField)}
+                    {renderFormInput(portField)}
                 </div>
               )}
             </div>
-            
-            {/* Other Account Type */}
-            {otherTypeField && (
-              <div className="mb-12">
-                <label className="form-label">
-                  {otherTypeField.label}
-                </label>
-                {renderFormInput(otherTypeField)}
-              </div>
-            )}
           </div>
         );
       } else {
-        // Render other complex field groups
+          // Render other complex field groups without header
         renderElements.push(
           <div key={`group-${groupType}`} className="field-group">
-            <div className="field-group-header">
-              {groupLabel}
-            </div>
-            {groupFields.map((field) => {
-              
-              return (
-                <div key={field.name} className="mb-12">
+              {groupFields.map((gField) => (
+                <div key={gField.name} className="mb-12">
                   <label className="form-label">
-                    {field.label} {field.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
+                    {gField.label} {gField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                   </label>
-                {renderFormInput(field)}
+                  {renderFormInput(gField)}
               </div>
-            )})}
+              ))}
           </div>
         );
       }
-    });
-
-    // Render individual fields
-    individualFields.forEach((field) => {
-      
+      } else {
+        // This is an individual field - render it directly
       renderElements.push(
         <div key={field.name} className="mb-16">
           <label className="form-label">
-            {field.label} {field.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>} {field.templateField && <span className="text-muted text-xs">(Template)</span>}
+              {field.label} {field.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
           </label>
           {renderFormInput(field)}
         </div>
       );
+      }
     });
 
     return renderElements;
@@ -3626,8 +2126,6 @@ const IssuePanel = () => {
       setRecordForUpdateCurrentPage(1);
       setRecordDetails({});
       setLoadingRecordDetails(false);
-      setDynamicCustomFields([]);
-      setManualCustomFields([]);
       setRecordTypeTemplate({});
       setTemplateFields([]);
       setLoadingTemplate(false);
@@ -3792,41 +2290,6 @@ const IssuePanel = () => {
   };
 
   // Add manual custom field
-  const addManualCustomField = () => {
-    const fieldId = `manual_custom_${Date.now()}`;
-    const newField = {
-      id: fieldId,
-      name: '',
-      value: '',
-      placeholder: 'Enter custom field name'
-    };
-    setManualCustomFields(prev => [...prev, newField]);
-  };
-
-  // Remove manual custom field
-  const removeManualCustomField = (fieldId) => {
-    setManualCustomFields(prev => prev.filter(field => field.id !== fieldId));
-    // Also remove from form data
-    setFormData(prev => {
-      const newData = { ...prev };
-      const fieldToRemove = manualCustomFields.find(field => field.id === fieldId);
-      if (fieldToRemove && fieldToRemove.name) {
-        delete newData[fieldToRemove.name];
-      }
-      return newData;
-    });
-  };
-
-  // Update manual custom field name
-  const updateManualCustomFieldName = (fieldId, newName) => {
-    setManualCustomFields(prev => 
-      prev.map(field => 
-        field.id === fieldId ? { ...field, name: newName, placeholder: `Enter value for ${newName || 'custom field'}` } : field
-      )
-    );
-  };
-
-
   // Validate required fields
   const validateForm = () => {
     if (!selectedAction?.fields) return true;
@@ -3992,19 +2455,6 @@ const IssuePanel = () => {
     return true;
   };
 
-  // Format card number for display (4-4-4-4 format)
-  const formatCardNumber = (cardNumber) => {
-    if (!cardNumber) return '';
-    // Remove all non-digits and format as groups of 4
-    const digits = cardNumber.replace(/\D/g, '');
-    return digits.replace(/(\d{4})/g, '$1 ').trim();
-  };
-
-  // Parse formatted card number back to digits only
-  const parseCardNumber = (formatted) => {
-    return formatted.replace(/\s/g, '');
-  };
-
   // Render form input based on field type
   const renderFormInput = (field) => {
     let value = formData[field.name] || '';
@@ -4012,11 +2462,6 @@ const IssuePanel = () => {
     // Default expiration_type to 'none' if not set
     if (field.name === 'expiration_type' && !value) {
       value = 'none';
-    }
-    
-    // Special formatting for card number display
-    if (field.name === 'paymentCard_cardNumber') {
-      value = formatCardNumber(value);
     }
     
     // For record-update, get the current value from record details to check if field has data
@@ -4288,14 +2733,11 @@ const IssuePanel = () => {
                 
                 // Clear existing template fields first
                 setTemplateFields([]);
-                setDynamicCustomFields([]);
-                
                 if (newValue && newValue !== '') {
                   fetchRecordTypeTemplateWithFormMapping(newValue, currentFormData);
                 } else {
                   setRecordTypeTemplate({});
                   setTemplateFields([]);
-                  setDynamicCustomFields([]);
                 }
               }
               
@@ -4342,6 +2784,138 @@ const IssuePanel = () => {
             className={getInputClassName()}
           />
         );
+      case 'secureTextarea':
+        // Secure textarea with mask/unmask toggle - JIRA UI style
+        return (
+          <div className="secure-field-container">
+            <textarea
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => handleInputChange(field.name, e.target.value)}
+              placeholder={field.placeholder}
+              rows={4}
+              className={`${getInputClassName()} ${showSecureNote ? 'secure-field-textarea' : 'secure-field-textarea-masked'}`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowSecureNote(!showSecureNote)}
+              disabled={isFormDisabled}
+              title={showSecureNote ? 'Hide note content' : 'Show note content'}
+              className="secure-toggle-btn"
+            >
+              {showSecureNote ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+          </div>
+        );
+      case 'secureTextareaPrivateKey':
+        // Secure textarea for SSH Private Key with mask/unmask toggle
+        return (
+          <div className="secure-field-container">
+            <textarea
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => handleInputChange(field.name, e.target.value)}
+              placeholder={field.placeholder}
+              rows={4}
+              className={`${getInputClassName()} ${showPrivateKey ? 'secure-field-textarea-monospace' : 'secure-field-textarea-monospace-masked'}`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPrivateKey(!showPrivateKey)}
+              disabled={isFormDisabled}
+              title={showPrivateKey ? 'Hide private key' : 'Show private key'}
+              className="secure-toggle-btn"
+            >
+              {showPrivateKey ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+          </div>
+        );
+      case 'secureTextareaPublicKey':
+        // Secure textarea for SSH Public Key with mask/unmask toggle
+        return (
+          <div className="secure-field-container">
+            <textarea
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => handleInputChange(field.name, e.target.value)}
+              placeholder={field.placeholder}
+              rows={3}
+              className={`${getInputClassName()} ${showPublicKey ? 'secure-field-textarea-monospace' : 'secure-field-textarea-monospace-masked'}`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPublicKey(!showPublicKey)}
+              disabled={isFormDisabled}
+              title={showPublicKey ? 'Hide public key' : 'Show public key'}
+              className="secure-toggle-btn"
+            >
+              {showPublicKey ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+          </div>
+        );
+      case 'secureText':
+        // Secure single-line text input with mask/unmask toggle - JIRA UI style
+        return (
+          <div className="secure-field-container">
+            <input
+              type={showLicenseKey ? 'text' : 'password'}
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => handleInputChange(field.name, e.target.value)}
+              placeholder={field.placeholder}
+              className={`${getInputClassName()} secure-field-input`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowLicenseKey(!showLicenseKey)}
+              disabled={isFormDisabled}
+              title={showLicenseKey ? 'Hide content' : 'Show content'}
+              className="secure-toggle-btn-center"
+            >
+              {showLicenseKey ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+          </div>
+        );
       case 'number':
         return (
           <input
@@ -4352,6 +2926,35 @@ const IssuePanel = () => {
             placeholder={field.placeholder}
             className={getInputClassName()}
           />
+        );
+      case 'dateMMDDYYYY':
+        // Date picker with MM/DD/YYYY format display - JIRA UI style
+        return (
+          <div className="secure-field-container">
+            <input
+              type="date"
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => {
+                const dateValue = e.target.value;
+                handleInputChange(field.name, dateValue);
+              }}
+              placeholder={field.placeholder}
+              className={`${getInputClassName()} date-field-input`}
+            />
+            {value && (
+              <div className="date-field-hint">
+                {(() => {
+                  try {
+                    const [year, month, day] = value.split('-');
+                    return `Format: ${month}/${day}/${year}`;
+                  } catch {
+                    return '';
+                  }
+                })()}
+              </div>
+            )}
+          </div>
         );
       case 'checkbox':
         // Special handling for recursive checkbox in share-record action
@@ -4478,20 +3081,41 @@ const IssuePanel = () => {
             </div>
           );
         }
-        // Regular password field
+        // Regular password field with hide/show toggle
         const passwordValidation = validatePassword(value);
         const hasValidationErrors = !passwordValidation.isValid && value && value !== '$GEN';
         
         return (
           <div>
-            <input
-              type="password"
-              value={value}
-              disabled={isFormDisabled}
-              onChange={(e) => handleInputChange(field.name, e.target.value)}
-              placeholder={field.placeholder || "Password or $GEN"}
-              className={`${getInputClassName()} ${hasValidationErrors ? 'required-error' : ''}`}
-            />
+            <div className="secure-field-container">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={value}
+                disabled={isFormDisabled}
+                onChange={(e) => handleInputChange(field.name, e.target.value)}
+                placeholder={field.placeholder || "Password or $GEN"}
+                className={`${getInputClassName()} secure-field-input ${hasValidationErrors ? 'required-error' : ''}`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                disabled={isFormDisabled}
+                title={showPassword ? 'Hide password' : 'Show password'}
+                className="secure-toggle-btn-center"
+              >
+                {showPassword ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                )}
+              </button>
+            </div>
             <div className="password-hint">
               Enter your own password or type <strong>$GEN</strong> for automatic password generation
             </div>
@@ -4507,251 +3131,54 @@ const IssuePanel = () => {
             )}
           </div>
         );
-      case 'addressRef':
-        // Special handling for address reference fields
-        const addressUid = value;
-        const displayValue = addressUid ? getAddressDisplayValue(addressUid) : field.placeholder || 'Select or add address...';
-        const isLoading = addressUid && loadingAddresses.has(addressUid);
-        
-        return (
-          <div className="relative">
-            <div
-              className={`${getInputClassName()} ref-field-container ${isFormDisabled ? 'disabled' : ''}`}
-              onClick={() => {
-                if (!isFormDisabled) {
-                  if (!showAddressDropdown) {
-                    // Fetch address records when opening dropdown
-                    fetchAddressRecords();
-                  }
-                  setShowAddressDropdown(!showAddressDropdown);
-                }
-              }}
-            >
-              <span className={`ref-field-text ${addressUid ? 'value' : 'placeholder'}`}>
-                {isLoading ? 'Loading address...' : displayValue}
-              </span>
-              <div className="ref-field-actions">
-                {addressUid && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!isFormDisabled) {
-                        handleInputChange(field.name, '');
-                        // Clear from resolved addresses cache
-                        setResolvedAddresses(prev => {
-                          const updated = { ...prev };
-                          delete updated[addressUid];
-                          return updated;
-                        });
-                      }
-                    }}
-                    className="ref-clear-btn"
-                    title="Remove address"
-                  >
-                    ×
-                  </button>
-                )}
-                <span className="dropdown-arrow cursor-pointer">
-                  ▼
-                </span>
-              </div>
-            </div>
-            
-            {/* Address Dropdown */}
-            {showAddressDropdown && !isFormDisabled && (
-              <div className="ref-dropdown-menu">
-                {loadingAddressRecords ? (
-                  <div className="ref-dropdown-loading">
-                    Loading addresses...
-                  </div>
-                ) : (
-                  <>
-                    {/* Current Address (if selected) */}
-                    {addressUid && (
-                      <div
-                        className="ref-dropdown-item"
-                        onClick={() => {
-                          setShowAddressDropdown(false);
-                          // Keep current address selected
-                        }}
-                      >
-                        <div className="ref-dropdown-item-title">
-                          Current Address
-                        </div>
-                        <div className="ref-dropdown-item-text">
-                          {displayValue}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Existing Address Records */}
-                    {addressRecords.length > 0 && (
-                      <>
-                        <div className="ref-dropdown-section-header">
-                          Existing Addresses ({addressRecords.length})
-                        </div>
-                        {addressRecords.map((record) => {
-                          // Build address display from record fields
-                          const addressParts = [];
-                          if (record.fields) {
-                            record.fields.forEach(field => {
-                              if (field.type === 'address' && field.value && Array.isArray(field.value) && field.value.length > 0) {
-                                const addr = field.value[0];
-                                if (addr.street1) addressParts.push(addr.street1);
-                                if (addr.street2) addressParts.push(addr.street2);
-                                if (addr.city) addressParts.push(addr.city);
-                                if (addr.state) addressParts.push(addr.state);
-                                if (addr.zip) addressParts.push(addr.zip);
-                                if (addr.country) addressParts.push(addr.country);
-                              }
-                            });
-                          }
-                          const fullAddress = addressParts.join(', ');
-                          const displayText = fullAddress || record.title || record.record_uid || 'Address Record';
-
-                          return (
-                            <div
-                              key={record.record_uid}
-                              className="ref-dropdown-item"
-                              onClick={() => {
-                                handleInputChange('addressRef', record.record_uid);
-                                setShowAddressDropdown(false);
-                              }}
-                            >
-                              <div className="ref-dropdown-item-title">
-                                {record.title || 'Address Record'}
-                              </div>
-                              <div className="ref-dropdown-item-text">
-                                {displayText}
-                              </div>
-                              <div className="text-xs text-muted mt-2">
-                                ID: {record.record_uid}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </>
-                    )}
-
-                    {/* New Address Option */}
-                    <div
-                      className={`ref-dropdown-new-item ${addressRecords.length > 0 ? 'with-border' : ''}`}
-                      onClick={() => {
-                        handleNewAddress();
-                      }}
-                    >
-                      <span className="ref-dropdown-new-item-icon">+</span>
-                      New Address
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-            
-            {/* Click outside to close dropdown */}
-            {showAddressDropdown && (
-              <div
-                className="click-overlay z-999"
-                onClick={() => setShowAddressDropdown(false)}
-              />
-            )}
-          </div>
-        );
-      case 'fileRef':
-        // Special handling for file reference fields
-        const fileUid = value;
-        const fileDisplayValue = fileUid ? `File: ${fileUid}` : field.placeholder || 'Select files...';
-        
-        return (
-          <div className="relative">
-            <div
-              className={`${getInputClassName()} ref-field-container ${isFormDisabled ? 'disabled' : ''}`}
-              onClick={() => {
-                if (!isFormDisabled) {
-                  alert('File selection functionality will be implemented soon');
-                }
-              }}
-            >
-              <span className={`ref-field-text flex-1 ${fileUid ? 'value' : 'placeholder'}`}>
-                {fileDisplayValue}
-              </span>
-              <div className="ref-field-actions">
-                <span className="text-sm text-secondary">FOLDER</span>
-              </div>
-            </div>
-          </div>
-        );
-      case 'cardRef':
-        // Special handling for payment card reference fields
-        const cardUid = value;
-        const cardDisplayValue = cardUid ? `Card: ${cardUid}` : field.placeholder || 'Select payment card...';
-        
-        return (
-          <div className="relative">
-            <div
-              className={`${getInputClassName()} ref-field-container ${isFormDisabled ? 'disabled' : ''}`}
-              onClick={() => {
-                if (!isFormDisabled) {
-                  alert('Payment card selection functionality will be implemented soon');
-                }
-              }}
-            >
-              <span className={`ref-field-text flex-1 ${cardUid ? 'value' : 'placeholder'}`}>
-                {cardDisplayValue}
-              </span>
-              <div className="ref-field-actions">
-                <span className="text-sm text-secondary">CARD</span>
-              </div>
-            </div>
-          </div>
-        );
       default:
-        // Special handling for card number formatting
-        if (field.name === 'paymentCard_cardNumber') {
-          return (
-            <input
-              type="text"
-              value={value} // Already formatted by renderFormInput
-              disabled={isFormDisabled}
-              onChange={(e) => {
-                // Parse formatted input and store digits only
-                const digitsOnly = parseCardNumber(e.target.value);
-                handleInputChange(field.name, digitsOnly);
-              }}
-              placeholder="•••• •••• •••• 1234"
-              maxLength={19} // 16 digits + 3 spaces
-              className={getInputClassName()}
-            />
-          );
-        }
-        
         // Use getInputTypeForField to map field types to proper HTML input types
         const inputType = getInputTypeForField(field.type);
         
-        // Special handling for password-like fields to show the $GEN note
+        // Special handling for password-like fields to show the $GEN note with hide/show toggle
         if (inputType === 'password') {
-          const passwordValidation = validatePassword(value);
-          const hasValidationErrors = !passwordValidation.isValid && value && value !== '$GEN';
+          const passwordValidation2 = validatePassword(value);
+          const hasValidationErrors2 = !passwordValidation2.isValid && value && value !== '$GEN';
           
           return (
             <div>
-              <input
-                type="password"
-                value={value}
-                disabled={isFormDisabled}
-                onChange={(e) => handleInputChange(field.name, e.target.value)}
-                placeholder={field.placeholder || "Password or $GEN"}
-                className={`${getInputClassName()} ${hasValidationErrors ? 'required-error' : ''}`}
-              />
+              <div className="secure-field-container">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={value}
+                  disabled={isFormDisabled}
+                  onChange={(e) => handleInputChange(field.name, e.target.value)}
+                  placeholder={field.placeholder || "Password or $GEN"}
+                  className={`${getInputClassName()} secure-field-input ${hasValidationErrors2 ? 'required-error' : ''}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  disabled={isFormDisabled}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  className="secure-toggle-btn-center"
+                >
+                  {showPassword ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                      <line x1="1" y1="1" x2="23" y2="23"/>
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
               <div className="password-hint">
                 Enter your own password or type <strong>$GEN</strong> for automatic password generation
               </div>
-              {hasValidationErrors && (
+              {hasValidationErrors2 && (
                 <div className="validation-errors">
                   Password requirements:
                   <ul>
-                    {passwordValidation.errors.map((error, index) => (
+                    {passwordValidation2.errors.map((error, index) => (
                       <li key={index}>{error}</li>
                     ))}
                   </ul>
@@ -5028,89 +3455,6 @@ const IssuePanel = () => {
             setIsExecuting(false);
             return;
           }
-        }
-      } else if (newAddressFormData && newAddressFormData.title && Object.keys(newAddressFormData).length > 1) {
-        // This is a new address from the modal - create it
-        try {
-          
-          // Prepare address data for API call
-          const addressData = {
-            title: newAddressFormData.title,
-            fields: [
-              {
-                type: 'address',
-                value: [{
-                  street1: newAddressFormData.street1 || '',
-                  street2: newAddressFormData.street2 || '',
-                  city: newAddressFormData.city || '',
-                  state: newAddressFormData.state || '',
-                  zip: newAddressFormData.zip || '',
-                  country: newAddressFormData.country || ''
-                }]
-              }
-            ]
-          };
-
-          // Add notes if provided
-          if (newAddressFormData.notes) {
-            addressData.fields.push({
-              type: 'text',
-              value: newAddressFormData.notes
-            });
-          }
-
-          // Create the address record in Keeper using executeKeeperAction
-          const addressResult = await api.executeKeeperAction(
-            issueContext.issueKey,
-            "record-add",
-            "Create address record",
-            {
-              recordType: "address",
-              title: newAddressFormData.title,
-              skipComment: true, // Don't create comment for reference records
-              street1: newAddressFormData.street1 || '',
-              street2: newAddressFormData.street2 || '',
-              city: newAddressFormData.city || '',
-              state: newAddressFormData.state || '',
-              zip: newAddressFormData.zip || '',
-              country: newAddressFormData.country || '',
-              notes: newAddressFormData.notes || ''
-            }
-          );
-
-          if (addressResult && addressResult.record_uid) {
-            realAddressUid = addressResult.record_uid;
-            addressCreated = true;
-            
-            // Update the parameters to use the real address UID
-            finalParameters.addressRef = realAddressUid;
-            
-            // Update the resolved addresses cache
-            setResolvedAddresses(prev => ({
-              ...prev,
-              [realAddressUid]: {
-                record_uid: realAddressUid,
-                type: 'address',
-                title: newAddressFormData.title,
-                fields: addressData.fields
-              }
-            }));
-            
-            
-            // Clear the modal data since address has been created
-            setNewAddressFormData({});
-            setShowNewAddressModal(false);
-          } else {
-            throw new Error("Failed to create address record from modal data");
-          }
-        } catch (error) {
-          const errorMessage = handleApiError(error, "Failed to create address record");
-          setLastResult({ 
-            success: false, 
-            message: errorMessage
-          });
-          setIsExecuting(false);
-          return;
         }
       }
       
@@ -5550,9 +3894,8 @@ const IssuePanel = () => {
                                           setSelectedRecordForUpdate(record);
                                           setShowRecordForUpdateDropdown(false);
                                           setRecordForUpdateSearchTerm("");
-                                          // Clear previous record data immediately to avoid showing old custom fields
+                                          // Clear previous record data immediately
                                           setRecordDetails({});
-                                          setDynamicCustomFields([]); // Clear immediately
                                           // For record-update, keep the record identifier but clear other fields
                                           setFormData({
                                             record: record.record_uid || record.title // Keep record identifier
@@ -5561,8 +3904,6 @@ const IssuePanel = () => {
                                           setTemplateFields([]);
                                           setOriginalRecordType(null);
                                           setOriginalFormData({});
-                                          // Ensure custom fields stay cleared during loading
-                                          setTimeout(() => setDynamicCustomFields([]), 100);
                                           // Fetch record details but preserve stored data if it exists
                                           const currentStoredData = hasStoredData && storedRequestData ? storedRequestData : null;
                                           fetchKeeperRecordDetails(record.record_uid, currentStoredData);
@@ -5571,9 +3912,6 @@ const IssuePanel = () => {
                                       >
                                         <div className="dropdown-option-title">
                                           {record.title}
-                                        </div>
-                                        <div className="dropdown-option-description">
-                                          UID: {record.record_uid}
                                         </div>
                                       </div>
                                     ))}
@@ -6260,7 +4598,6 @@ const IssuePanel = () => {
                             } else {
                               setRecordTypeTemplate({});
                               setTemplateFields([]);
-                              setDynamicCustomFields([]);
                             }
                           }}
                           className={isFormDisabled ? 'select-disabled-state' : (formData.recordType ? 'select-with-value' : 'select-no-value')}
@@ -6288,7 +4625,7 @@ const IssuePanel = () => {
                       {selectedAction.value === 'record-update' && loadingTemplate && (
                         <div className="loading-state-box-no-mt">
                           <div className="loading-state-title">
-                            Loading template fields for {formData.recordType}...
+                            Loading template fields for {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType}...
                           </div>
                           <div className="loading-state-subtitle">
                             Please wait while we fetch the appropriate form fields
@@ -6458,8 +4795,6 @@ const IssuePanel = () => {
                             
                             // Clear existing template fields first
                             setTemplateFields([]);
-                            setDynamicCustomFields([]);
-                            
                             // Prepare current form data with new record type
                             const currentFormDataWithNewType = { ...formData, recordType: newRecordType };
                             
@@ -6472,7 +4807,6 @@ const IssuePanel = () => {
                             } else {
                               setRecordTypeTemplate({});
                               setTemplateFields([]);
-                              setDynamicCustomFields([]);
                             }
                           }}
                           className={isFormDisabled ? 'select-disabled-state' : (formData.recordType ? 'select-with-value' : 'select-no-value')}
@@ -6500,14 +4834,14 @@ const IssuePanel = () => {
                       {formData.recordType && (
                         <div>
                           <div className="section-header-bordered">
-                            Step 2: Configure {formData.recordType} Fields
+                            Step 2: Configure {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType} Fields
                           </div>
                           
                           {/* Loading indicator when template is being fetched */}
                           {loadingTemplate && (
                             <div className="loading-state-box-no-mt">
                               <div className="loading-state-title">
-                                Loading template fields for {formData.recordType}...
+                                Loading template fields for {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType}...
                               </div>
                               <div className="loading-state-subtitle">
                                 Please wait while we fetch the appropriate form fields
@@ -6527,11 +4861,51 @@ const IssuePanel = () => {
                             </div>
                           )}
                           
-                          {/* Fallback message when no template fields */}
-                          {templateFields.length === 0 && !loadingTemplate && (
+                          {/* Error message when template loading fails */}
+                          {templateError && !loadingTemplate && (
+                            <div style={{
+                              backgroundColor: '#FEF2F2',
+                              border: '1px solid #FCA5A5',
+                              borderRadius: '8px',
+                              padding: '16px',
+                              marginBottom: '16px'
+                            }}>
+                              <div style={{
+                                color: '#DC2626',
+                                fontWeight: '600',
+                                fontSize: '14px',
+                                marginBottom: '8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px'
+                              }}>
+                                ⚠️ Keeper API Connection Error
+                              </div>
+                              <div style={{
+                                color: '#7F1D1D',
+                                fontSize: '13px',
+                                whiteSpace: 'pre-wrap',
+                                lineHeight: '1.5'
+                              }}>
+                                {templateError}
+                              </div>
+                              <div style={{
+                                marginTop: '12px',
+                                paddingTop: '12px',
+                                borderTop: '1px solid #FCA5A5',
+                                color: '#991B1B',
+                                fontSize: '12px'
+                              }}>
+                                💡 Go to the <strong>App Configuration</strong> page to verify and update the Keeper API settings.
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Fallback message when no template fields (but no error) */}
+                          {templateFields.length === 0 && !loadingTemplate && !templateError && (
                             <div className="warning-message-box">
                               <div className="warning-message-title">
-                                No template fields available for {formData.recordType}
+                                No template fields available for {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType}
                               </div>
                               <div className="warning-message-subtitle">
                                 You can still create the record. Standard fields will be available.
@@ -6625,7 +4999,7 @@ const IssuePanel = () => {
 
                   {/* Custom fields for record-update action handled on backend */}
                   
-                  {selectedAction.value !== 'record-update' && (
+                  {selectedAction.value !== 'record-update' && selectedAction.value !== 'record-add' && (
                     <div className="field-hint-text-mt-8">
                       * Required fields must be completed before approval
                     </div>
@@ -6746,8 +5120,8 @@ const IssuePanel = () => {
                     </Button>
                   )}
                   
-                  {/* Reject Button - show when there's stored data to reject */}
-                  {hasStoredData && (
+                  {/* Reject Button - show when there's stored data to reject (not for admin-only actions) */}
+                  {hasStoredData && selectedAction?.value !== 'record-add' && selectedAction?.value !== 'record-update' && (
                     <Button
                       appearance="default"
                       onClick={() => setShowRejectionForm(true)}
@@ -6867,28 +5241,27 @@ const IssuePanel = () => {
                   <Button
                     appearance="primary"
                     onClick={updateFormData}
-                    isLoading={isUpdating || loadingAdmins}
-                    isDisabled={isUpdating || loadingAdmins || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
+                    isLoading={isUpdating}
+                    isDisabled={isUpdating || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
                     style={{
                       backgroundColor: isFormDisabled ? "#D0D0D0" : 
-                        (loadingTemplate || loadingRecordTypes || loadingAdmins) ? "#F0F0F0" :
+                        (loadingTemplate || loadingRecordTypes) ? "#F0F0F0" :
                         (selectedAction && validateForm() && !isUpdating ? "#4285F4" : isUpdating ? "#357AE8" : "#E0E0E0"),
                       color: isFormDisabled ? "#777" : 
-                        (loadingTemplate || loadingRecordTypes || loadingAdmins) ? "#999" :
+                        (loadingTemplate || loadingRecordTypes) ? "#999" :
                         ((selectedAction && validateForm()) || isUpdating ? "#FFFFFF" : "#999"),
                       fontWeight: "600",
                       fontSize: "14px",
                       padding: "8px 16px",
                       borderRadius: "8px",
                       border: "none",
-                      cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || loadingAdmins || (!selectedAction || !validateForm() || isUpdating) ? "not-allowed" : "pointer",
-                      boxShadow: (selectedAction && validateForm() && !isUpdating && !loadingAdmins) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
+                      cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isUpdating) ? "not-allowed" : "pointer",
+                      boxShadow: (selectedAction && validateForm() && !isUpdating) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
                       transition: "all 0.2s ease"
                     }}
                   >
                     {isFormDisabled ? "Form Disabled (Re-enabling...)" :
                      isUpdating ? "Saving..." :
-                     loadingAdmins ? "Loading Administrators..." :
                      loadingTemplate ? "Loading Template Fields..." :
                      loadingRecordTypes ? "Loading Record Types..." :
                      !selectedAction ? "Select Action to Enable" :
@@ -7139,351 +5512,6 @@ const IssuePanel = () => {
                 ? "Review user requests and use 'Approve & Execute' to run approved actions via ngrok API, or 'Reject Request' to decline with feedback."
                 : "Fill out the form and use 'Save Request' to submit your Keeper action for admin review and approval."
               }
-            </div>
-          </div>
-        )}
-
-        {/* Simple Address Modal */}
-        {showNewAddressModal && (
-          <div className="modal-overlay">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h3 className="modal-title">
-                  Create New Address
-                </h3>
-                <button
-                  onClick={() => setShowNewAddressModal(false)}
-                  className="modal-close-btn"
-                >
-                  ×
-                </button>
-              </div>
-
-              <div>
-                {/* Simple address form fields */}
-                <div className="mb-16">
-                  <label className="label-md-6">
-                    Title *
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.title || ''}
-                    onChange={(e) => handleAddressFieldChange('title', e.target.value)}
-                    placeholder="Enter address title"
-                    className="input-field"
-                  />
-                </div>
-
-                <div className="mb-16">
-                  <label className="label-md-6">
-                    Street Address
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.street1 || ''}
-                    onChange={(e) => handleAddressFieldChange('street1', e.target.value)}
-                    placeholder="Enter street address"
-                    className="input-field"
-                  />
-                </div>
-
-                <div className="mb-16">
-                  <label className="label-md-6">
-                    Street Address 2
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.street2 || ''}
-                    onChange={(e) => handleAddressFieldChange('street2', e.target.value)}
-                    placeholder="Enter street address 2 (optional)"
-                    className="input-field"
-                  />
-                </div>
-
-                <div className="mb-16">
-                  <label className="label-md-6">
-                    City
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.city || ''}
-                    onChange={(e) => handleAddressFieldChange('city', e.target.value)}
-                    placeholder="Enter city"
-                    className="input-field"
-                  />
-                </div>
-
-                <div className="mb-16">
-                  <label className="label-md-6">
-                    State
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.state || ''}
-                    onChange={(e) => handleAddressFieldChange('state', e.target.value)}
-                    placeholder="Enter state"
-                    className="input-field"
-                  />
-                </div>
-
-                <div className="mb-16">
-                  <label className="label-md-6">
-                    ZIP Code
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.zip || ''}
-                    onChange={(e) => handleAddressFieldChange('zip', e.target.value)}
-                    placeholder="Enter ZIP code"
-                    className="input-field"
-                  />
-                </div>
-
-                <div className="mb-16">
-                  <label className="label-md-6">
-                    Country
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.country || ''}
-                    onChange={(e) => handleAddressFieldChange('country', e.target.value)}
-                    placeholder="Enter country"
-                    className="input-field"
-                  />
-                </div>
-
-                <div className="mb-20">
-                  <label className="label-md-6">
-                    Notes
-                  </label>
-                  <textarea
-                    value={newAddressFormData.notes || ''}
-                    onChange={(e) => handleAddressFieldChange('notes', e.target.value)}
-                    placeholder="Enter notes (optional)"
-                    rows={3}
-                    className="input-field"
-                  />
-                </div>
-                
-                <div className="button-group-end">
-                  <button
-                    onClick={() => setShowNewAddressModal(false)}
-                    className="btn-cancel"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={saveNewAddress}
-                    disabled={!newAddressFormData.title}
-                    className="btn-primary"
-                  >
-                    Create Address
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Admin Selection Modal */}
-        {showAdminModal && (
-          <div className="modal-overlay">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h3 className="modal-title">
-                  Select Administrator
-                </h3>
-                <button
-                  onClick={() => {
-                    setShowAdminModal(false);
-                    setShowAdminDropdown(false);
-                    setSelectedAdmin(null);
-                    setAdminSearchTerm("");
-                    setAdminCurrentPage(1);
-                  }}
-                  className="modal-close-btn"
-                >
-                  ×
-                </button>
-              </div>
-
-              <p className="modal-description">
-                Please select an administrator to assign this request to. The ticket will be assigned to the selected admin for review and approval.
-              </p>
-
-              {loadingAdmins ? (
-                <div className="loading-spinner-container">
-                  <Spinner size="large" />
-                </div>
-              ) : (
-                <>
-                  {projectAdmins.length === 0 ? (
-                    <div className="empty-state">
-                      No administrators found for this project.
-                    </div>
-                  ) : (
-                    <>
-                      {/* Custom Admin Dropdown */}
-                      <div className="relative mb-20">
-                        {/* Search/Display Input */}
-                        <input
-                          type="text"
-                          placeholder={selectedAdmin ? (selectedAdmin.displayName || selectedAdmin.name || 'Administrator') : "Click to select administrator..."}
-                          value={adminSearchTerm}
-                          onChange={(e) => {
-                            setAdminSearchTerm(e.target.value);
-                            setAdminCurrentPage(1);
-                          }}
-                          onFocus={() => setShowAdminDropdown(true)}
-                          onClick={() => setShowAdminDropdown(!showAdminDropdown)}
-                          className={`admin-selector-input ${showAdminDropdown ? 'admin-selector-input-focused' : 'admin-selector-input-default'}`}
-                        />
-                        
-                        {/* Dropdown Arrow */}
-                        <div
-                          onClick={() => setShowAdminDropdown(!showAdminDropdown)}
-                          className="admin-dropdown-arrow"
-                        >
-                          ▼
-                        </div>
-
-                        {/* Dropdown Menu */}
-                        {showAdminDropdown && (
-                          <div className="admin-dropdown-menu">
-
-                            {(() => {
-                              // Filter admins based on search
-                              const filteredAdmins = projectAdmins.filter(admin => {
-                                const displayName = (admin.displayName || admin.name || '').toLowerCase();
-                                return displayName.includes(adminSearchTerm.toLowerCase());
-                              });
-
-                              // Calculate pagination
-                              const totalPages = Math.ceil(filteredAdmins.length / adminsPerPage);
-                              const startIndex = (adminCurrentPage - 1) * adminsPerPage;
-                              const endIndex = startIndex + adminsPerPage;
-                              const paginatedAdmins = filteredAdmins.slice(startIndex, endIndex);
-
-                              return (
-                                <>
-                                  {filteredAdmins.length === 0 ? (
-                                    <div className="admin-dropdown-no-results">
-                                      No administrators match your search.
-                                    </div>
-                                  ) : (
-                                    <>
-                                      {/* Admin List */}
-                                      {paginatedAdmins.map((admin) => {
-                                        const displayName = admin.displayName || admin.name || 'Administrator';
-                                        const isSelected = selectedAdmin?.accountId === admin.accountId;
-                                        
-                                        return (
-                                          <div
-                                            key={admin.accountId}
-                                            onClick={() => {
-                                              setSelectedAdmin(admin);
-                                              setShowAdminDropdown(false);
-                                              setAdminSearchTerm('');
-                                            }}
-                                            className={`admin-dropdown-item-wrapper ${isSelected ? 'selected' : ''}`}
-                                          >
-                                            {/* Avatar */}
-                                            {admin.avatarUrl ? (
-                                              <img
-                                                src={admin.avatarUrl}
-                                                alt={displayName}
-                                                className="avatar-img"
-                                              />
-                                            ) : (
-                                              <div className="avatar-placeholder">
-                                                {displayName.charAt(0).toUpperCase()}
-                                              </div>
-                                            )}
-                                            
-                                            {/* Name */}
-                                            <div className="admin-name-text">
-                                              {displayName}
-                                            </div>
-                                            
-                                            {/* Check Icon */}
-                                            {isSelected && (
-                                              <div className="check-icon">
-                                                ✓
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                      
-                                      {/* Pagination */}
-                                      {totalPages > 1 && (
-                                        <div className="pagination-layout">
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setAdminCurrentPage(Math.max(1, adminCurrentPage - 1));
-                                            }}
-                                            disabled={adminCurrentPage === 1}
-                                            className={`pagination-button-prev ${adminCurrentPage === 1 ? 'pagination-button-prev-disabled' : 'pagination-button-prev-enabled'}`}
-                                          >
-                                            ← Prev
-                                          </button>
-                                          
-                                          <span className="pagination-page-info">
-                                            {adminCurrentPage} / {totalPages}
-                                          </span>
-                                          
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setAdminCurrentPage(Math.min(totalPages, adminCurrentPage + 1));
-                                            }}
-                                            disabled={adminCurrentPage === totalPages}
-                                            className={`pagination-button-prev ${adminCurrentPage === totalPages ? 'pagination-button-prev-disabled' : 'pagination-button-prev-enabled'}`}
-                                          >
-                                            Next →
-                                          </button>
-                                        </div>
-                                      )}
-                                    </>
-                                  )}
-                                </>
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-                  <div className="modal-footer-btns">
-                    <button
-                      onClick={() => {
-                        setShowAdminModal(false);
-                        setShowAdminDropdown(false);
-                        setSelectedAdmin(null);
-                        setAdminSearchTerm("");
-                        setAdminCurrentPage(1);
-                      }}
-                      className="modal-cancel-btn"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (selectedAdmin) {
-                          saveRequestDataWithAdmin(selectedAdmin.accountId);
-                        }
-                      }}
-                      disabled={!selectedAdmin || isUpdating}
-                      className={`modal-primary-btn btn-flex-layout ${selectedAdmin && !isUpdating ? 'modal-primary-btn-enabled' : 'modal-primary-btn-disabled'}`}
-                    >
-                      {isUpdating && <Spinner size="small" />}
-                      {isUpdating ? 'Assigning...' : 'Assign & Submit Request'}
-                    </button>
-                  </div>
-                </>
-              )}
             </div>
           </div>
         )}

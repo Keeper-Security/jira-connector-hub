@@ -25,16 +25,6 @@ export const getKeeperRecordDetails = async (recordUid) => {
   return await invoke("getKeeperRecordDetails", { recordUid });
 };
 
-// Get record types
-export const getRecordTypes = async () => {
-  return await invoke("getRecordTypes");
-};
-
-// Get record type template
-export const getRecordTypeTemplate = async (recordType) => {
-  return await invoke("getRecordTypeTemplate", { recordType });
-};
-
 // Get user role
 export const getUserRole = async (issueKey) => {
   return await invoke("getUserRole", { issueKey });

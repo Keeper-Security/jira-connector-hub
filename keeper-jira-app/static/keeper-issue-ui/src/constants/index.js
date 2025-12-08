@@ -3,7 +3,7 @@ export const KEEPER_ACTION_OPTIONS = [
   { 
     value: 'record-add', 
     label: 'Create New Secret', 
-    description: 'Create new secret after approval.',
+    description: 'Create a new secret record in Keeper.',
     fields: [
       { name: 'recordType', label: 'Record Type', type: 'select', required: true, options: [], placeholder: 'Select record type' }
     ]
@@ -26,8 +26,7 @@ export const KEEPER_ACTION_OPTIONS = [
   },
   { 
     value: 'record-permission', 
-    label: 'Record Permission', 
-    description: 'Grant or revoke record permissions for all users in shared folder.',
+    label: 'Request Record Permission Change', 
     requiresSharedFolderSelection: true,
     fields: [
       { name: 'sharedFolder', label: 'Shared Folder', type: 'folder-select', required: true, placeholder: 'Select shared folder' },
@@ -39,8 +38,7 @@ export const KEEPER_ACTION_OPTIONS = [
   },
   { 
     value: 'share-record', 
-    label: 'Share Record', 
-    description: 'Grant or revoke user access to record(s).',
+    label: 'Request Access to Record', 
     requiresSharedFolderSelection: true,
     fields: [
       { name: 'user', label: 'Email', type: 'email', required: true, placeholder: 'Email of account to edit permissions for' },
@@ -56,8 +54,7 @@ export const KEEPER_ACTION_OPTIONS = [
   },
   { 
     value: 'share-folder', 
-    label: 'Share Folder', 
-    description: 'Grant or remove user/team access to folder with specific permissions.',
+    label: 'Request Access to Folder', 
     requiresSharedFolderSelection: true,
     fields: [
       { name: 'folder', label: 'Shared Folder', type: 'folder-select', required: true, placeholder: 'Select shared folder' },

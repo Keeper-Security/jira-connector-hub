@@ -3220,7 +3220,7 @@ textarea.input-field {
 
 .admin-pagination-btn {
   padding: 6px 12px;
-  fontSize: 12px;
+  font-size: 12px;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
@@ -3244,7 +3244,7 @@ textarea.input-field {
 }
 
 .admin-pagination-text {
-  fontSize: 12px;
+  font-size: 12px;
   color: #6B778C;
   font-weight: 500;
 }
@@ -3489,4 +3489,122 @@ textarea.input-field {
 
 .modal-uid strong {
   color: #172B4D;
+}
+
+/* Secure Field Toggle Styles */
+.secure-field-container {
+  position: relative;
+}
+
+.secure-field-input {
+  padding-right: 44px;
+}
+
+.secure-field-input-monospace {
+  padding-right: 44px;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.secure-field-textarea {
+  padding-right: 44px;
+}
+
+.secure-field-textarea-masked {
+  padding-right: 44px;
+  -webkit-text-security: disc;
+  font-family: text-security-disc, monospace;
+}
+
+.secure-field-textarea-monospace {
+  padding-right: 44px;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.secure-field-textarea-monospace-masked {
+  padding-right: 44px;
+  font-family: monospace;
+  font-size: 12px;
+  -webkit-text-security: disc;
+}
+
+.secure-toggle-btn {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  background: none;
+  border: none;
+  padding: 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6B778C;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.secure-toggle-btn:hover:not(:disabled) {
+  background-color: #EBECF0;
+  color: #172B4D;
+}
+
+.secure-toggle-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.secure-toggle-btn-center {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6B778C;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.secure-toggle-btn-center:hover:not(:disabled) {
+  background-color: #EBECF0;
+  color: #172B4D;
+}
+
+.secure-toggle-btn-center:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Date field styles */
+.date-field-input {
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.date-field-input:disabled {
+  cursor: not-allowed;
+}
+
+.date-field-hint {
+  font-size: 11px;
+  color: #6B778C;
+  margin-top: 4px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+}
+
+/* Field column flex styles */
+.field-col-flex-2 {
+  flex: 2;
+}
+
+.field-col-flex-1 {
+  flex: 1;
 }
