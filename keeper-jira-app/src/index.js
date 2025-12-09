@@ -219,6 +219,11 @@ function buildKeeperCommand(action, parameters, issueKey) {
         'host': ['hostName', 'port']
       };
       
+      // Map reference fields to their corresponding JSON field types
+      // When a reference field is provided, skip the corresponding JSON field
+      // Currently empty as no reference fields are used in static record types
+      const referenceFieldMappings = {};
+      
       // First pass: Group fields that need JSON formatting
       Object.keys(parameters).forEach(key => {
         if (metadataFields.includes(key) || !parameters[key]) {

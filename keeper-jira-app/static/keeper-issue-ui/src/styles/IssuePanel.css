@@ -404,6 +404,19 @@
   cursor: not-allowed;
 }
 
+/* Readonly field display (non-editable text) */
+.readonly-field-display {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: #F4F5F7;
+  border: 1px solid #DFE1E6;
+  color: #505F79;
+  font-weight: 500;
+  box-sizing: border-box;
+}
+
 .share-record-dropdown-input {
   width: 100%;
   padding: 8px 40px 8px 12px;

@@ -2712,10 +2712,10 @@ const IssuePanel = () => {
           });
         }
         
-        // Disable expiration_type dropdown when cancel action is selected for share-record
+        // Disable expiration_type dropdown when cancel or owner action is selected for share-record
         const isExpirationDisabledForCancel = selectedAction?.value === 'share-record' && 
                                                field.name === 'expiration_type' && 
-                                               formData.action === 'cancel';
+                                               (formData.action === 'cancel' || formData.action === 'owner');
         
         return (
           <select
@@ -2756,6 +2756,22 @@ const IssuePanel = () => {
                   expire_in: ''
                 }));
                 // Don't clear record or folder - admin can select either one
+              }
+              
+              // Special handling for share-record action field when "owner" is selected
+              if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'owner') {
+                // Clear and disable all checkboxes and expiration when owner is selected
+                // Owner action doesn't support expiration or permission checkboxes
+                setFormData(prev => ({
+                  ...prev,
+                  action: newValue,
+                  can_share: false,
+                  can_write: false,
+                  recursive: false,
+                  expiration_type: 'none',
+                  expire_at: '',
+                  expire_in: ''
+                }));
               }
             }}
             className={getInputClassName()}
@@ -2979,8 +2995,13 @@ const IssuePanel = () => {
                                         formData.action === 'cancel' &&
                                         (field.name === 'can_share' || field.name === 'can_write' || field.name === 'recursive');
         
+        // Disable all checkboxes when "owner" action is selected for share-record (owner doesn't support permissions)
+        const isOwnerActionDisabled = selectedAction?.value === 'share-record' && 
+                                        formData.action === 'owner' &&
+                                        (field.name === 'can_share' || field.name === 'can_write' || field.name === 'recursive');
+        
         const isExpirationDisabled = isCanShareDisabled || isManageUsersDisabled;
-        const checkboxDisabled = isFormDisabled || isExpirationDisabled || isRecursiveDisabled || isCancelActionDisabled;
+        const checkboxDisabled = isFormDisabled || isExpirationDisabled || isRecursiveDisabled || isCancelActionDisabled || isOwnerActionDisabled;
         
         return (
           <div className={`checkbox-container ${(checkboxDisabled || isExpirationDisabled) ? 'disabled' : ''}`}>
@@ -3002,6 +3023,11 @@ const IssuePanel = () => {
                 {isRecursiveDisabled && (
                   <span className="checkbox-disabled-msg">
                     (Only for shared folder)
+                  </span>
+                )}
+                {isOwnerActionDisabled && (
+                  <span className="checkbox-disabled-msg">
+                    (Not supported for Owner action)
                   </span>
                 )}
               </div>
@@ -3193,13 +3219,48 @@ const IssuePanel = () => {
                                        field.name === 'user' && 
                                        (selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder');
         
+        // Check if this is a port field (only allow numbers)
+        const isPortField = field.name === 'host_port' || field.name.includes('_port') || field.subField === 'port';
+        
+        // Check if this is a phone number field (only allow numbers and +)
+        const isPhoneField = field.type === 'tel' || field.name === 'phone_number' || field.name.includes('phone_number');
+        
+        // Check if this is a phone extension field (only allow numbers)
+        const isPhoneExtField = field.name === 'phone_ext' || field.name.includes('phone_ext') || field.subField === 'ext';
+        
+        // Handler for port field - only allow numbers
+        const handlePortChange = (e) => {
+          const newValue = e.target.value.replace(/[^0-9]/g, '');
+          handleInputChange(field.name, newValue);
+        };
+        
+        // Handler for phone field - only allow numbers and + (for international codes)
+        const handlePhoneChange = (e) => {
+          const newValue = e.target.value.replace(/[^0-9+]/g, '');
+          handleInputChange(field.name, newValue);
+        };
+        
+        // Handler for phone extension - only allow numbers
+        const handlePhoneExtChange = (e) => {
+          const newValue = e.target.value.replace(/[^0-9]/g, '');
+          handleInputChange(field.name, newValue);
+        };
+        
+        // Determine the onChange handler based on field type
+        const getChangeHandler = () => {
+          if (isPortField) return handlePortChange;
+          if (isPhoneField) return handlePhoneChange;
+          if (isPhoneExtField) return handlePhoneExtChange;
+          return (e) => handleInputChange(field.name, e.target.value);
+        };
+        
         return (
           <input
             type={inputType}
             value={value}
             disabled={isFormDisabled}
             readOnly={isUserFieldForNonAdmin}
-            onChange={(e) => handleInputChange(field.name, e.target.value)}
+            onChange={getChangeHandler()}
             placeholder={field.placeholder}
             className={`${getInputClassName()} ${isUserFieldForNonAdmin ? 'readonly-field' : ''}`}
             title={isUserFieldForNonAdmin ? 'This field is auto-populated with your email address' : ''}
@@ -4552,80 +4613,33 @@ const IssuePanel = () => {
                   )}
 
                   
-                  {/* Loading state for record types */}
-                  {selectedAction.value === 'record-update' && selectedRecordForUpdate && Object.keys(recordDetails).length > 0 && !loadingRecordDetails && loadingRecordTypes && (
-                    <div className="loading-state-box">
-                      <div className="loading-state-title">
-                        Loading record types...
-                      </div>
-                      <div className="loading-state-subtitle">
-                        Please wait while we load the available record types
-                      </div>
-                    </div>
-                  )}
-                  
                   {/* Step 2: Dynamic Form Fields for record-update (only show after record selection) */}
-                  {selectedAction.value === 'record-update' && selectedRecordForUpdate && Object.keys(recordDetails).length > 0 && !loadingRecordDetails && !loadingRecordTypes && recordTypes.length > 0 && (
+                  {selectedAction.value === 'record-update' && selectedRecordForUpdate && Object.keys(recordDetails).length > 0 && !loadingRecordDetails && (
                     <div className="mb-16 mt-24">
                       <div className="section-header">
                         Step 2: Update Record Fields
                       </div>
                       
-                      
-                      {/* Record Type Field */}
-                      <div className="mb-16">
-                        <label className="label-sm">
-                          Record Type
-                        </label>
-                        <select
-                          value={formData.recordType || ''}
-                          disabled={isFormDisabled}
-                          onChange={(e) => {
-                            const newRecordType = e.target.value;
-                            
-                            // Capture current form data with new record type for enhanced mapping
-                            const currentFormDataWithNewType = {
-                              ...formData,
-                              recordType: newRecordType
-                            };
-                            
-                            // Update the form data immediately
-                            setFormData(currentFormDataWithNewType);
-                            
-                            // Fetch template using the enhanced function that preserves all form data
-                            if (newRecordType && newRecordType !== '') {
-                              fetchRecordTypeTemplateWithFormMapping(newRecordType, currentFormDataWithNewType);
-                            } else {
-                              setRecordTypeTemplate({});
-                              setTemplateFields([]);
-                            }
-                          }}
-                          className={isFormDisabled ? 'select-disabled-state' : (formData.recordType ? 'select-with-value' : 'select-no-value')}
-                        >
-                          <option value="">
-                            {recordTypes.length === 0 ? "Loading record types..." : "Select Type"}
-                          </option>
-                          {recordTypes.map((recordType) => (
-                            <option key={recordType.value} value={recordType.value}>
-                              {recordType.label}
-                            </option>
-                          ))}
-                        </select>
-                        {(loadingRecordTypes || loadingTemplate) && (
-                          <div className="helper-text-loading">
-                            {loadingRecordTypes ? "Loading record types..." : "Loading template..."}
+                      {/* Show original record type as read-only info */}
+                      {originalRecordType && (
+                        <div className="mb-16">
+                          <label className="label-sm">
+                            Record Type
+                          </label>
+                          <div className="readonly-field-display">
+                            {recordTypes.find(rt => rt.value === originalRecordType)?.label || originalRecordType}
                           </div>
-                        )}
-                        <div className="helper-text-sm">
-                          Change the record type if needed (optional)
+                          <div className="helper-text-sm">
+                            Original record type (cannot be changed during update)
+                          </div>
                         </div>
-                      </div>
+                      )}
                       
                       {/* Loading indicator when template is being fetched */}
                       {selectedAction.value === 'record-update' && loadingTemplate && (
                         <div className="loading-state-box-no-mt">
                           <div className="loading-state-title">
-                            Loading template fields for {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType}...
+                            Loading template fields for {recordTypes.find(rt => rt.value === originalRecordType)?.label || originalRecordType}...
                           </div>
                           <div className="loading-state-subtitle">
                             Please wait while we fetch the appropriate form fields
@@ -4637,7 +4651,7 @@ const IssuePanel = () => {
                       {selectedAction.value === 'record-update' && templateFields.length > 0 && !loadingTemplate && (
                         <div>
                           <div className="template-fields-header">
-                            {recordTypeTemplate.$id ? `${recordTypeTemplate.$id} Fields:` : recordTypeTemplate.type ? `${recordTypeTemplate.type} Fields:` : 'Template Fields:'} ({templateFields.length} fields)
+                            {recordTypes.find(rt => rt.value === originalRecordType)?.label || originalRecordType || 'Template'} Fields: ({templateFields.length} fields)
                           </div>
                           
                           {/* Render Template Fields Dynamically with Grouping */}
