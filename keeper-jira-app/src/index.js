@@ -200,11 +200,31 @@ function buildKeeperCommand(action, parameters, issueKey) {
       
       // Dynamic field processing for any record type
       // Process all parameters except metadata fields
-      const metadataFields = ['recordType', 'title', 'notes', 'skipComment'];
+      const metadataFields = ['recordType', 'title', 'notes', 'skipComment', 'phoneEntries'];
       
       // Special handling for login record type (password generation)
       if (recordType === 'login' && !parameters.password) {
         command += ` password=$GEN`; // Generate password if not provided for login records
+      }
+      
+      // Special handling for phoneEntries (dynamic phone number entries for contact record type)
+      if (parameters.phoneEntries && Array.isArray(parameters.phoneEntries)) {
+        parameters.phoneEntries.forEach(entry => {
+          if (entry.number && entry.number.trim()) {
+            const phoneType = entry.type || 'Mobile';
+            const phoneObj = {
+              number: entry.number.trim()
+            };
+            if (entry.region && entry.region.trim()) {
+              phoneObj.region = entry.region.trim();
+            }
+            if (entry.ext && entry.ext.trim()) {
+              phoneObj.ext = entry.ext.trim();
+            }
+            phoneObj.type = phoneType;
+            command += ` phone.${phoneType}='$JSON:${JSON.stringify(phoneObj)}'`;
+          }
+        });
       }
       
       // Process all fields dynamically with proper JSON formatting for complex field types
@@ -216,7 +236,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
         'address': ['street1', 'street2', 'city', 'state', 'zip', 'country'],
         'name': ['first', 'middle', 'last'],
         'phone': ['region', 'number', 'ext', 'type'],
-        'host': ['hostName', 'port']
+        'host': ['hostName', 'port'],
+        'keyPair': ['privateKey', 'publicKey']
       };
       
       // Map reference fields to their corresponding JSON field types
@@ -256,6 +277,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
             
             if (!jsonFields[`phone.${phoneType}`]) {
               jsonFields[`phone.${phoneType}`] = {};
+              // Automatically add the type field based on phone type
+              jsonFields[`phone.${phoneType}`]['type'] = phoneType;
             }
             jsonFields[`phone.${phoneType}`][phoneField] = value;
             addProcessedFields.add(key);
@@ -286,6 +309,10 @@ function buildKeeperCommand(action, parameters, issueKey) {
         if (value) {
           // Handle custom fields (c.text.Department, c.secret.API_Key, etc.)
           if (key.startsWith('c.')) {
+              command += ` ${key}='${value}'`;
+          }
+          // Handle text.fieldname format (e.g., text.database for databaseCredentials)
+          else if (key.startsWith('text.')) {
               command += ` ${key}='${value}'`;
           }
           // Handle grouped fields that don't need JSON
@@ -423,6 +450,28 @@ function buildKeeperCommand(action, parameters, issueKey) {
               });
               break;
               
+            case 'keyPair':
+              // SSH keyPair format: keyPair='$JSON:{"privateKey": "...", "publicKey": "..."}'
+              const keyPairObj = {};
+              if (fieldData.privateKey) keyPairObj.privateKey = fieldData.privateKey;
+              if (fieldData.publicKey) keyPairObj.publicKey = fieldData.publicKey;
+              
+              if (Object.keys(keyPairObj).length > 0) {
+                command += ` keyPair='$JSON:${JSON.stringify(keyPairObj)}'`;
+              }
+              break;
+              
+            case 'host':
+              // Host format: host='$JSON:{"hostName": "...", "port": "..."}'
+              const hostObj = {};
+              if (fieldData.hostName) hostObj.hostName = fieldData.hostName;
+              if (fieldData.port) hostObj.port = fieldData.port;
+              
+              if (Object.keys(hostObj).length > 0) {
+                command += ` host='$JSON:${JSON.stringify(hostObj)}'`;
+              }
+              break;
+              
             default:
               // Handle any other grouped fields as custom fields
               Object.keys(fieldData).forEach(subField => {
@@ -487,30 +536,6 @@ function buildKeeperCommand(action, parameters, issueKey) {
         processedFields.add(fieldGroup);
       });
       
-      // Handle remaining custom fields (c. prefix for manually added custom fields)
-      Object.keys(parameters).forEach(key => {
-        if (key.startsWith('custom_') && parameters[key] && parameters[key].trim() !== '') {
-          const customFieldName = key.replace('custom_', '');
-          const customValue = parameters[key].toString().trim();
-          
-          // Skip if already processed by dynamic field processing
-          if (processedFields.has(customFieldName) || processedFields.has(key)) {
-            return;
-          }
-          
-          // Detect field type and format accordingly
-          if (customFieldName.toLowerCase().includes('secret') || customFieldName.toLowerCase().includes('key')) {
-            command += ` c.secret.${customFieldName}='${customValue}'`;
-          } else if (customFieldName.toLowerCase().includes('date') || customFieldName.toLowerCase().includes('expir')) {
-            command += ` c.date.${customFieldName}='${customValue}'`;
-          } else if (customValue.includes('\n') || customValue.length > 100) {
-            command += ` c.multiline.${customFieldName}='${customValue}'`;
-          } else {
-            command += ` c.text.${customFieldName}='${customValue}'`;
-          }
-        }
-      });
-      
       // Force flag to ignore warnings
       if (parameters.force === true) {
         command += ` --force`;
@@ -519,19 +544,41 @@ function buildKeeperCommand(action, parameters, issueKey) {
       
       break;
       
-    case 'record-permissions':
-      if (parameters.record) {
-        command += ` --record='${parameters.record}'`;
+    case 'record-permission':
+      // Format: record-permission FOLDER_UID -a ACTION [-d] [-s] [-R]
+      // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R
+      // -a = action (grant/revoke)
+      // -d = edit permission flag (can_edit)
+      // -s = share permission flag (can_share)
+      // -R = recursive flag (apply to all sub folders)
+      
+      // Add folder UID (from selectedFolder or sharedFolder)
+      if (parameters.folder) {
+        command += ` '${parameters.folder}'`;
+      } else if (parameters.sharedFolder) {
+        command += ` '${parameters.sharedFolder}'`;
       }
-      if (parameters.user) {
-        command += ` --user='${parameters.user}'`;
-      }
+      
+      // Add action flag (-a)
       if (parameters.action) {
-        command += ` --action='${parameters.action}'`;
+        command += ` -a ${parameters.action}`;
       }
-      if (parameters.permissions) {
-        command += ` --permissions='${parameters.permissions}'`;
+      
+      // Add edit permission flag (-d) if can_edit is true
+      if (parameters.can_edit === true || parameters.can_edit === 'true') {
+        command += ` -d`;
       }
+      
+      // Add share permission flag (-s) if can_share is true
+      if (parameters.can_share === true || parameters.can_share === 'true') {
+        command += ` -s`;
+      }
+      
+      // Add recursive flag (-R) if recursive is true
+      if (parameters.recursive === true || parameters.recursive === 'true') {
+        command += ` -R`;
+      }
+      
       break;
       
     case 'share-record':

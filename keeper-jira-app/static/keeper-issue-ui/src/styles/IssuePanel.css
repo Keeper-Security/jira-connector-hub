@@ -343,6 +343,41 @@
   border: 1px solid #ABF5D1;
 }
 
+.share-record-selected-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.share-record-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid #006644;
+  border-radius: 50%;
+  color: #006644;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.share-record-clear-btn:hover:not(:disabled) {
+  background-color: #006644;
+  color: #FFFFFF;
+}
+
+.share-record-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .share-record-selected-text {
   font-weight: bold;
 }
@@ -3620,4 +3655,191 @@ textarea.input-field {
 
 .field-col-flex-1 {
   flex: 1;
+}
+
+/* Phone Entries Component Styles */
+.phone-entries-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.phone-entries-header {
+  display: flex;
+  align-items: center;
+}
+
+.phone-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  color: #0052CC;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.phone-add-btn:hover:not(:disabled) {
+  background-color: #DEEBFF;
+}
+
+.phone-add-btn:disabled {
+  color: #A5ADBA;
+  cursor: not-allowed;
+}
+
+.phone-add-btn svg {
+  stroke: currentColor;
+}
+
+.phone-entry-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px;
+  background: #FAFBFC;
+  border: 1px solid #DFE1E6;
+  border-radius: 6px;
+}
+
+.phone-entry-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex: 1;
+}
+
+.phone-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 100px;
+}
+
+.phone-number-field {
+  flex: 2;
+  min-width: 150px;
+}
+
+.phone-ext-field {
+  min-width: 70px;
+  max-width: 90px;
+}
+
+.phone-field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #5E6C84;
+}
+
+.phone-country-select,
+.phone-type-select {
+  padding: 8px 12px;
+  border: 1px solid #DFE1E6;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: #FFFFFF;
+  color: #172B4D;
+  cursor: pointer;
+  min-width: 100px;
+}
+
+.phone-country-select:focus,
+.phone-type-select:focus {
+  border-color: #0052CC;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 82, 204, 0.2);
+}
+
+.phone-country-select:disabled,
+.phone-type-select:disabled {
+  background-color: #F4F5F7;
+  color: #A5ADBA;
+  cursor: not-allowed;
+}
+
+.phone-number-input,
+.phone-ext-input {
+  padding: 8px 12px;
+  border: 1px solid #DFE1E6;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: #FFFFFF;
+  color: #172B4D;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.phone-number-input:focus,
+.phone-ext-input:focus {
+  border-color: #0052CC;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 82, 204, 0.2);
+}
+
+.phone-number-input:disabled,
+.phone-ext-input:disabled {
+  background-color: #F4F5F7;
+  color: #A5ADBA;
+  cursor: not-allowed;
+}
+
+.phone-number-input::placeholder,
+.phone-ext-input::placeholder {
+  color: #A5ADBA;
+}
+
+.phone-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid #DFE1E6;
+  border-radius: 4px;
+  color: #6B778C;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.phone-delete-btn:hover:not(:disabled) {
+  background-color: #FFEBE6;
+  border-color: #DE350B;
+  color: #DE350B;
+}
+
+.phone-delete-btn:disabled {
+  color: #C1C7D0;
+  cursor: not-allowed;
+  border-color: #EBECF0;
+}
+
+.phone-delete-btn svg {
+  stroke: currentColor;
+}
+
+/* Responsive adjustments for phone entries */
+@media (max-width: 600px) {
+  .phone-entry-fields {
+    flex-direction: column;
+  }
+  
+  .phone-field-group {
+    width: 100%;
+    min-width: auto;
+  }
+  
+  .phone-number-field,
+  .phone-ext-field {
+    max-width: none;
+  }
 }

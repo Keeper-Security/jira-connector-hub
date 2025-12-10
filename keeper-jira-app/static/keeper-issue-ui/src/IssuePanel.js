@@ -84,6 +84,7 @@ const IssuePanel = () => {
   const [showPrivateKey, setShowPrivateKey] = useState(false); // Toggle for SSH private key visibility
   const [showPublicKey, setShowPublicKey] = useState(false); // Toggle for SSH public key visibility
   const [showPassword, setShowPassword] = useState(false); // Toggle for password visibility
+  const [phoneEntries, setPhoneEntries] = useState([{ id: 1, region: 'US', number: '', ext: '', type: 'Mobile' }]); // Dynamic phone entries
   const [recordTypes, setRecordTypes] = useState([]);
   const [loadingRecordTypes, setLoadingRecordTypes] = useState(false);
   const [recordTypeTemplate, setRecordTypeTemplate] = useState({});
@@ -423,24 +424,6 @@ const IssuePanel = () => {
           });
         }
         
-        // Also check for any other custom fields in the response
-        if (details.custom && Array.isArray(details.custom)) {
-          details.custom.forEach(customField => {
-            if (customField.name && customField.value) {
-              customFields.push({
-                name: `custom_${customField.name}`,
-                displayName: customField.name,
-                value: customField.value,
-                label: `${customField.name.charAt(0).toUpperCase() + customField.name.slice(1)}`,
-                type: 'text',
-                placeholder: customField.name
-              });
-              
-              existingValues[`custom_${customField.name}`] = customField.value || '';
-            }
-          });
-        }
-        
         // For record-update, don't populate custom fields with existing values
         // User should see empty fields and fill only what they want to change
         // Store custom field definitions for reference but don't set their values
@@ -564,55 +547,52 @@ const IssuePanel = () => {
       },
       'contact': {
         fields: [
-          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Enter contact name' },
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Contact name (e.g., John Smith)' },
           { name: 'name_first', label: 'First Name', type: 'text', required: true, placeholder: 'First name', parentType: 'name', subField: 'first' },
           { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
           { name: 'name_last', label: 'Last Name', type: 'text', required: true, placeholder: 'Last name', parentType: 'name', subField: 'last' },
-          { name: 'company', label: 'Company', type: 'text', required: false, placeholder: 'Company name' },
+          { name: 'text.company', label: 'Company', type: 'text', required: false, placeholder: 'Company name (e.g., ABC Corporation)' },
           { name: 'email', label: 'Email', type: 'email', required: false, placeholder: 'email@example.com' },
-          { name: 'phone_number', label: 'Phone Number', type: 'tel', required: false, placeholder: '+1 (555) 123-4567', parentType: 'phone', subField: 'number' },
-          { name: 'phone_ext', label: 'Extension', type: 'text', required: false, placeholder: 'Ext', parentType: 'phone', subField: 'ext' },
-          { name: 'phone_type', label: 'Phone Type', type: 'select', required: false, options: [{ value: '', label: 'Select Type' }, { value: 'Home', label: 'Home' }, { value: 'Work', label: 'Work' }, { value: 'Mobile', label: 'Mobile' }], parentType: 'phone', subField: 'type' },
+          { name: 'phoneNumbers', label: 'Phone Number', type: 'phoneEntries', required: false },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
       },
       'databaseCredentials': {
         fields: [
           { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Database name' },
-          { name: 'type', label: 'Type', type: 'text', required: false, placeholder: 'Database type (e.g., MySQL, PostgreSQL)' },
-          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'host', subField: 'hostName' },
-          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number', parentType: 'host', subField: 'port' },
+          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP (e.g., db.company.com)', parentType: 'host', subField: 'hostName' },
+          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 5432, 27017)', parentType: 'host', subField: 'port' },
           { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Database username' },
-          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN:rand,24' },
+          { name: 'text.database', label: 'Database Name', type: 'text', required: false, placeholder: 'Database name (e.g., production_db)' },
+          { name: 'c.text.Database_Type', label: 'Database Type', type: 'text', required: false, placeholder: 'e.g., PostgreSQL, MySQL, MongoDB' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
       },
       'encryptedNotes': {
         fields: [
-          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Note title' },
-          { name: 'note', label: 'Secured Note', type: 'secureTextarea', required: false, placeholder: 'Enter your secured note content...' },
-          { name: 'date', label: 'Date', type: 'dateMMDDYYYY', required: false, placeholder: 'MM/DD/YYYY' },
-          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Note title (e.g., Important Information, Recovery Codes)' },
+          { name: 'note', label: 'Secured Note', type: 'secureTextarea', required: false, placeholder: 'Enter your secured/confidential note content...' },
+          { name: 'date', label: 'Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' }
         ]
       },
       'membership': {
         fields: [
-          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Membership name' },
-          { name: 'accountNumber', label: 'Account Number', type: 'text', required: false, placeholder: 'Membership account number' },
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Membership name (e.g., Gold\'s Gym, IEEE Membership)' },
+          { name: 'accountNumber', label: 'Account Number', type: 'text', required: false, placeholder: 'Membership ID (e.g., GYM123456)' },
           { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
-          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
           { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
-          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
       },
       'serverCredentials': {
         fields: [
-          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Server name' },
-          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'host', subField: 'hostName' },
-          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number', parentType: 'host', subField: 'port' },
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Server name (e.g., Production Web Server)' },
+          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP (e.g., web.company.com)', parentType: 'host', subField: 'hostName' },
+          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 22)', parentType: 'host', subField: 'port' },
           { name: 'login', label: 'Username', type: 'text', required: false, placeholder: 'Server username' },
-          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN:rand,20' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
       },
@@ -620,8 +600,10 @@ const IssuePanel = () => {
         fields: [
           { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Software name' },
           { name: 'licenseNumber', label: 'License Key', type: 'secureText', required: false, placeholder: 'License key or serial number' },
-          { name: 'activationDate', label: 'Activation Date', type: 'dateMMDDYYYY', required: false, placeholder: 'MM/DD/YYYY' },
-          { name: 'expirationDate', label: 'Expiration Date', type: 'dateMMDDYYYY', required: false, placeholder: 'MM/DD/YYYY' },
+          { name: 'c.text.Product_Version', label: 'Product Version', type: 'text', required: false, placeholder: 'e.g., Office 365' },
+          { name: 'c.text.Licensed_To', label: 'Licensed To', type: 'text', required: false, placeholder: 'License owner name' },
+          { name: 'c.date.Purchase_Date', label: 'Purchase Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'c.date.Expiration_Date', label: 'Expiration Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
       },
@@ -2083,9 +2065,12 @@ const IssuePanel = () => {
         // This is an individual field - render it directly
       renderElements.push(
         <div key={field.name} className="mb-16">
-          <label className="form-label">
-              {field.label} {field.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
-          </label>
+          {/* Don't show label for phoneEntries type - it has its own header */}
+          {field.type !== 'phoneEntries' && (
+            <label className="form-label">
+                {field.label} {field.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
+            </label>
+          )}
           {renderFormInput(field)}
         </div>
       );
@@ -2348,8 +2333,25 @@ const IssuePanel = () => {
         return false;
       }
       
-      // For record-update, only record selection is required
-      // All other fields are optional for updates
+      // For record-update, at least one field must be provided to update
+      // Check standard fields (excluding 'record' which is just the identifier and 'force' which is a modifier)
+      const standardUpdateFields = ['title', 'login', 'password', 'url', 'email', 'notes', 'recordType'];
+      const hasStandardFieldValue = standardUpdateFields.some(fieldName => {
+        const value = formData[fieldName];
+        return value !== undefined && value !== null && value !== '' && String(value).trim() !== '';
+      });
+      
+      // Check template fields for any values
+      const hasTemplateFieldValue = templateFields.some(field => {
+        const value = formData[field.name];
+        return value !== undefined && value !== null && value !== '' && String(value).trim() !== '';
+      });
+      
+      // At least one update field must have a value
+      if (!hasStandardFieldValue && !hasTemplateFieldValue) {
+        return false;
+      }
+      
       return true;
     }
     
@@ -2712,15 +2714,20 @@ const IssuePanel = () => {
           });
         }
         
-        // Disable expiration_type dropdown when cancel or owner action is selected for share-record
+        // Disable expiration_type dropdown when cancel, owner, or revoke action is selected for share-record
         const isExpirationDisabledForCancel = selectedAction?.value === 'share-record' && 
                                                field.name === 'expiration_type' && 
-                                               (formData.action === 'cancel' || formData.action === 'owner');
+                                               (formData.action === 'cancel' || formData.action === 'owner' || formData.action === 'revoke');
+        
+        // Disable expiration_type dropdown when remove action is selected for share-folder
+        const isExpirationDisabledForRemove = selectedAction?.value === 'share-folder' && 
+                                               field.name === 'expiration_type' && 
+                                               formData.action === 'remove';
         
         return (
           <select
             value={value}
-            disabled={isFormDisabled || isExpirationDisabledForCancel}
+            disabled={isFormDisabled || isExpirationDisabledForCancel || isExpirationDisabledForRemove}
             onChange={(e) => {
               const newValue = e.target.value;
               handleInputChange(field.name, newValue);
@@ -2768,6 +2775,37 @@ const IssuePanel = () => {
                   can_share: false,
                   can_write: false,
                   recursive: false,
+                  expiration_type: 'none',
+                  expire_at: '',
+                  expire_in: ''
+                }));
+              }
+              
+              // Special handling for share-record action field when "revoke" is selected
+              // Per Keeper docs: revoke action NEEDS -s (share), -w (write), -R (recursive) flags
+              // to specify what permissions to revoke. Only expiration is not supported.
+              if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'revoke') {
+                // Only clear expiration when revoke is selected (checkboxes are needed for revoke)
+                setFormData(prev => ({
+                  ...prev,
+                  action: newValue,
+                  expiration_type: 'none',
+                  expire_at: '',
+                  expire_in: ''
+                }));
+              }
+              
+              // Special handling for share-folder action field when "remove" is selected
+              if (selectedAction?.value === 'share-folder' && field.name === 'action' && newValue === 'remove') {
+                // Clear and disable all checkboxes and expiration when remove is selected
+                // Remove action doesn't support expiration or permission checkboxes
+                setFormData(prev => ({
+                  ...prev,
+                  action: newValue,
+                  can_edit: false,
+                  can_share: false,
+                  manage_users: false,
+                  manage_records: false,
                   expiration_type: 'none',
                   expire_at: '',
                   expire_in: ''
@@ -3000,8 +3038,16 @@ const IssuePanel = () => {
                                         formData.action === 'owner' &&
                                         (field.name === 'can_share' || field.name === 'can_write' || field.name === 'recursive');
         
+        // Note: For share-record revoke action, checkboxes ARE needed to specify what permissions to revoke
+        // Per Keeper docs: -s (share), -w (write), -R (recursive) are valid flags for revoke action
+        
+        // Disable all checkboxes when "remove" action is selected for share-folder (remove doesn't support permissions or expiration)
+        const isRemoveActionDisabled = selectedAction?.value === 'share-folder' && 
+                                        formData.action === 'remove' &&
+                                        (field.name === 'can_edit' || field.name === 'can_share' || field.name === 'manage_users' || field.name === 'manage_records');
+        
         const isExpirationDisabled = isCanShareDisabled || isManageUsersDisabled;
-        const checkboxDisabled = isFormDisabled || isExpirationDisabled || isRecursiveDisabled || isCancelActionDisabled || isOwnerActionDisabled;
+        const checkboxDisabled = isFormDisabled || isExpirationDisabled || isRecursiveDisabled || isCancelActionDisabled || isOwnerActionDisabled || isRemoveActionDisabled;
         
         return (
           <div className={`checkbox-container ${(checkboxDisabled || isExpirationDisabled) ? 'disabled' : ''}`}>
@@ -3030,6 +3076,11 @@ const IssuePanel = () => {
                     (Not supported for Owner action)
                   </span>
                 )}
+                {isRemoveActionDisabled && (
+                  <span className="checkbox-disabled-msg">
+                    (Not supported for Remove action)
+                  </span>
+                )}
               </div>
               {field.description && (
                 <div className={`field-description ${checkboxDisabled ? 'disabled' : ''}`}>
@@ -3037,6 +3088,202 @@ const IssuePanel = () => {
                 </div>
               )}
             </div>
+          </div>
+        );
+      case 'phoneEntries':
+        // Dynamic phone number entries component - Complete country list from Keeper
+        const countryOptions = [
+          { code: 'AC', label: 'AC (+247)' }, { code: 'AD', label: 'AD (+376)' }, { code: 'AE', label: 'AE (+971)' },
+          { code: 'AF', label: 'AF (+93)' }, { code: 'AG', label: 'AG (+1)' }, { code: 'AI', label: 'AI (+1)' },
+          { code: 'AL', label: 'AL (+355)' }, { code: 'AM', label: 'AM (+374)' }, { code: 'AO', label: 'AO (+244)' },
+          { code: 'AR', label: 'AR (+54)' }, { code: 'AS', label: 'AS (+1)' }, { code: 'AT', label: 'AT (+43)' },
+          { code: 'AU', label: 'AU (+61)' }, { code: 'AW', label: 'AW (+297)' }, { code: 'AX', label: 'AX (+358)' },
+          { code: 'AZ', label: 'AZ (+994)' }, { code: 'BA', label: 'BA (+387)' }, { code: 'BB', label: 'BB (+1)' },
+          { code: 'BD', label: 'BD (+880)' }, { code: 'BE', label: 'BE (+32)' }, { code: 'BF', label: 'BF (+226)' },
+          { code: 'BG', label: 'BG (+359)' }, { code: 'BH', label: 'BH (+973)' }, { code: 'BI', label: 'BI (+257)' },
+          { code: 'BJ', label: 'BJ (+229)' }, { code: 'BL', label: 'BL (+590)' }, { code: 'BM', label: 'BM (+1)' },
+          { code: 'BN', label: 'BN (+673)' }, { code: 'BO', label: 'BO (+591)' }, { code: 'BQ', label: 'BQ (+599)' },
+          { code: 'BR', label: 'BR (+55)' }, { code: 'BS', label: 'BS (+1)' }, { code: 'BT', label: 'BT (+975)' },
+          { code: 'BW', label: 'BW (+267)' }, { code: 'BY', label: 'BY (+375)' }, { code: 'BZ', label: 'BZ (+501)' },
+          { code: 'CA', label: 'CA (+1)' }, { code: 'CC', label: 'CC (+61)' }, { code: 'CD', label: 'CD (+243)' },
+          { code: 'CF', label: 'CF (+236)' }, { code: 'CG', label: 'CG (+242)' }, { code: 'CH', label: 'CH (+41)' },
+          { code: 'CI', label: 'CI (+225)' }, { code: 'CK', label: 'CK (+682)' }, { code: 'CL', label: 'CL (+56)' },
+          { code: 'CM', label: 'CM (+237)' }, { code: 'CN', label: 'CN (+86)' }, { code: 'CO', label: 'CO (+57)' },
+          { code: 'CR', label: 'CR (+506)' }, { code: 'CU', label: 'CU (+53)' }, { code: 'CV', label: 'CV (+238)' },
+          { code: 'CW', label: 'CW (+599)' }, { code: 'CX', label: 'CX (+61)' }, { code: 'CY', label: 'CY (+357)' },
+          { code: 'CZ', label: 'CZ (+420)' }, { code: 'DE', label: 'DE (+49)' }, { code: 'DJ', label: 'DJ (+253)' },
+          { code: 'DK', label: 'DK (+45)' }, { code: 'DM', label: 'DM (+1)' }, { code: 'DO', label: 'DO (+1)' },
+          { code: 'DZ', label: 'DZ (+213)' }, { code: 'EC', label: 'EC (+593)' }, { code: 'EE', label: 'EE (+372)' },
+          { code: 'EG', label: 'EG (+20)' }, { code: 'EH', label: 'EH (+212)' }, { code: 'ER', label: 'ER (+291)' },
+          { code: 'ES', label: 'ES (+34)' }, { code: 'ET', label: 'ET (+251)' }, { code: 'FI', label: 'FI (+358)' },
+          { code: 'FJ', label: 'FJ (+679)' }, { code: 'FK', label: 'FK (+500)' }, { code: 'FM', label: 'FM (+691)' },
+          { code: 'FO', label: 'FO (+298)' }, { code: 'FR', label: 'FR (+33)' }, { code: 'GA', label: 'GA (+241)' },
+          { code: 'GB', label: 'GB (+44)' }, { code: 'GD', label: 'GD (+1)' }, { code: 'GE', label: 'GE (+995)' },
+          { code: 'GF', label: 'GF (+594)' }, { code: 'GG', label: 'GG (+44)' }, { code: 'GH', label: 'GH (+233)' },
+          { code: 'GI', label: 'GI (+350)' }, { code: 'GL', label: 'GL (+299)' }, { code: 'GM', label: 'GM (+220)' },
+          { code: 'GN', label: 'GN (+224)' }, { code: 'GP', label: 'GP (+590)' }, { code: 'GQ', label: 'GQ (+240)' },
+          { code: 'GR', label: 'GR (+30)' }, { code: 'GT', label: 'GT (+502)' }, { code: 'GU', label: 'GU (+1)' },
+          { code: 'GW', label: 'GW (+245)' }, { code: 'GY', label: 'GY (+592)' }, { code: 'HK', label: 'HK (+852)' },
+          { code: 'HN', label: 'HN (+504)' }, { code: 'HR', label: 'HR (+385)' }, { code: 'HT', label: 'HT (+509)' },
+          { code: 'HU', label: 'HU (+36)' }, { code: 'ID', label: 'ID (+62)' }, { code: 'IE', label: 'IE (+353)' },
+          { code: 'IL', label: 'IL (+972)' }, { code: 'IM', label: 'IM (+44)' }, { code: 'IN', label: 'IN (+91)' },
+          { code: 'IO', label: 'IO (+246)' }, { code: 'IQ', label: 'IQ (+964)' }, { code: 'IR', label: 'IR (+98)' },
+          { code: 'IS', label: 'IS (+354)' }, { code: 'IT', label: 'IT (+39)' }, { code: 'JE', label: 'JE (+44)' },
+          { code: 'JM', label: 'JM (+1)' }, { code: 'JO', label: 'JO (+962)' }, { code: 'JP', label: 'JP (+81)' },
+          { code: 'KE', label: 'KE (+254)' }, { code: 'KG', label: 'KG (+996)' }, { code: 'KH', label: 'KH (+855)' },
+          { code: 'KI', label: 'KI (+686)' }, { code: 'KM', label: 'KM (+269)' }, { code: 'KN', label: 'KN (+1)' },
+          { code: 'KP', label: 'KP (+850)' }, { code: 'KR', label: 'KR (+82)' }, { code: 'KW', label: 'KW (+965)' },
+          { code: 'KY', label: 'KY (+1)' }, { code: 'KZ', label: 'KZ (+7)' }, { code: 'LA', label: 'LA (+856)' },
+          { code: 'LB', label: 'LB (+961)' }, { code: 'LC', label: 'LC (+1)' }, { code: 'LI', label: 'LI (+423)' },
+          { code: 'LK', label: 'LK (+94)' }, { code: 'LR', label: 'LR (+231)' }, { code: 'LS', label: 'LS (+266)' },
+          { code: 'LT', label: 'LT (+370)' }, { code: 'LU', label: 'LU (+352)' }, { code: 'LV', label: 'LV (+371)' },
+          { code: 'LY', label: 'LY (+218)' }, { code: 'MA', label: 'MA (+212)' }, { code: 'MC', label: 'MC (+377)' },
+          { code: 'MD', label: 'MD (+373)' }, { code: 'ME', label: 'ME (+382)' }, { code: 'MF', label: 'MF (+590)' },
+          { code: 'MG', label: 'MG (+261)' }, { code: 'MH', label: 'MH (+692)' }, { code: 'MK', label: 'MK (+389)' },
+          { code: 'ML', label: 'ML (+223)' }, { code: 'MM', label: 'MM (+95)' }, { code: 'MN', label: 'MN (+976)' },
+          { code: 'MO', label: 'MO (+853)' }, { code: 'MP', label: 'MP (+1)' }, { code: 'MQ', label: 'MQ (+596)' },
+          { code: 'MR', label: 'MR (+222)' }, { code: 'MS', label: 'MS (+1)' }, { code: 'MT', label: 'MT (+356)' },
+          { code: 'MU', label: 'MU (+230)' }, { code: 'MV', label: 'MV (+960)' }, { code: 'MW', label: 'MW (+265)' },
+          { code: 'MX', label: 'MX (+52)' }, { code: 'MY', label: 'MY (+60)' }, { code: 'MZ', label: 'MZ (+258)' },
+          { code: 'NA', label: 'NA (+264)' }, { code: 'NC', label: 'NC (+687)' }, { code: 'NE', label: 'NE (+227)' },
+          { code: 'NF', label: 'NF (+672)' }, { code: 'NG', label: 'NG (+234)' }, { code: 'NI', label: 'NI (+505)' },
+          { code: 'NL', label: 'NL (+31)' }, { code: 'NO', label: 'NO (+47)' }, { code: 'NP', label: 'NP (+977)' },
+          { code: 'NR', label: 'NR (+674)' }, { code: 'NU', label: 'NU (+683)' }, { code: 'NZ', label: 'NZ (+64)' },
+          { code: 'OM', label: 'OM (+968)' }, { code: 'PA', label: 'PA (+507)' }, { code: 'PE', label: 'PE (+51)' },
+          { code: 'PF', label: 'PF (+689)' }, { code: 'PG', label: 'PG (+675)' }, { code: 'PH', label: 'PH (+63)' },
+          { code: 'PK', label: 'PK (+92)' }, { code: 'PL', label: 'PL (+48)' }, { code: 'PM', label: 'PM (+508)' },
+          { code: 'PR', label: 'PR (+1)' }, { code: 'PS', label: 'PS (+970)' }, { code: 'PT', label: 'PT (+351)' },
+          { code: 'PW', label: 'PW (+680)' }, { code: 'PY', label: 'PY (+595)' }, { code: 'QA', label: 'QA (+974)' },
+          { code: 'RE', label: 'RE (+262)' }, { code: 'RO', label: 'RO (+40)' }, { code: 'RS', label: 'RS (+381)' },
+          { code: 'RU', label: 'RU (+7)' }, { code: 'RW', label: 'RW (+250)' }, { code: 'SA', label: 'SA (+966)' },
+          { code: 'SB', label: 'SB (+677)' }, { code: 'SC', label: 'SC (+248)' }, { code: 'SD', label: 'SD (+249)' },
+          { code: 'SE', label: 'SE (+46)' }, { code: 'SG', label: 'SG (+65)' }, { code: 'SH', label: 'SH (+290)' },
+          { code: 'SI', label: 'SI (+386)' }, { code: 'SJ', label: 'SJ (+47)' }, { code: 'SK', label: 'SK (+421)' },
+          { code: 'SL', label: 'SL (+232)' }, { code: 'SM', label: 'SM (+378)' }, { code: 'SN', label: 'SN (+221)' },
+          { code: 'SO', label: 'SO (+252)' }, { code: 'SR', label: 'SR (+597)' }, { code: 'SS', label: 'SS (+211)' },
+          { code: 'ST', label: 'ST (+239)' }, { code: 'SV', label: 'SV (+503)' }, { code: 'SX', label: 'SX (+1)' },
+          { code: 'SY', label: 'SY (+963)' }, { code: 'SZ', label: 'SZ (+268)' }, { code: 'TA', label: 'TA (+290)' },
+          { code: 'TC', label: 'TC (+1)' }, { code: 'TD', label: 'TD (+235)' }, { code: 'TG', label: 'TG (+228)' },
+          { code: 'TH', label: 'TH (+66)' }, { code: 'TJ', label: 'TJ (+992)' }, { code: 'TK', label: 'TK (+690)' },
+          { code: 'TL', label: 'TL (+670)' }, { code: 'TM', label: 'TM (+993)' }, { code: 'TN', label: 'TN (+216)' },
+          { code: 'TO', label: 'TO (+676)' }, { code: 'TR', label: 'TR (+90)' }, { code: 'TT', label: 'TT (+1)' },
+          { code: 'TV', label: 'TV (+688)' }, { code: 'TW', label: 'TW (+886)' }, { code: 'TZ', label: 'TZ (+255)' },
+          { code: 'UA', label: 'UA (+380)' }, { code: 'UG', label: 'UG (+256)' }, { code: 'US', label: 'US (+1)' },
+          { code: 'UY', label: 'UY (+598)' }, { code: 'UZ', label: 'UZ (+998)' }, { code: 'VA', label: 'VA (+39)' },
+          { code: 'VC', label: 'VC (+1)' }, { code: 'VE', label: 'VE (+58)' }, { code: 'VG', label: 'VG (+1)' },
+          { code: 'VI', label: 'VI (+1)' }, { code: 'VN', label: 'VN (+84)' }, { code: 'VU', label: 'VU (+678)' },
+          { code: 'WF', label: 'WF (+681)' }, { code: 'WS', label: 'WS (+685)' }, { code: 'YE', label: 'YE (+967)' },
+          { code: 'YT', label: 'YT (+262)' }, { code: 'ZA', label: 'ZA (+27)' }, { code: 'ZM', label: 'ZM (+260)' },
+          { code: 'ZW', label: 'ZW (+263)' }
+        ];
+        const phoneTypeOptions = ['Mobile', 'Work', 'Home'];
+        
+        const addPhoneEntry = () => {
+          const newId = Math.max(...phoneEntries.map(e => e.id), 0) + 1;
+          setPhoneEntries([...phoneEntries, { id: newId, region: 'US', number: '', ext: '', type: 'Mobile' }]);
+        };
+        
+        const removePhoneEntry = (id) => {
+          if (phoneEntries.length > 1) {
+            setPhoneEntries(phoneEntries.filter(e => e.id !== id));
+          }
+        };
+        
+        const updatePhoneEntry = (id, fieldName, fieldValue) => {
+          setPhoneEntries(phoneEntries.map(entry => 
+            entry.id === id ? { ...entry, [fieldName]: fieldValue } : entry
+          ));
+        };
+        
+        return (
+          <div className="phone-entries-container">
+            <div className="phone-entries-header">
+              <button
+                type="button"
+                onClick={addPhoneEntry}
+                disabled={isFormDisabled}
+                className="phone-add-btn"
+                title="Add Phone Number"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="16"/>
+                  <line x1="8" y1="12" x2="16" y2="12"/>
+                </svg>
+                <span>{field.label || 'Phone Number'}</span>
+              </button>
+            </div>
+            
+            {phoneEntries.map((entry, index) => (
+              <div key={entry.id} className="phone-entry-row">
+                <div className="phone-entry-fields">
+                  <div className="phone-field-group">
+                    <label className="phone-field-label">Country</label>
+                    <select
+                      value={entry.region}
+                      onChange={(e) => updatePhoneEntry(entry.id, 'region', e.target.value)}
+                      disabled={isFormDisabled}
+                      className="phone-country-select"
+                    >
+                      {countryOptions.map(opt => (
+                        <option key={opt.code} value={opt.code}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div className="phone-field-group phone-number-field">
+                    <label className="phone-field-label">Phone Number</label>
+                    <input
+                      type="tel"
+                      value={entry.number}
+                      onChange={(e) => updatePhoneEntry(entry.id, 'number', e.target.value.replace(/[^0-9-() ]/g, ''))}
+                      disabled={isFormDisabled}
+                      placeholder="555-555-5555"
+                      className="phone-number-input"
+                    />
+                  </div>
+                  
+                  <div className="phone-field-group phone-ext-field">
+                    <label className="phone-field-label">Ext.</label>
+                    <input
+                      type="text"
+                      value={entry.ext}
+                      onChange={(e) => updatePhoneEntry(entry.id, 'ext', e.target.value)}
+                      disabled={isFormDisabled}
+                      placeholder="Ext."
+                      className="phone-ext-input"
+                    />
+                  </div>
+                  
+                  <div className="phone-field-group">
+                    <label className="phone-field-label">Type</label>
+                    <select
+                      value={entry.type}
+                      onChange={(e) => updatePhoneEntry(entry.id, 'type', e.target.value)}
+                      disabled={isFormDisabled}
+                      className="phone-type-select"
+                    >
+                      {phoneTypeOptions.map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
+                <button
+                  type="button"
+                  onClick={() => removePhoneEntry(entry.id)}
+                  disabled={isFormDisabled || phoneEntries.length === 1}
+                  className="phone-delete-btn"
+                  title="Remove phone number"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                </button>
+              </div>
+            ))}
           </div>
         );
       case 'folder-select':
@@ -3362,6 +3609,15 @@ const IssuePanel = () => {
       // Prepare final parameters for special actions
       let finalParameters = { ...formData };
       
+      // Add phoneEntries for contact record type
+      if (selectedAction.value === 'record-add' && formData.recordType === 'contact') {
+        // Filter out empty phone entries and add to parameters
+        const validPhoneEntries = phoneEntries.filter(entry => entry.number && entry.number.trim());
+        if (validPhoneEntries.length > 0) {
+          finalParameters.phoneEntries = validPhoneEntries;
+        }
+      }
+      
       if (selectedAction.value === 'share-record' && selectedRecord) {
         // Ensure record field is populated with selected record UID
         finalParameters.record = selectedRecord.record_uid;
@@ -3389,7 +3645,12 @@ const IssuePanel = () => {
       
       if (selectedAction.value === 'record-permission' && selectedFolder) {
         // For record-permission command, format follows CLI pattern:
-        // record-permission <folder_uid> --action <grant|revoke> [--user <email>] [--can-share] [--can-edit] [--recursive] [--force]
+        // record-permission FOLDER_UID -a ACTION [-d] [-s] [-R]
+        // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R
+        // -a = action (grant/revoke)
+        // -d = edit permission flag (can_edit)
+        // -s = share permission flag (can_share)
+        // -R = recursive flag (apply to all sub folders)
         
         // Build the CLI command format
         let commandParts = [
@@ -3397,20 +3658,19 @@ const IssuePanel = () => {
           selectedFolder.folder_uid || selectedFolder.uid || selectedFolder.path || selectedFolder.name
         ];
         
-        // Add required action
+        // Add required action (-a)
         if (finalParameters.action) {
-          commandParts.push('--action', finalParameters.action);
+          commandParts.push('-a', finalParameters.action);
         }
         
-        // Note: No user email needed - record-permission applies to all users in the shared folder
+        // Add edit permission flag (-d) if can_edit is true
+        if (finalParameters.can_edit) commandParts.push('-d');
         
-        // Add permission flags
-        if (finalParameters.can_share) commandParts.push('--can-share');
-        if (finalParameters.can_edit) commandParts.push('--can-edit');
-        if (finalParameters.recursive) commandParts.push('--recursive');
+        // Add share permission flag (-s) if can_share is true
+        if (finalParameters.can_share) commandParts.push('-s');
         
-        // Always add --force flag for API execution (no interactive prompts possible)
-        commandParts.push('--force');
+        // Add recursive flag (-R) if recursive is true
+        if (finalParameters.recursive) commandParts.push('-R');
         
         // Replace parameters with the properly formatted CLI command
         finalParameters = {
@@ -4189,7 +4449,21 @@ const IssuePanel = () => {
                       {/* Selected record info */}
                       {selectedRecord && (
                         <div className="share-record-selected-box">
-                          <div>Selected: <span className="share-record-selected-text">{selectedRecord.title}</span></div>
+                          <div className="share-record-selected-content">
+                            <span>Selected: <span className="share-record-selected-text">{selectedRecord.title}</span></span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedRecord(null);
+                                setFormData(prev => ({ ...prev, record: '' }));
+                              }}
+                              disabled={isFormDisabled}
+                              className="share-record-clear-btn"
+                              title="Clear selection"
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -4213,7 +4487,21 @@ const IssuePanel = () => {
                           {/* Info message when folder is selected */}
                           {selectedFolder && (
                             <div className="share-record-selected-box">
-                              <div>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.folderPath}</span></div>
+                              <div className="share-record-selected-content">
+                                <span>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.folderPath}</span></span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedFolder(null);
+                                    setFormData(prev => ({ ...prev, sharedFolder: '' }));
+                                  }}
+                                  disabled={isFormDisabled}
+                                  className="share-record-clear-btn"
+                                  title="Clear selection"
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -4557,7 +4845,21 @@ const IssuePanel = () => {
                       {/* Selected folder info */}
                       {selectedFolder && (
                         <div className="share-record-selected-box">
-                          <div>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.title}</span></div>
+                          <div className="share-record-selected-content">
+                            <span>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.title}</span></span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedFolder(null);
+                                setFormData(prev => ({ ...prev, folder: '' }));
+                              }}
+                              disabled={isFormDisabled}
+                              className="share-record-clear-btn"
+                              title="Clear selection"
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -4957,16 +5259,19 @@ const IssuePanel = () => {
                         key={field.name}
                         className="mb-12"
                       >
-                        <label className="label-record-add">
-                          {field.label}
-                          {/* Don't show required asterisk for non-admin users in share-record, share-folder, record-permission */}
-                          {/* EXCEPT for the action field which is now required */}
-                          {field.required && selectedAction.value !== 'record-update' && 
-                           (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
-                            (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
-                            <span className="text-error ml-4">*</span>
-                          )}
-                        </label>
+                        {/* Don't show label for phoneEntries type - it has its own header */}
+                        {field.type !== 'phoneEntries' && (
+                          <label className="label-record-add">
+                            {field.label}
+                            {/* Don't show required asterisk for non-admin users in share-record, share-folder, record-permission */}
+                            {/* EXCEPT for the action field which is now required */}
+                            {field.required && selectedAction.value !== 'record-update' && 
+                             (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
+                              (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
+                              <span className="text-error ml-4">*</span>
+                            )}
+                          </label>
+                        )}
                         {renderFormInput(field)}
                         {selectedAction.value === 'record-update' && (
                           <div className="field-hint-text">
