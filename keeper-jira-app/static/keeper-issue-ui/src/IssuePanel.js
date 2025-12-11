@@ -2414,10 +2414,12 @@ const IssuePanel = () => {
         return false;
       }
       
-      // At least one permission flag should be set
-      const hasPermissionFlags = formData.can_share || formData.can_edit;
-      if (!hasPermissionFlags) {
-        return false;
+      // For revoke action, at least one permission flag (can_share or can_edit) must be selected
+      if (formData.action === 'revoke') {
+        const hasPermissionFlags = formData.can_share || formData.can_edit;
+        if (!hasPermissionFlags) {
+          return false;
+        }
       }
       
       return true;
@@ -3645,12 +3647,13 @@ const IssuePanel = () => {
       
       if (selectedAction.value === 'record-permission' && selectedFolder) {
         // For record-permission command, format follows CLI pattern:
-        // record-permission FOLDER_UID -a ACTION [-d] [-s] [-R]
-        // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R
+        // record-permission FOLDER_UID -a ACTION [-d] [-s] [-R] [--force]
+        // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R --force
         // -a = action (grant/revoke)
         // -d = edit permission flag (can_edit)
         // -s = share permission flag (can_share)
         // -R = recursive flag (apply to all sub folders)
+        // --force = force flag (for grant and revoke actions)
         
         // Build the CLI command format
         let commandParts = [
@@ -3671,6 +3674,9 @@ const IssuePanel = () => {
         
         // Add recursive flag (-R) if recursive is true
         if (finalParameters.recursive) commandParts.push('-R');
+        
+        // Add force flag (--force) for grant and revoke actions
+        if (finalParameters.action === 'grant' || finalParameters.action === 'revoke') commandParts.push('--force');
         
         // Replace parameters with the properly formatted CLI command
         finalParameters = {

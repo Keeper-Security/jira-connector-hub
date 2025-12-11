@@ -545,12 +545,13 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'record-permission':
-      // Format: record-permission FOLDER_UID -a ACTION [-d] [-s] [-R]
-      // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R
+      // Format: record-permission FOLDER_UID -a ACTION [-d] [-s] [-R] [--force]
+      // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R --force
       // -a = action (grant/revoke)
       // -d = edit permission flag (can_edit)
       // -s = share permission flag (can_share)
       // -R = recursive flag (apply to all sub folders)
+      // --force = force flag (for grant and revoke actions)
       
       // Add folder UID (from selectedFolder or sharedFolder)
       if (parameters.folder) {
@@ -577,6 +578,11 @@ function buildKeeperCommand(action, parameters, issueKey) {
       // Add recursive flag (-R) if recursive is true
       if (parameters.recursive === true || parameters.recursive === 'true') {
         command += ` -R`;
+      }
+      
+      // Add force flag (--force) for grant and revoke actions
+      if (parameters.action === 'grant' || parameters.action === 'revoke') {
+        command += ` --force`;
       }
       
       break;
