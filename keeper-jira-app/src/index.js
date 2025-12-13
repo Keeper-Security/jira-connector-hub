@@ -171,8 +171,66 @@ resolver.define('getIssueContext', async (req) => {
 });
 
 /**
+ * Helper function to parse and clean Keeper CLI error messages
+ * Extracts the meaningful user-friendly error message from verbose CLI output
+ */
+function parseKeeperErrorMessage(errorMessage) {
+  if (!errorMessage || typeof errorMessage !== 'string') return errorMessage;
+  
+  let errorText = errorMessage;
+  
+  // Try to parse JSON response and extract error field
+  try {
+    const jsonError = JSON.parse(errorMessage);
+    if (jsonError.error) {
+      errorText = jsonError.error;
+    } else if (jsonError.message) {
+      errorText = jsonError.message;
+    }
+  } catch (e) {
+    // Not JSON, use as-is
+  }
+  
+  // Split by newlines and process each line
+  const lines = errorText.split('\n').map(line => line.trim()).filter(line => line);
+  
+  // Skip system messages like "Bypassing master password enforcement..."
+  const meaningfulLines = lines.filter(line => 
+    !line.startsWith('Bypassing master password') &&
+    !line.includes('running in service mode')
+  );
+  
+  // If we have meaningful lines, process them
+  if (meaningfulLines.length > 0) {
+    const lastLine = meaningfulLines[meaningfulLines.length - 1];
+    
+    // Look for pattern: "Failed to ... : <actual error message>"
+    // Extract the part after the last colon if it contains a meaningful message
+    const colonIndex = lastLine.lastIndexOf(': ');
+    if (colonIndex !== -1) {
+      const afterColon = lastLine.substring(colonIndex + 2).trim();
+      // Check if the part after colon is a meaningful message (not just a short token)
+      if (afterColon.length > 20 && !afterColon.includes('Failed to')) {
+        return afterColon;
+      }
+    }
+    
+    // If no colon pattern found, return the last meaningful line
+    return lastLine;
+  }
+  
+  return errorText;
+}
+
+/**
  * Build Keeper CLI command from action and parameters
  */
+// Helper function to capitalize first letter of a field name
+function capitalizeFieldName(fieldName) {
+  if (!fieldName || typeof fieldName !== 'string') return fieldName;
+  return fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
+}
+
 function buildKeeperCommand(action, parameters, issueKey) {
   // Check if we have a pre-formatted CLI command (used for record-permission)
   if (parameters.cliCommand) {
@@ -195,7 +253,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
       command += ` --title="${parameters.title}"`;
       // Handle common fields for all record types
       if (parameters.notes) {
-        command += ` notes="${parameters.notes}"`;
+        command += ` Notes="${parameters.notes}"`;
       }
       
       // Dynamic field processing for any record type
@@ -204,27 +262,27 @@ function buildKeeperCommand(action, parameters, issueKey) {
       
       // Special handling for login record type (password generation)
       if (recordType === 'login' && !parameters.password) {
-        command += ` password=$GEN`; // Generate password if not provided for login records
+        command += ` Password=$GEN`; // Generate password if not provided for login records
       }
       
-      // Special handling for phoneEntries (dynamic phone number entries for contact record type)
-      if (parameters.phoneEntries && Array.isArray(parameters.phoneEntries)) {
-        parameters.phoneEntries.forEach(entry => {
-          if (entry.number && entry.number.trim()) {
-            const phoneType = entry.type || 'Mobile';
-            const phoneObj = {
-              number: entry.number.trim()
-            };
-            if (entry.region && entry.region.trim()) {
-              phoneObj.region = entry.region.trim();
-            }
-            if (entry.ext && entry.ext.trim()) {
-              phoneObj.ext = entry.ext.trim();
-            }
-            phoneObj.type = phoneType;
-            command += ` phone.${phoneType}='$JSON:${JSON.stringify(phoneObj)}'`;
+      // Special handling for single phone entry (contact record type)
+      if (parameters.phoneEntries && Array.isArray(parameters.phoneEntries) && parameters.phoneEntries.length > 0) {
+        const entry = parameters.phoneEntries[0]; // Only first phone entry
+        if (entry.number && entry.number.trim()) {
+          const phoneObj = {
+            number: entry.number.trim()
+          };
+          if (entry.region && entry.region.trim()) {
+            phoneObj.region = entry.region.trim();
           }
-        });
+          if (entry.ext && entry.ext.trim()) {
+            phoneObj.ext = entry.ext.trim();
+          }
+          if (entry.type) {
+            phoneObj.type = entry.type;
+          }
+          command += ` Phone='$JSON:${JSON.stringify(phoneObj)}'`;
+        }
       }
       
       // Process all fields dynamically with proper JSON formatting for complex field types
@@ -311,16 +369,16 @@ function buildKeeperCommand(action, parameters, issueKey) {
           if (key.startsWith('c.')) {
               command += ` ${key}='${value}'`;
           }
-          // Handle text.fieldname format (e.g., text.database for databaseCredentials)
+          // Handle text.fieldname format (e.g., text.type for databaseCredentials)
           else if (key.startsWith('text.')) {
+              // Keep as-is (lowercase) for Keeper CLI
               command += ` ${key}='${value}'`;
           }
-          // Handle grouped fields that don't need JSON
+          // Handle grouped fields that don't need JSON - skip, handled in jsonFields
           else if (key.includes('_')) {
-            const [prefix, suffix] = key.split('_', 2);
-            command += ` ${suffix}='${value}'`;
+            // These are handled in jsonFields section
           }
-          // Single fields (login, password, url, email, etc.)
+          // Single fields (login, password, url, email, etc.) - keep lowercase
           else {
             command += ` ${key}='${value}'`;
           }
@@ -340,6 +398,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
           });
           
           if (!shouldSkip) {
+            // Keep field names lowercase for Keeper CLI
             command += ` ${fieldName}='$JSON:${JSON.stringify(fieldData)}'`;
           }
         }
@@ -385,12 +444,16 @@ function buildKeeperCommand(action, parameters, issueKey) {
         const value = parameters[key].toString().trim();
         
         // Skip already processed core fields and metadata
-        if (['record', 'title', 'recordType', 'notes', 'appendNotes', 'force'].includes(key)) {
+        if (['record', 'title', 'recordType', 'notes', 'appendNotes', 'force', 'phoneEntries'].includes(key)) {
           return;
         }
         
         // Detect field patterns and group them
-        if (key.includes('_')) {
+        // Don't split custom fields (c.text.*, c.secret.*, c.date.*) or labeled fields (date.*, password.*) - preserve them as-is
+        if (key.startsWith('c.') || key.startsWith('text.') || key.startsWith('date.') || key.startsWith('password.')) {
+          // Custom fields and labeled fields should be preserved as single fields with full key
+          groupedFields[key] = value;
+        } else if (key.includes('_')) {
           const [prefix, suffix] = key.split('_', 2);
           if (!groupedFields[prefix]) {
             groupedFields[prefix] = {};
@@ -440,14 +503,16 @@ function buildKeeperCommand(action, parameters, issueKey) {
               break;
               
             case 'phone':
-              // Phone format: phone.Work='$JSON:{"number": "(555) 555-1234", "type": "Work"}'
-              Object.keys(fieldData).forEach(phoneType => {
-                const phoneValue = fieldData[phoneType];
-                if (phoneValue) {
-                  const phoneObj = { number: phoneValue, type: phoneType };
-                  command += ` phone.${phoneType}='$JSON:${JSON.stringify(phoneObj)}'`;
-                }
-              });
+              // Simple phone format without type: phone='$JSON:{"number": "...", ...}'
+              const simplePhoneObj = {};
+              if (fieldData.number) simplePhoneObj.number = fieldData.number;
+              if (fieldData.ext) simplePhoneObj.ext = fieldData.ext;
+              if (fieldData.region) simplePhoneObj.region = fieldData.region;
+              if (fieldData.type) simplePhoneObj.type = fieldData.type;
+              
+              if (Object.keys(simplePhoneObj).length > 0) {
+                command += ` phone='$JSON:${JSON.stringify(simplePhoneObj)}'`;
+              }
               break;
               
             case 'keyPair':
@@ -500,12 +565,42 @@ function buildKeeperCommand(action, parameters, issueKey) {
               }
               break;
               
+            case 'passphrase':
+              // Passphrase is a password-type field with label "passphrase"
+              // Keeper CLI format: password.label='value'
+              if (value === '$GEN' || value === 'generate') {
+                command += ` password.passphrase=$GEN`;
+              } else {
+                command += ` password.passphrase='${value}'`;
+              }
+              break;
+              
             case 'url':
               command += ` url='${value}'`;
               break;
               
             case 'email':
               command += ` email='${value}'`;
+              break;
+              
+            case 'licenseNumber':
+              // Standard Keeper field type for software licenses
+              command += ` licenseNumber='${value}'`;
+              break;
+              
+            case 'accountNumber':
+              // Standard Keeper field type for memberships
+              command += ` accountNumber='${value}'`;
+              break;
+              
+            case 'expirationDate':
+              // Standard Keeper field type for expiration dates
+              command += ` expirationDate='${value}'`;
+              break;
+              
+            case 'note':
+              // Standard Keeper field type for notes
+              command += ` note='${value}'`;
               break;
               
             case 'date':
@@ -527,14 +622,44 @@ function buildKeeperCommand(action, parameters, issueKey) {
               break;
               
             default:
-              // Any other single field as custom text field
-              command += ` c.text.${fieldGroup}='${value}'`;
+              // Handle custom fields (c.*) and labeled fields (type.label format like date.dateActive, password.passphrase)
+              if (fieldGroup.startsWith('c.') || fieldGroup.startsWith('text.') || fieldGroup.startsWith('date.') || fieldGroup.startsWith('password.')) {
+                command += ` ${fieldGroup}='${value}'`;
+                break;
+              }
+              // Any other single field - use c.secret for $GEN values, c.text for others
+              if (value === '$GEN' || value === 'generate') {
+                command += ` c.secret.${fieldGroup}=$GEN`;
+              } else {
+                command += ` c.text.${fieldGroup}='${value}'`;
+              }
               break;
           }
         }
         
         processedFields.add(fieldGroup);
       });
+      
+      // Handle single phone entry for contact record updates
+      // Format per Keeper docs: phone='$JSON:{"number":"...", "type":"...", ...}'
+      if (parameters.phoneEntries && Array.isArray(parameters.phoneEntries) && parameters.phoneEntries.length > 0) {
+        const entry = parameters.phoneEntries[0]; // Only first phone entry
+        if (entry.number && entry.number.trim()) {
+          const phoneObj = {
+            number: entry.number.trim()
+          };
+          if (entry.type) {
+            phoneObj.type = entry.type;
+          }
+          if (entry.region) {
+            phoneObj.region = entry.region;
+          }
+          if (entry.ext && entry.ext.trim()) {
+            phoneObj.ext = entry.ext.trim();
+          }
+          command += ` phone='$JSON:${JSON.stringify(phoneObj)}'`;
+        }
+      }
       
       // Force flag to ignore warnings
       if (parameters.force === true) {
@@ -732,13 +857,16 @@ resolver.define('getKeeperRecords', async (req) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Keeper API error: ${response.status} - ${errorText}`);
+      const cleanedError = parseKeeperErrorMessage(errorText);
+      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
     }
 
     const data = await response.json();
 
     if (data.status !== "success" || data.error) {
-      throw new Error(`Keeper API error: ${data.error || data.message || 'Unknown error'}`);
+      const rawError = data.error || data.message || 'Unknown error';
+      const cleanedError = parseKeeperErrorMessage(rawError);
+      throw new Error(cleanedError);
     }
 
     // Parse the JSON data from the response
@@ -796,13 +924,16 @@ resolver.define('getKeeperFolders', async (req) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Keeper API error: ${response.status} - ${errorText}`);
+      const cleanedError = parseKeeperErrorMessage(errorText);
+      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
     }
 
     const data = await response.json();
 
     if (data.success === false || data.error) {
-      throw new Error(`Keeper API error: ${data.error || data.message || 'Unknown error'}`);
+      const rawError = data.error || data.message || 'Unknown error';
+      const cleanedError = parseKeeperErrorMessage(rawError);
+      throw new Error(cleanedError);
     }
 
     // Parse the JSON data from the response
@@ -890,13 +1021,16 @@ resolver.define('getKeeperRecordDetails', async (req) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Keeper API error: ${response.status} - ${errorText}`);
+      const cleanedError = parseKeeperErrorMessage(errorText);
+      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
     }
 
     const data = await response.json();
 
     if (data.success === false || data.error) {
-      throw new Error(`Keeper API error: ${data.error || data.message || 'Unknown error'}`);
+      const rawError = data.error || data.message || 'Unknown error';
+      const cleanedError = parseKeeperErrorMessage(rawError);
+      throw new Error(cleanedError);
     }
 
     // Parse the JSON data from the response
@@ -964,14 +1098,17 @@ resolver.define('executeKeeperCommand', async (req) => {
     // Check if the API call was successful
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Keeper API error: ${response.status} - ${errorText}`);
+      const cleanedError = parseKeeperErrorMessage(errorText);
+      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
     }
 
     const data = await response.json();
 
     // Check if API response indicates error
     if (data.success === false || data.error) {
-      throw new Error(`Keeper API error: ${data.error || data.message || 'Unknown error'}`);
+      const rawError = data.error || data.message || 'Unknown error';
+      const cleanedError = parseKeeperErrorMessage(rawError);
+      throw new Error(cleanedError);
     }
 
     return { 
@@ -1064,14 +1201,17 @@ resolver.define('executeKeeperAction', async (req) => {
     // Check if the API call was successful
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Keeper API error: ${response.status} - ${errorText}`);
+      const cleanedError = parseKeeperErrorMessage(errorText);
+      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
     }
 
     const data = await response.json();
 
     // Check if API response indicates error
     if (data.success === false || data.error) {
-      throw new Error(`Keeper API error: ${data.error || data.message || 'Unknown error'}`);
+      const rawError = data.error || data.message || 'Unknown error';
+      const cleanedError = parseKeeperErrorMessage(rawError);
+      throw new Error(cleanedError);
     }
 
     // Extract record_uid if this is a record-add command

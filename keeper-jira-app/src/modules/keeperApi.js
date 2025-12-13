@@ -6,6 +6,58 @@
 import { storage, fetch } from '@forge/api';
 
 /**
+ * Helper function to parse and clean Keeper CLI error messages
+ * Extracts the meaningful user-friendly error message from verbose CLI output
+ */
+function parseKeeperErrorMessage(errorMessage) {
+  if (!errorMessage || typeof errorMessage !== 'string') return errorMessage;
+  
+  let errorText = errorMessage;
+  
+  // Try to parse JSON response and extract error field
+  try {
+    const jsonError = JSON.parse(errorMessage);
+    if (jsonError.error) {
+      errorText = jsonError.error;
+    } else if (jsonError.message) {
+      errorText = jsonError.message;
+    }
+  } catch (e) {
+    // Not JSON, use as-is
+  }
+  
+  // Split by newlines and process each line
+  const lines = errorText.split('\n').map(line => line.trim()).filter(line => line);
+  
+  // Skip system messages like "Bypassing master password enforcement..."
+  const meaningfulLines = lines.filter(line => 
+    !line.startsWith('Bypassing master password') &&
+    !line.includes('running in service mode')
+  );
+  
+  // If we have meaningful lines, process them
+  if (meaningfulLines.length > 0) {
+    const lastLine = meaningfulLines[meaningfulLines.length - 1];
+    
+    // Look for pattern: "Failed to ... : <actual error message>"
+    // Extract the part after the last colon if it contains a meaningful message
+    const colonIndex = lastLine.lastIndexOf(': ');
+    if (colonIndex !== -1) {
+      const afterColon = lastLine.substring(colonIndex + 2).trim();
+      // Check if the part after colon is a meaningful message (not just a short token)
+      if (afterColon.length > 20 && !afterColon.includes('Failed to')) {
+        return afterColon;
+      }
+    }
+    
+    // If no colon pattern found, return the last meaningful line
+    return lastLine;
+  }
+  
+  return errorText;
+}
+
+/**
  * Fetch PEDM approval details from Keeper API with auto-sync fallback
  * @param {string} requestUid - The request UID to fetch details for
  * @returns {Promise<Object|null>} - Approval details or null if failed
@@ -98,13 +150,16 @@ export async function executeKeeperCommand(command) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Keeper API error: ${response.status} - ${errorText}`);
+    const cleanedError = parseKeeperErrorMessage(errorText);
+    throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
   }
 
   const data = await response.json();
 
   if (data.success === false || data.error) {
-    throw new Error(`Keeper API error: ${data.error || data.message || 'Unknown error'}`);
+    const rawError = data.error || data.message || 'Unknown error';
+    const cleanedError = parseKeeperErrorMessage(rawError);
+    throw new Error(cleanedError);
   }
 
   return { 
@@ -136,13 +191,16 @@ export async function testKeeperConnection(apiUrl, apiKey) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Connection failed: ${response.status} - ${errorText}`);
+    const cleanedError = parseKeeperErrorMessage(errorText);
+    throw new Error(`Connection failed: ${response.status} - ${cleanedError}`);
   }
 
   const data = await response.json();
 
   if (data.success === false || data.error) {
-    throw new Error(`Connection test failed: ${data.error || data.message || 'Unknown error'}`);
+    const rawError = data.error || data.message || 'Unknown error';
+    const cleanedError = parseKeeperErrorMessage(rawError);
+    throw new Error(`Connection test failed: ${cleanedError}`);
   }
 
   return {

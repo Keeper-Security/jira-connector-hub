@@ -24,22 +24,6 @@ const IssuePanel = () => {
   const [lastResult, setLastResult] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedAction, setSelectedAction] = useState(null);
-  
-  useEffect(() => {
-    // Trigger any necessary actions when selectedAction changes
-    if (selectedAction?.value === 'record-permission') {
-      // Fetch shared folders for record-permission command
-      fetchKeeperFolders();
-    }
-    if (selectedAction?.value === 'record-update') {
-      // Fetch records for the update record dropdown
-      fetchKeeperRecords();
-    }
-    if (selectedAction?.value === 'share-record') {
-      // Fetch shared folders for share-record command (for cancel action)
-      fetchKeeperFolders();
-    }
-  }, [selectedAction]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -84,7 +68,7 @@ const IssuePanel = () => {
   const [showPrivateKey, setShowPrivateKey] = useState(false); // Toggle for SSH private key visibility
   const [showPublicKey, setShowPublicKey] = useState(false); // Toggle for SSH public key visibility
   const [showPassword, setShowPassword] = useState(false); // Toggle for password visibility
-  const [phoneEntries, setPhoneEntries] = useState([{ id: 1, region: 'US', number: '', ext: '', type: 'Mobile' }]); // Dynamic phone entries
+  const [phoneEntries, setPhoneEntries] = useState([]); // Dynamic phone entries - starts empty, populated from record or user adds
   const [recordTypes, setRecordTypes] = useState([]);
   const [loadingRecordTypes, setLoadingRecordTypes] = useState(false);
   const [recordTypeTemplate, setRecordTypeTemplate] = useState({});
@@ -491,6 +475,31 @@ const IssuePanel = () => {
           
           // Fetch template and map record details to form fields
           fetchRecordTypeTemplate(details.type, details);
+          
+          // Populate phone entries for contact records
+          if (details.type === 'contact' && details.fields && Array.isArray(details.fields)) {
+            const phoneFields = details.fields.filter(f => f.type === 'phone');
+            if (phoneFields.length > 0) {
+              const existingPhones = phoneFields.map((phone, idx) => {
+                const phoneValue = phone.value?.[0] || {};
+                const phoneNumber = phoneValue.number || '';
+                return {
+                  id: idx + 1,
+                  region: phoneValue.region || 'US',
+                  number: phoneNumber,
+                  originalNumber: phoneNumber, // Store original for masking
+                  ext: phoneValue.ext || '',
+                  type: phoneValue.type || 'Mobile',
+                  isNew: false,
+                  isEdited: false
+                };
+              }).filter(entry => entry.number);
+              
+              if (existingPhones.length > 0) {
+                setPhoneEntries(existingPhones);
+              }
+            }
+          }
         }
       }
       
@@ -560,12 +569,11 @@ const IssuePanel = () => {
       'databaseCredentials': {
         fields: [
           { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Database name' },
+          { name: 'text.type', label: 'Database Type', type: 'text', required: false, placeholder: 'e.g., PostgreSQL, MySQL, MongoDB' },
           { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP (e.g., db.company.com)', parentType: 'host', subField: 'hostName' },
           { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 5432, 27017)', parentType: 'host', subField: 'port' },
           { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Database username' },
           { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN:rand,24' },
-          { name: 'text.database', label: 'Database Name', type: 'text', required: false, placeholder: 'Database name (e.g., production_db)' },
-          { name: 'c.text.Database_Type', label: 'Database Type', type: 'text', required: false, placeholder: 'e.g., PostgreSQL, MySQL, MongoDB' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
       },
@@ -581,6 +589,7 @@ const IssuePanel = () => {
           { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Membership name (e.g., Gold\'s Gym, IEEE Membership)' },
           { name: 'accountNumber', label: 'Account Number', type: 'text', required: false, placeholder: 'Membership ID (e.g., GYM123456)' },
           { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
           { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
           { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
@@ -600,10 +609,8 @@ const IssuePanel = () => {
         fields: [
           { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Software name' },
           { name: 'licenseNumber', label: 'License Key', type: 'secureText', required: false, placeholder: 'License key or serial number' },
-          { name: 'c.text.Product_Version', label: 'Product Version', type: 'text', required: false, placeholder: 'e.g., Office 365' },
-          { name: 'c.text.Licensed_To', label: 'Licensed To', type: 'text', required: false, placeholder: 'License owner name' },
-          { name: 'c.date.Purchase_Date', label: 'Purchase Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
-          { name: 'c.date.Expiration_Date', label: 'Expiration Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'expirationDate', label: 'Expiration Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'date.dateActive', label: 'Activation Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
       },
@@ -1275,10 +1282,14 @@ const IssuePanel = () => {
       });
     });
     
-    // Handle unmatched fields as custom fields  
+    // Handle unmatched fields as custom fields
+    // NOTE: Only preserve unmatched fields for record-update action
+    // This prevents fields like name_first, name_last from being sent when switching from Contact to Server
+    // For record-add and any other action, unmatched fields should be discarded
+    const shouldPreserveUnmatchedFields = selectedAction?.value === 'record-update';
     
-    if (unmatchedFields.length > 0) {
-      
+    if (unmatchedFields.length > 0 && shouldPreserveUnmatchedFields) {
+      // Only preserve unmatched fields explicitly for record-update action
       const customFields = unmatchedFields.map((field, index) => {
         // Clean the field name by removing prefixes (e.g., parentType_fieldName -> fieldName)
         let cleanFieldName = field.originalFieldName;
@@ -1553,6 +1564,31 @@ const IssuePanel = () => {
       setFormData(cleanedFormData);
     }
     
+    // Populate phone entries if template has phoneEntries field (for contact records)
+    const hasPhoneEntriesField = templateFields.find(tf => tf.type === 'phoneEntries');
+    if (hasPhoneEntriesField && detailsToUse?.fields && !isPreservingStoredDataRef.current) {
+      const phoneFields = detailsToUse.fields.filter(f => f.type === 'phone');
+      if (phoneFields.length > 0) {
+        const existingPhoneEntries = phoneFields.map((phone, idx) => {
+          const phoneValue = phone.value?.[0] || {};
+          return {
+            id: idx + 1,
+            region: phoneValue.region || 'US',
+            number: phoneValue.number || '',
+            ext: phoneValue.ext || '',
+            type: phoneValue.type || 'Mobile'
+          };
+        }).filter(entry => entry.number); // Only include entries with numbers
+        
+        if (existingPhoneEntries.length > 0) {
+          setPhoneEntries(existingPhoneEntries);
+        } else {
+          // No phones - keep empty (user can add via + button)
+          setPhoneEntries([]);
+        }
+      }
+    }
+    
     // If this is the initial load for the original record type, update originalFormData with all expanded fields
     if (cleanedFormData.recordType === originalRecordType && detailsToUse) {
       setOriginalFormData(cleanedFormData);
@@ -1746,6 +1782,31 @@ const IssuePanel = () => {
     // Skip if preserving stored data
     if (!isPreservingStoredDataRef.current) {
       setFormData(cleanedFormData);
+    }
+    
+    // Populate phone entries if template has phoneEntries field (for contact records)
+    const hasPhoneEntriesFieldLegacy = templateFields.find(tf => tf.type === 'phoneEntries');
+    if (hasPhoneEntriesFieldLegacy && recordDetails?.fields && !isPreservingStoredDataRef.current) {
+      const phoneFieldsLegacy = recordDetails.fields.filter(f => f.type === 'phone');
+      if (phoneFieldsLegacy.length > 0) {
+        const existingPhoneEntriesLegacy = phoneFieldsLegacy.map((phone, idx) => {
+          const phoneValue = phone.value?.[0] || {};
+          return {
+            id: idx + 1,
+            region: phoneValue.region || 'US',
+            number: phoneValue.number || '',
+            ext: phoneValue.ext || '',
+            type: phoneValue.type || 'Mobile'
+          };
+        }).filter(entry => entry.number);
+        
+        if (existingPhoneEntriesLegacy.length > 0) {
+          setPhoneEntries(existingPhoneEntriesLegacy);
+        } else {
+          // No phones - keep empty (user can add via + button)
+          setPhoneEntries([]);
+        }
+      }
     }
     
     // If this is the initial load for the original record type, update originalFormData with all expanded fields
@@ -2132,30 +2193,37 @@ const IssuePanel = () => {
       }));
     }
     
+    // Skip API calls for non-admin users when config is missing (they only submit requests)
+    const shouldFetchData = issueContext?.hasConfig || isAdmin;
+    
     // Fetch records when share-record or record-update is selected (but not when loading stored data)
-    if (selectedAction && (selectedAction.value === 'share-record' || selectedAction.value === 'record-update') && !isLoadingStoredData) {
+    // Only fetch if config exists or user is admin
+    if (selectedAction && (selectedAction.value === 'share-record' || selectedAction.value === 'record-update') && !isLoadingStoredData && shouldFetchData) {
       fetchKeeperRecords();
     }
     
     // Fetch folders when share-record is selected (for the new folder dropdown)
-    if (selectedAction && selectedAction.value === 'share-record' && !isLoadingStoredData) {
+    // Only fetch if config exists or user is admin
+    if (selectedAction && selectedAction.value === 'share-record' && !isLoadingStoredData && shouldFetchData) {
       fetchKeeperFolders();
     }
     
     // Fetch record types when record-add or record-update is selected (but not when loading stored data)
-    if (selectedAction && (selectedAction.value === 'record-add' || selectedAction.value === 'record-update') && !isLoadingStoredData) {
+    // Only fetch if config exists or user is admin
+    if (selectedAction && (selectedAction.value === 'record-add' || selectedAction.value === 'record-update') && !isLoadingStoredData && shouldFetchData) {
       fetchRecordTypes();
     }
     
     // Fetch folders when share-folder or record-permission is selected
-    if (selectedAction && (selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) {
+    // Only fetch if config exists or user is admin
+    if (selectedAction && (selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission') && shouldFetchData) {
       fetchKeeperFolders();
     }
   }, [selectedAction, isLoadingStoredData, isAdmin, issueContext]);
 
   // Auto-dismiss workflow info dialog after 5 seconds
   useEffect(() => {
-    if (showWorkflowInfo && issueContext?.hasConfig && !isLoading && !isLoadingStoredData) {
+    if (showWorkflowInfo && (issueContext?.hasConfig || !isAdmin) && !isLoading && !isLoadingStoredData) {
       const timer = setTimeout(() => {
         setShowWorkflowInfo(false);
       }, 5000); // 5 seconds
@@ -3182,110 +3250,138 @@ const IssuePanel = () => {
         
         const addPhoneEntry = () => {
           const newId = Math.max(...phoneEntries.map(e => e.id), 0) + 1;
-          setPhoneEntries([...phoneEntries, { id: newId, region: 'US', number: '', ext: '', type: 'Mobile' }]);
+          setPhoneEntries([...phoneEntries, { id: newId, region: 'US', number: '', ext: '', type: 'Mobile', isNew: true }]);
         };
         
         const removePhoneEntry = (id) => {
-          if (phoneEntries.length > 1) {
-            setPhoneEntries(phoneEntries.filter(e => e.id !== id));
-          }
+          const updatedEntries = phoneEntries.filter(e => e.id !== id);
+          setPhoneEntries(updatedEntries);
         };
         
         const updatePhoneEntry = (id, fieldName, fieldValue) => {
-          setPhoneEntries(phoneEntries.map(entry => 
-            entry.id === id ? { ...entry, [fieldName]: fieldValue } : entry
-          ));
+          setPhoneEntries(phoneEntries.map(entry => {
+            if (entry.id === id) {
+              // Mark as edited when number field is changed
+              const isEdited = fieldName === 'number' ? true : entry.isEdited;
+              return { ...entry, [fieldName]: fieldValue, isEdited };
+            }
+            return entry;
+          }));
         };
+        
+        // Mask phone number - show last 4 digits only
+        const maskPhoneNumber = (number) => {
+          if (!number || number.length <= 4) return '••••••••';
+          return '••••••' + number.slice(-4);
+        };
+        
+        // Show all phone entries (existing from record + newly added)
+        const visiblePhoneEntries = phoneEntries;
+        
+        const renderPhoneRow = (entry) => {
+          // For existing entries that haven't been edited, show masked number
+          const isExistingUnedited = !entry.isNew && !entry.isEdited && entry.number;
+          const displayNumber = isExistingUnedited ? maskPhoneNumber(entry.originalNumber || entry.number) : entry.number;
+          
+          return (
+          <div key={entry.id} className="phone-entry-row">
+            <div className="phone-entry-fields">
+              <div className="phone-field-group">
+                <label className="phone-field-label">Country</label>
+                <select
+                  value={entry.region}
+                  onChange={(e) => updatePhoneEntry(entry.id, 'region', e.target.value)}
+                  disabled={isFormDisabled}
+                  className="phone-country-select"
+                >
+                  {countryOptions.map(opt => (
+                    <option key={opt.code} value={opt.code}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="phone-field-group phone-number-field">
+                <label className="phone-field-label">Phone Number</label>
+                <input
+                  type="tel"
+                  value={isExistingUnedited ? '' : entry.number}
+                  onChange={(e) => updatePhoneEntry(entry.id, 'number', e.target.value.replace(/[^0-9-() ]/g, ''))}
+                  disabled={isFormDisabled}
+                  placeholder={isExistingUnedited ? displayNumber : '555-555-5555'}
+                  className="phone-number-input"
+                />
+              </div>
+              
+              <div className="phone-field-group phone-ext-field">
+                <label className="phone-field-label">Ext.</label>
+                <input
+                  type="text"
+                  value={entry.ext}
+                  onChange={(e) => updatePhoneEntry(entry.id, 'ext', e.target.value)}
+                  disabled={isFormDisabled}
+                  placeholder="Ext."
+                  className="phone-ext-input"
+                />
+              </div>
+              
+              <div className="phone-field-group">
+                <label className="phone-field-label">Type</label>
+                <select
+                  value={entry.type}
+                  onChange={(e) => updatePhoneEntry(entry.id, 'type', e.target.value)}
+                  disabled={isFormDisabled}
+                  className="phone-type-select"
+                >
+                  {phoneTypeOptions.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            <button
+              type="button"
+              onClick={() => removePhoneEntry(entry.id)}
+              disabled={isFormDisabled}
+              className="phone-delete-btn"
+              title="Remove phone number"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+        )};
+        
+        // Only allow one phone entry for contact records
+        const hasPhoneEntry = visiblePhoneEntries.length > 0;
         
         return (
           <div className="phone-entries-container">
-            <div className="phone-entries-header">
-              <button
-                type="button"
-                onClick={addPhoneEntry}
-                disabled={isFormDisabled}
-                className="phone-add-btn"
-                title="Add Phone Number"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="12" y1="8" x2="12" y2="16"/>
-                  <line x1="8" y1="12" x2="16" y2="12"/>
-                </svg>
-                <span>{field.label || 'Phone Number'}</span>
-              </button>
-            </div>
-            
-            {phoneEntries.map((entry, index) => (
-              <div key={entry.id} className="phone-entry-row">
-                <div className="phone-entry-fields">
-                  <div className="phone-field-group">
-                    <label className="phone-field-label">Country</label>
-                    <select
-                      value={entry.region}
-                      onChange={(e) => updatePhoneEntry(entry.id, 'region', e.target.value)}
-                      disabled={isFormDisabled}
-                      className="phone-country-select"
-                    >
-                      {countryOptions.map(opt => (
-                        <option key={opt.code} value={opt.code}>{opt.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <div className="phone-field-group phone-number-field">
-                    <label className="phone-field-label">Phone Number</label>
-                    <input
-                      type="tel"
-                      value={entry.number}
-                      onChange={(e) => updatePhoneEntry(entry.id, 'number', e.target.value.replace(/[^0-9-() ]/g, ''))}
-                      disabled={isFormDisabled}
-                      placeholder="555-555-5555"
-                      className="phone-number-input"
-                    />
-                  </div>
-                  
-                  <div className="phone-field-group phone-ext-field">
-                    <label className="phone-field-label">Ext.</label>
-                    <input
-                      type="text"
-                      value={entry.ext}
-                      onChange={(e) => updatePhoneEntry(entry.id, 'ext', e.target.value)}
-                      disabled={isFormDisabled}
-                      placeholder="Ext."
-                      className="phone-ext-input"
-                    />
-                  </div>
-                  
-                  <div className="phone-field-group">
-                    <label className="phone-field-label">Type</label>
-                    <select
-                      value={entry.type}
-                      onChange={(e) => updatePhoneEntry(entry.id, 'type', e.target.value)}
-                      disabled={isFormDisabled}
-                      className="phone-type-select"
-                    >
-                      {phoneTypeOptions.map(type => (
-                        <option key={type} value={type}>{type}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                
+            {/* Show phone entry OR "+ Phone Number" button (only one phone allowed) */}
+            {hasPhoneEntry ? (
+              // Show existing/added phone entry (only first one)
+              visiblePhoneEntries.slice(0, 1).map(renderPhoneRow)
+            ) : (
+              // Show "+ Phone Number" button only if no phone exists
+              <div className="phone-entries-header">
                 <button
                   type="button"
-                  onClick={() => removePhoneEntry(entry.id)}
-                  disabled={isFormDisabled || phoneEntries.length === 1}
-                  className="phone-delete-btn"
-                  title="Remove phone number"
+                  onClick={addPhoneEntry}
+                  disabled={isFormDisabled}
+                  className="phone-add-btn"
+                  title="Add Phone Number"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="3 6 5 6 21 6"/>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="16"/>
+                    <line x1="8" y1="12" x2="16" y2="12"/>
                   </svg>
+                  <span>{field.label || 'Phone Number'}</span>
                 </button>
               </div>
-            ))}
+            )}
           </div>
         );
       case 'folder-select':
@@ -3636,6 +3732,16 @@ const IssuePanel = () => {
         if (finalParameters.password === '••••••••') {
           delete finalParameters.password; // Don't send masked password back
         }
+        
+        // Add phone entries only if modified (new or edited)
+        if (formData.recordType === 'contact') {
+          const modifiedPhoneEntries = phoneEntries.filter(entry => 
+            (entry.isNew || entry.isEdited) && entry.number && entry.number.trim()
+          );
+          if (modifiedPhoneEntries.length > 0) {
+            finalParameters.phoneEntries = modifiedPhoneEntries;
+          }
+        }
       }
       
       if (selectedAction.value === 'share-folder' && selectedFolder) {
@@ -3979,16 +4085,16 @@ const IssuePanel = () => {
         </div>
 
 
-        {/* Configuration Status */}
-        {!issueContext.hasConfig && (
+        {/* Configuration Status - Only show warning for admins */}
+        {!issueContext.hasConfig && isAdmin && (
           <SectionMessage appearance="warning" title="Configuration Required">
             Keeper integration hub is not configured. Please go to the Keeper global
             page to set up the integration hub.
           </SectionMessage>
         )}
 
-        {/* Action Selection and Approval */}
-        {issueContext.hasConfig && (
+        {/* Action Selection and Approval - Allow non-admin users even without config since they only submit requests */}
+        {(issueContext.hasConfig || !isAdmin) && (
           <>
             {/* Action Dropdown */}
             <div className="mb-12">
@@ -4061,6 +4167,18 @@ const IssuePanel = () => {
                             setSelectedAction(option);
                             setShowDropdown(false);
                             setSearchTerm("");
+                            // Clear all form data and state when switching actions
+                            setFormData({});
+                            setPhoneEntries([]);
+                            setRecordDetails({});
+                            setTemplateFields([]);
+                            setSelectedRecordForUpdate(null);
+                            setSelectedRecord(null);
+                            setSelectedFolder(null);
+                            setOriginalFormData({});
+                            setStoredRequestData(null);
+                            setHasStoredData(false);
+                            setCustomFields([]);
                           }}
                           className={`action-option-item ${selectedAction?.value === option.value ? 'selected' : ''}`}
                         >
@@ -5785,8 +5903,8 @@ const IssuePanel = () => {
           );
         })()}
 
-        {/* Workflow info */}
-        {issueContext.hasConfig && !isLoading && !isLoadingStoredData && showWorkflowInfo && (
+        {/* Workflow info - Show for non-admin users even without config */}
+        {(issueContext.hasConfig || !isAdmin) && !isLoading && !isLoadingStoredData && showWorkflowInfo && (
           <div style={{
             marginTop: "16px",
             padding: "10px 14px",
