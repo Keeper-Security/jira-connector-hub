@@ -198,7 +198,7 @@ const App = () => {
                   <strong className="setup-strong">Cloudflare Tunnel</strong> is an enterprise-grade alternative that provides secure, reliable tunneling through Cloudflare's global network. It offers enhanced security features and is particularly well-suited for production deployments. Learn more at <span onClick={() => router.open("https://www.cloudflare.com/products/tunnel/")} className="setup-link">Cloudflare Tunnel documentation</span> to obtain your tunnel token.
                 </p>
                 <p className="setup-text-last">
-                  Once your tunnel is established, you'll receive a public URL. Enter the complete Keeper Commander API endpoint URL in the Configuration tab. The endpoint typically follows the format <code className="setup-code">https://your-tunnel-domain.com/api/v1/executecommand</code> or <code className="setup-code">/api/v2/executecommand</code> depending on your service configuration. Ensure you include the complete path as configured in your Keeper Commander Service Mode.
+                  Once your tunnel is established, you'll receive a public URL. Enter the <strong>complete API v2 URL</strong> in the Configuration tab including the <code className="setup-code">/api/v2</code> path (e.g., <code className="setup-code">https://your-tunnel-domain.ngrok.io/api/v2</code>). This integration uses API v2 async queue mode which requires Commander 17.1.7 or later.
                 </p>
                 <p className="setup-reference">
                   Reference: <span onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api#create-service-mode-using-tunneling")} className="setup-link-subtle">Creating Service Mode with Tunneling</span>
@@ -210,7 +210,7 @@ const App = () => {
                   4. Service Mode REST API Configuration & Deployment
                 </h3>
                 <p className="setup-text">
-                  Service Mode transforms Keeper Commander into a REST API server that can process commands via HTTP endpoints. This mode is specifically designed for integration scenarios where external applications need programmatic access to vault operations. The service automatically generates a secure API key upon startup and exposes the <code className="setup-code">/api/v1/executecommand</code> endpoint for command execution.
+                  Service Mode transforms Keeper Commander into a REST API server that can process commands via HTTP endpoints. This mode is specifically designed for integration scenarios where external applications need programmatic access to vault operations. The service automatically generates a secure API key upon startup and exposes the <code className="setup-code">/api/v2/executecommand-async</code> endpoint for asynchronous command execution with queue support.
                 </p>
                 <p className="setup-text-spacing">
                   For this integration to function correctly, your Service Mode instance must be configured with specific parameters. The commands list defines which CLI operations are permitted via the API, the run mode determines whether the service operates in the foreground or background, and the queue system setting controls asynchronous request handling. Additionally, enabling persistent login ensures uninterrupted authentication without repeated login prompts, which is critical for continuous operation.
@@ -237,7 +237,7 @@ const App = () => {
                       <tr>
                         <td>Queue System:</td>
                         <td>
-                          <code className="setup-code-small">-q n</code> <span className="setup-color-grey">(Disabled for synchronous execution)</span>
+                          <code className="setup-code-small">-q y</code> <span className="setup-color-grey">(Required for API v2 async mode)</span>
                         </td>
                       </tr>
                       <tr>
@@ -263,21 +263,21 @@ const App = () => {
                     Basic Deployment:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q n --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q y --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-subtitle-spacing">
                     With Ngrok Tunneling:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q n -ng &lt;ngrok-auth-token&gt; -cd &lt;custom-domain&gt; --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q y -ng &lt;ngrok-auth-token&gt; -cd &lt;custom-domain&gt; --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-subtitle-spacing">
                     With Cloudflare Tunneling:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q n -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q y -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-note">
@@ -309,21 +309,21 @@ this-device timeout 30d`}
                     Basic Service Creation:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=n -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=y -f=json
                   </code>
                   
                   <p className="setup-cli-subtitle-bold">
                     With Ngrok Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=n -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=y -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-subtitle-bold">
                     With Cloudflare Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=n -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=y -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-note">

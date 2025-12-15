@@ -1,9 +1,40 @@
 /**
  * Keeper Commander API Module
  * Handles all interactions with Keeper Security Commander API
+ * Uses API v2 (async queue mode) - introduced in Commander 17.1.7
+ * 
+ * API v2 Reference: https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api/api-usage
  */
 
 import { storage, fetch } from '@forge/api';
+
+// ============================================================================
+// Configuration Constants
+// ============================================================================
+
+const API_CONFIG = {
+  // Polling configuration for async requests
+  polling: {
+    initialDelayMs: 500,      // Initial delay before first status check
+    intervalMs: 1000,         // Delay between status checks
+    maxAttempts: 60,          // Maximum polling attempts (60 * 1s = 60s timeout)
+    backoffMultiplier: 1.5,   // Exponential backoff multiplier
+    maxIntervalMs: 5000,      // Maximum interval between polls
+  },
+  
+  // Request states from API v2
+  requestStates: {
+    QUEUED: 'queued',
+    PROCESSING: 'processing',
+    COMPLETED: 'completed',
+    FAILED: 'failed',
+    EXPIRED: 'expired',
+  },
+};
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
 
 /**
  * Helper function to parse and clean Keeper CLI error messages
@@ -58,6 +89,260 @@ function parseKeeperErrorMessage(errorMessage) {
 }
 
 /**
+ * Normalize the API URL
+ * Expects complete API v2 URL like: http://localhost:8080/api/v2 or https://my-tunnel.ngrok.io/api/v2
+ * Removes any trailing slashes for consistent endpoint construction
+ * 
+ * @param {string} apiUrl - The configured API URL (including /api/v2)
+ * @returns {string} - Normalized API URL
+ */
+function normalizeApiUrl(apiUrl) {
+  // Remove trailing slashes
+  let url = apiUrl.replace(/\/+$/, '');
+  return url;
+}
+
+/**
+ * Get the API v2 endpoint
+ * Constructs full endpoint URL from the provided API URL
+ * 
+ * User provides complete URL including /api/v2, e.g.:
+ * - https://my-tunnel.ngrok.io/api/v2
+ * - http://localhost:8080/api/v2
+ * 
+ * This function appends the specific endpoint:
+ * - POST {apiUrl}/executecommand-async - Submit command to queue
+ * - GET  {apiUrl}/status/{request_id}  - Check request status
+ * - GET  {apiUrl}/result/{request_id}  - Get request result
+ * - GET  {apiUrl}/queue/status         - Get queue status
+ * 
+ * @param {string} apiUrl - Complete API URL (e.g., http://localhost:8080/api/v2)
+ * @param {string} endpoint - Endpoint path (e.g., executecommand-async)
+ * @returns {string} - Full endpoint URL
+ */
+function getApiEndpoint(apiUrl, endpoint) {
+  return `${apiUrl}/${endpoint}`;
+}
+
+/**
+ * Sleep utility for async/await
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise<void>}
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Calculate next polling interval with exponential backoff
+ * @param {number} currentInterval - Current interval in ms
+ * @returns {number} - Next interval in ms
+ */
+function calculateNextInterval(currentInterval) {
+  const nextInterval = Math.floor(currentInterval * API_CONFIG.polling.backoffMultiplier);
+  return Math.min(nextInterval, API_CONFIG.polling.maxIntervalMs);
+}
+
+// ============================================================================
+// API v2 - Asynchronous Queue Execution
+// ============================================================================
+
+/**
+ * Submit an async command to the API v2 queue
+ * @param {string} baseUrl - Base API URL
+ * @param {string} apiKey - API key
+ * @param {string} command - Command to execute
+ * @param {Object} options - Additional options (e.g., filedata)
+ * @returns {Promise<Object>} - Queue submission response with request_id
+ */
+async function submitAsyncCommand(baseUrl, apiKey, command, options = {}) {
+  const endpoint = getApiEndpoint(baseUrl, 'executecommand-async');
+  
+  const body = { command };
+  if (options.filedata) {
+    body.filedata = options.filedata;
+  }
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+
+  // Handle specific v2 error codes
+  if (response.status === 503) {
+    throw new Error('Keeper API queue is full. Please try again later.');
+  }
+  if (response.status === 429) {
+    throw new Error('Keeper API rate limit exceeded. Please try again later.');
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    const cleanedError = parseKeeperErrorMessage(errorText);
+    throw new Error(`Keeper API submit error: ${response.status} - ${cleanedError}`);
+  }
+
+  const data = await response.json();
+
+  if (!data.success || !data.request_id) {
+    throw new Error(`Keeper API submit failed: ${data.message || 'No request_id returned'}`);
+  }
+
+  return {
+    requestId: data.request_id,
+    status: data.status,
+    message: data.message,
+  };
+}
+
+/**
+ * Check the status of an async request
+ * @param {string} baseUrl - Base API URL
+ * @param {string} apiKey - API key
+ * @param {string} requestId - Request ID from submit
+ * @returns {Promise<Object>} - Status response
+ */
+async function checkRequestStatus(baseUrl, apiKey, requestId) {
+  const endpoint = getApiEndpoint(baseUrl, `status/${requestId}`);
+
+  const response = await fetch(endpoint, {
+    method: 'GET',
+    headers: {
+      'api-key': apiKey,
+    },
+  });
+
+  if (response.status === 404) {
+    throw new Error(`Request ${requestId} not found. It may have expired.`);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    const cleanedError = parseKeeperErrorMessage(errorText);
+    throw new Error(`Keeper API status check error: ${response.status} - ${cleanedError}`);
+  }
+
+  const data = await response.json();
+
+  return {
+    requestId: data.request_id,
+    command: data.command,
+    status: data.status,
+    createdAt: data.created_at,
+    startedAt: data.started_at,
+    completedAt: data.completed_at,
+  };
+}
+
+/**
+ * Get the result of a completed async request
+ * @param {string} baseUrl - Base API URL
+ * @param {string} apiKey - API key
+ * @param {string} requestId - Request ID from submit
+ * @returns {Promise<Object>} - Command result
+ */
+async function getRequestResult(baseUrl, apiKey, requestId) {
+  const endpoint = getApiEndpoint(baseUrl, `result/${requestId}`);
+
+  const response = await fetch(endpoint, {
+    method: 'GET',
+    headers: {
+      'api-key': apiKey,
+    },
+  });
+
+  if (response.status === 404) {
+    throw new Error(`Result for request ${requestId} not found. It may have expired.`);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    const cleanedError = parseKeeperErrorMessage(errorText);
+    throw new Error(`Keeper API result error: ${response.status} - ${cleanedError}`);
+  }
+
+  const data = await response.json();
+
+  return data;
+}
+
+/**
+ * Execute command using API v2 (async queue mode) with polling
+ * This is the main wrapper function that handles the full async flow:
+ * 1. Submit command to queue
+ * 2. Poll for status until completed/failed
+ * 3. Retrieve and return result
+ * 
+ * @param {string} baseUrl - Base API URL
+ * @param {string} apiKey - API key
+ * @param {string} command - Command to execute
+ * @param {Object} options - Additional options
+ * @param {Object} options.filedata - File data for commands requiring file input
+ * @param {number} options.maxAttempts - Override max polling attempts
+ * @param {number} options.pollingIntervalMs - Override polling interval
+ * @returns {Promise<Object>} - Command result
+ */
+async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
+  const {
+    filedata,
+    maxAttempts = API_CONFIG.polling.maxAttempts,
+    pollingIntervalMs = API_CONFIG.polling.intervalMs,
+  } = options;
+
+  // Step 1: Submit the command to the async queue
+  const submitResponse = await submitAsyncCommand(baseUrl, apiKey, command, { filedata });
+  const { requestId } = submitResponse;
+
+  // Step 2: Wait for initial delay before first poll
+  await sleep(API_CONFIG.polling.initialDelayMs);
+
+  // Step 3: Poll for completion with exponential backoff
+  let currentInterval = pollingIntervalMs;
+  let attempts = 0;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+
+    const statusResponse = await checkRequestStatus(baseUrl, apiKey, requestId);
+    const { status } = statusResponse;
+
+    // Check terminal states
+    if (status === API_CONFIG.requestStates.COMPLETED) {
+      // Step 4: Get and return the result
+      const result = await getRequestResult(baseUrl, apiKey, requestId);
+      return result;
+    }
+
+    if (status === API_CONFIG.requestStates.FAILED) {
+      throw new Error(`Keeper command execution failed for request ${requestId}`);
+    }
+
+    if (status === API_CONFIG.requestStates.EXPIRED) {
+      throw new Error(`Keeper command request ${requestId} expired before processing`);
+    }
+
+    // Still queued or processing - wait and retry
+    await sleep(currentInterval);
+    currentInterval = calculateNextInterval(currentInterval);
+  }
+
+  // Timeout - max attempts reached
+  throw new Error(
+    `Keeper command timed out after ${maxAttempts} polling attempts. ` +
+    `Request ${requestId} may still be processing. ` +
+    `Check status manually or increase timeout.`
+  );
+}
+
+// ============================================================================
+// Main API Interface
+// ============================================================================
+
+/**
  * Fetch PEDM approval details from Keeper API with auto-sync fallback
  * @param {string} requestUid - The request UID to fetch details for
  * @returns {Promise<Object|null>} - Approval details or null if failed
@@ -70,52 +355,42 @@ export async function fetchPedmApprovalDetails(requestUid) {
     }
 
     const { apiUrl, apiKey } = keeperConfig;
-    const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    const baseUrl = normalizeApiUrl(apiUrl);
     const viewCommand = `pedm approval view ${requestUid} --format=json`;
 
-    let response = await fetch(fullApiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
-      body: JSON.stringify({ command: viewCommand }),
-    });
+    // Execute view command using API v2
+    let data;
+    try {
+      data = await executeCommandAsync(baseUrl, apiKey, viewCommand);
+    } catch (error) {
+      // Check if request doesn't exist
+      const errorText = String(error.message || '');
+      const doesNotExist = errorText.toLowerCase().includes('does not exist');
 
-    // Parse response body (even for errors like 500)
-    let data = await response.json();
-
-    // Check if request doesn't exist (can be in error or message field)
-    const errorText = String(data.error || data.message || '');
-    const doesNotExist = errorText.toLowerCase().includes('does not exist');
-    
-    if (doesNotExist) {
-      
-      const syncResponse = await fetch(fullApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
-        body: JSON.stringify({ command: 'pedm sync-down' }),
-      });
-
-      const syncData = await syncResponse.json();
-      
-      if (syncData.status === 'error' || (syncData.success === false)) {
+      if (!doesNotExist) {
         return null;
       }
-      
+
+      // Try sync-down and retry
+      try {
+        await executeCommandAsync(baseUrl, apiKey, 'pedm sync-down');
+      } catch (syncError) {
+        return null;
+      }
+
       // Wait 2 seconds for sync to propagate
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await sleep(2000);
 
       // Retry view command after sync
-      response = await fetch(fullApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'api-key': apiKey },
-        body: JSON.stringify({ command: viewCommand }),
-      });
-
-      // Parse response even if status is not ok
-      data = await response.json();
+      try {
+        data = await executeCommandAsync(baseUrl, apiKey, viewCommand);
+      } catch (retryError) {
+        return null;
+      }
     }
 
-    // Validate and return data (check for success regardless of HTTP status)
-    if (data.status === 'success' && data.data && data.data.length > 0) {
+    // Validate and return data
+    if (data && data.status === 'success' && data.data && data.data.length > 0) {
       return data.data[0];
     }
 
@@ -126,7 +401,7 @@ export async function fetchPedmApprovalDetails(requestUid) {
 }
 
 /**
- * Execute a Keeper Commander command
+ * Execute a Keeper Commander command using API v2 async queue
  * @param {string} command - The command to execute
  * @returns {Promise<Object>} - API response
  */
@@ -137,25 +412,11 @@ export async function executeKeeperCommand(command) {
   }
 
   const { apiUrl, apiKey } = config;
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+  const baseUrl = normalizeApiUrl(apiUrl);
 
-  const response = await fetch(fullApiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-key': apiKey,
-    },
-    body: JSON.stringify({ command }),
-  });
+  const data = await executeCommandAsync(baseUrl, apiKey, command);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    const cleanedError = parseKeeperErrorMessage(errorText);
-    throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
-  }
-
-  const data = await response.json();
-
+  // Check for API-level errors in response
   if (data.success === false || data.error) {
     const rawError = data.error || data.message || 'Unknown error';
     const cleanedError = parseKeeperErrorMessage(rawError);
@@ -176,27 +437,11 @@ export async function executeKeeperCommand(command) {
  * @returns {Promise<Object>} - Test result
  */
 export async function testKeeperConnection(apiUrl, apiKey) {
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+  const baseUrl = normalizeApiUrl(apiUrl);
 
-  const response = await fetch(fullApiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'api-key': apiKey,
-    },
-    body: JSON.stringify({
-      command: 'service-status',
-    }),
-  });
+  const data = await executeCommandAsync(baseUrl, apiKey, 'service-status');
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    const cleanedError = parseKeeperErrorMessage(errorText);
-    throw new Error(`Connection failed: ${response.status} - ${cleanedError}`);
-  }
-
-  const data = await response.json();
-
+  // Check for API-level errors in response
   if (data.success === false || data.error) {
     const rawError = data.error || data.message || 'Unknown error';
     const cleanedError = parseKeeperErrorMessage(rawError);
@@ -209,4 +454,3 @@ export async function testKeeperConnection(apiUrl, apiKey) {
     data: data
   };
 }
-

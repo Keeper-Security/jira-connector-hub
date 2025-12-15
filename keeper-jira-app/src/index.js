@@ -1,6 +1,7 @@
 import Resolver from '@forge/resolver';
 import { storage, fetch, route, asApp, asUser, requestJira, webTrigger } from '@forge/api';
 import { webTriggerHandler } from './modules/webhookHandler.js';
+import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand } from './modules/keeperApi.js';
 
 const resolver = new Resolver();
 
@@ -61,6 +62,7 @@ resolver.define('setConfig', async (req) => {
 
 /**
  * Test Keeper connection (called from frontend)
+ * Uses API v2 async queue mode
  */
 resolver.define('testConnection', async (req) => {
   // Handle double nesting: req.payload.payload
@@ -76,37 +78,13 @@ resolver.define('testConnection', async (req) => {
   if (!apiUrl || !apiKey) {
     throw new Error('API URL and API Key are required for testing connection');
   }
-  
-  // Construct the full API endpoint
-  // Use the complete API URL as provided by the user
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
-    // Test with service-status command to check Keeper Commander service
-    const response = await fetch(fullApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        command: 'service-status', // Check service status
-      }),
-    });
+    // Use the v2 API test connection function from keeperApi module
+    const result = await testKeeperConnection(apiUrl, apiKey);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Connection failed: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-
-    if (data.status !== 'success' || data.error) {
-      throw new Error(`Connection failed: ${data.error || data.message || 'Unknown error'}`);
-    }
-
-    // Extract service status information
-    const serviceMessage = data.message || 'Service status unknown';
+    // Extract service status information from the response
+    const serviceMessage = result.data?.message || 'Service status unknown';
     const isRunning = serviceMessage.toLowerCase().includes('running');
 
     return { 
@@ -169,58 +147,6 @@ resolver.define('getIssueContext', async (req) => {
     currentUserEmail
   };
 });
-
-/**
- * Helper function to parse and clean Keeper CLI error messages
- * Extracts the meaningful user-friendly error message from verbose CLI output
- */
-function parseKeeperErrorMessage(errorMessage) {
-  if (!errorMessage || typeof errorMessage !== 'string') return errorMessage;
-  
-  let errorText = errorMessage;
-  
-  // Try to parse JSON response and extract error field
-  try {
-    const jsonError = JSON.parse(errorMessage);
-    if (jsonError.error) {
-      errorText = jsonError.error;
-    } else if (jsonError.message) {
-      errorText = jsonError.message;
-    }
-  } catch (e) {
-    // Not JSON, use as-is
-  }
-  
-  // Split by newlines and process each line
-  const lines = errorText.split('\n').map(line => line.trim()).filter(line => line);
-  
-  // Skip system messages like "Bypassing master password enforcement..."
-  const meaningfulLines = lines.filter(line => 
-    !line.startsWith('Bypassing master password') &&
-    !line.includes('running in service mode')
-  );
-  
-  // If we have meaningful lines, process them
-  if (meaningfulLines.length > 0) {
-    const lastLine = meaningfulLines[meaningfulLines.length - 1];
-    
-    // Look for pattern: "Failed to ... : <actual error message>"
-    // Extract the part after the last colon if it contains a meaningful message
-    const colonIndex = lastLine.lastIndexOf(': ');
-    if (colonIndex !== -1) {
-      const afterColon = lastLine.substring(colonIndex + 2).trim();
-      // Check if the part after colon is a meaningful message (not just a short token)
-      if (afterColon.length > 20 && !afterColon.includes('Failed to')) {
-        return afterColon;
-      }
-    }
-    
-    // If no colon pattern found, return the last meaningful line
-    return lastLine;
-  }
-  
-  return errorText;
-}
 
 /**
  * Build Keeper CLI command from action and parameters
@@ -832,61 +758,26 @@ function buildKeeperCommand(action, parameters, issueKey) {
  * Get records list from Keeper API (called from issue panel)
  */
 resolver.define('getKeeperRecords', async (req) => {
-  const config = await storage.get('keeperConfig');
-  if (!config) {
-    throw new Error('Keeper configuration not found. Please configure the app first.');
-  }
-
-  const { apiUrl, apiKey } = config;
-  
-  // Construct the full API endpoint
-  // Use the complete API URL as provided by the user
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-
   try {
-    const response = await fetch(fullApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        command: 'list --format=json',
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      const cleanedError = parseKeeperErrorMessage(errorText);
-      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
-    }
-
-    const data = await response.json();
-
-    if (data.status !== "success" || data.error) {
-      const rawError = data.error || data.message || 'Unknown error';
-      const cleanedError = parseKeeperErrorMessage(rawError);
-      throw new Error(cleanedError);
-    }
+    const result = await executeKeeperApiCommand('list --format=json');
+    const apiData = result.data;
 
     // Parse the JSON data from the response
     let records = [];
-    if (data.data && Array.isArray(data.data)) {
-      records = data.data;
-    } else if (data.message && typeof data.message === 'string') {
+    if (apiData.data && Array.isArray(apiData.data)) {
+      records = apiData.data;
+    } else if (apiData.message && typeof apiData.message === 'string') {
       try {
-        records = JSON.parse(data.message);
+        records = JSON.parse(apiData.message);
       } catch (parseError) {
         throw new Error('Failed to parse records data from message field');
       }
-    } else if (data.data && typeof data.data === 'string') {
+    } else if (apiData.data && typeof apiData.data === 'string') {
       try {
-        records = JSON.parse(data.data);
+        records = JSON.parse(apiData.data);
       } catch (parseError) {
         throw new Error('Failed to parse records data from data field');
       }
-    } else {
-      // No records found
     }
 
     return { success: true, records: records || [] };
@@ -899,49 +790,16 @@ resolver.define('getKeeperRecords', async (req) => {
  * Get folders list from Keeper API (called from issue panel)
  */
 resolver.define('getKeeperFolders', async (req) => {
-  const config = await storage.get('keeperConfig');
-  if (!config) {
-    throw new Error('Keeper configuration not found. Please configure the app first.');
-  }
-
-  const { apiUrl, apiKey } = config;
-  
-  // Construct the full API endpoint
-  // Use the complete API URL as provided by the user
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-
   try {
-    const response = await fetch(fullApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        command: 'ls -f --format=json',
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      const cleanedError = parseKeeperErrorMessage(errorText);
-      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
-    }
-
-    const data = await response.json();
-
-    if (data.success === false || data.error) {
-      const rawError = data.error || data.message || 'Unknown error';
-      const cleanedError = parseKeeperErrorMessage(rawError);
-      throw new Error(cleanedError);
-    }
+    const result = await executeKeeperApiCommand('ls -f --format=json');
+    const apiData = result.data;
 
     // Parse the JSON data from the response
     let folders = [];
-    if (data.data && Array.isArray(data.data)) {
+    if (apiData.data && Array.isArray(apiData.data)) {
       try {
         // data.data is directly an array of folders for ls -f command
-        folders = data.data.map((folder, index) => {
+        folders = apiData.data.map((folder, index) => {
           // Clean ANSI color codes from folder name
           let cleanName = folder.name || '';
           cleanName = cleanName.replace(/\[?\d+m/g, ''); // Remove [31m, [39m etc.
@@ -962,22 +820,20 @@ resolver.define('getKeeperFolders', async (req) => {
           
           return {
             number: index + 1,
-            folder_uid: folder.uid, // Use uid from the new format
-            uid: folder.uid, // Use uid from the new format
+            folder_uid: folder.uid,
+            uid: folder.uid,
             name: cleanName,
-            title: cleanName, // Add title alias
+            title: cleanName,
             path: cleanName,
             flags: flags,
             parent_uid: parentUid,
-            shared: flags && flags.includes('S'), // Mark as shared if flags contains "S"
+            shared: flags && flags.includes('S'),
             raw_data: folder
           };
         });
       } catch (parseError) {
         throw new Error('Failed to parse folders data');
       }
-    } else {
-      // No folder data found
     }
 
     return { success: true, folders: folders || [] };
@@ -995,53 +851,20 @@ resolver.define('getKeeperRecordDetails', async (req) => {
   if (!recordUid) {
     throw new Error('Record UID is required to fetch record details');
   }
-  
-  const config = await storage.get('keeperConfig');
-  if (!config) {
-    throw new Error('Keeper configuration not found. Please configure the app first.');
-  }
-
-  const { apiUrl, apiKey } = config;
-  
-  // Construct the full API endpoint
-  // Use the complete API URL as provided by the user
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
-    const response = await fetch(fullApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        command: `get "${recordUid}" --format=json`,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      const cleanedError = parseKeeperErrorMessage(errorText);
-      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
-    }
-
-    const data = await response.json();
-
-    if (data.success === false || data.error) {
-      const rawError = data.error || data.message || 'Unknown error';
-      const cleanedError = parseKeeperErrorMessage(rawError);
-      throw new Error(cleanedError);
-    }
+    const result = await executeKeeperApiCommand(`get "${recordUid}" --format=json`);
+    const apiData = result.data;
 
     // Parse the JSON data from the response
     let recordDetails = {};
-    if (data.data) {
+    if (apiData.data) {
       try {
         // Parse the JSON response from get command
-        if (typeof data.data === 'string') {
-          recordDetails = JSON.parse(data.data);
-        } else if (typeof data.data === 'object') {
-          recordDetails = data.data;
+        if (typeof apiData.data === 'string') {
+          recordDetails = JSON.parse(apiData.data);
+        } else if (typeof apiData.data === 'object') {
+          recordDetails = apiData.data;
         }
       } catch (parseError) {
         throw new Error('Failed to parse record details data');
@@ -1070,52 +893,10 @@ resolver.define('executeKeeperCommand', async (req) => {
   if (!command) {
     throw new Error('Command is required');
   }
-  
-  const config = await storage.get('keeperConfig');
-  if (!config) {
-    throw new Error('Keeper configuration not found. Please configure the app first.');
-  }
-
-  const { apiUrl, apiKey } = config;
-  
-  // Construct the full API endpoint
-  // Use the complete API URL as provided by the user
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
-    // Call Keeper API
-    const response = await fetch(fullApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        command: command,
-      }),
-    });
-
-    // Check if the API call was successful
-    if (!response.ok) {
-      const errorText = await response.text();
-      const cleanedError = parseKeeperErrorMessage(errorText);
-      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
-    }
-
-    const data = await response.json();
-
-    // Check if API response indicates error
-    if (data.success === false || data.error) {
-      const rawError = data.error || data.message || 'Unknown error';
-      const cleanedError = parseKeeperErrorMessage(rawError);
-      throw new Error(cleanedError);
-    }
-
-    return { 
-      success: true, 
-      data: data,
-      message: data.message || 'Command executed successfully'
-    };
+    const result = await executeKeeperApiCommand(command);
+    return result;
   } catch (err) {
     throw err;
   }
@@ -1171,48 +952,13 @@ resolver.define('executeKeeperAction', async (req) => {
     }
   }
   
-  const config = await storage.get('keeperConfig');
-  if (!config) {
-    throw new Error('Keeper configuration not found. Please configure the app first.');
-  }
-
-  const { apiUrl, apiKey } = config;
-  
   // Build dynamic command based on action and parameters
   const dynamicCommand = buildKeeperCommand(command, parameters || {}, issueKey);
-  
-  // Construct the full API endpoint
-  // Use the complete API URL as provided by the user
-  const fullApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
 
   try {
-    // Call Keeper API
-    const response = await fetch(fullApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        command: dynamicCommand,
-      }),
-    });
-
-    // Check if the API call was successful
-    if (!response.ok) {
-      const errorText = await response.text();
-      const cleanedError = parseKeeperErrorMessage(errorText);
-      throw new Error(`Keeper API error: ${response.status} - ${cleanedError}`);
-    }
-
-    const data = await response.json();
-
-    // Check if API response indicates error
-    if (data.success === false || data.error) {
-      const rawError = data.error || data.message || 'Unknown error';
-      const cleanedError = parseKeeperErrorMessage(rawError);
-      throw new Error(cleanedError);
-    }
+    // Call Keeper API using v2 async queue
+    const result = await executeKeeperApiCommand(dynamicCommand);
+    const data = result.data;
 
     // Extract record_uid if this is a record-add command
     let record_uid = null;

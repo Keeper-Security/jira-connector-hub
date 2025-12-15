@@ -54,15 +54,16 @@ const ConfigForm = ({
                   {...fieldProps}
                   value={formValues.apiUrl}
                   onChange={(e) => setFormValues(prev => ({ ...prev, apiUrl: e.target.value }))}
-                  placeholder="Enter complete Keeper Commander API endpoint URL"
+                  placeholder="https://your-domain.com/api/v2 or http://localhost:8080/api/v2"
                 />
                 <div className="config-form-helper-text">
-                  Provide the full API endpoint URL including the path (e.g., https://your-domain.com/api/v1/executecommand or /api/v2/executecommand). 
+                  Enter the complete API v2 URL of your Keeper Commander Service including the <code>/api/v2</code> path (e.g., <code>https://your-tunnel.ngrok.io/api/v2</code> or <code>http://localhost:8080/api/v2</code>). 
+                  Requires Commander 17.1.7+ with queue enabled (<code>-q y</code>).{' '}
                   <span 
-                    onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api")} 
+                    onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api/api-usage")} 
                     className="text-link text-link-spaced"
                   >
-                    Learn more
+                    API v2 Documentation
                   </span>
                 </div>
                 {error && (
