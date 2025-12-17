@@ -1986,6 +1986,43 @@ resolver.define('getWebhookTickets', async (req) => {
         console.error('Failed to parse JSON from description:', e);
       }
       
+      // Extract request UID - check multiple possible field names
+      // 1. Basic webhook payload uses: request_uid
+      // 2. Enriched PEDM data uses: approval_uid
+      // 3. Fallback: extract from labels (format: request-<uid>)
+      let requestUid = jsonPayload?.request_uid || jsonPayload?.approval_uid || null;
+      if (!requestUid) {
+        const labels = issue.fields.labels || [];
+        const requestLabel = labels.find(label => label.startsWith('request-'));
+        if (requestLabel) {
+          requestUid = requestLabel.replace('request-', '');
+        }
+      }
+      
+      // Extract username - check multiple possible field names
+      // 1. Basic webhook payload uses: username
+      // 2. Enriched PEDM data uses: account_info.Username
+      let username = jsonPayload?.username || 
+                     jsonPayload?.account_info?.Username || 
+                     null;
+      
+      // If this is enriched PEDM data, try to get additional info
+      const isPedmEnriched = !!jsonPayload?.approval_uid || !!jsonPayload?.account_info;
+      
+      // For description, prefer specific fields over summary
+      let ticketDescription = issue.fields.summary;
+      if (jsonPayload) {
+        if (jsonPayload.description) {
+          ticketDescription = jsonPayload.description;
+        } else if (isPedmEnriched && jsonPayload.approval_type) {
+          // For PEDM tickets, create a meaningful description
+          ticketDescription = `${jsonPayload.approval_type || 'PEDM'} Request - ${requestUid || 'Unknown'}`;
+          if (username) {
+            ticketDescription = `${username} - ${ticketDescription}`;
+          }
+        }
+      }
+      
       return {
         key: issue.key,
         id: issue.id,
@@ -1994,13 +2031,13 @@ resolver.define('getWebhookTickets', async (req) => {
         status: issue.fields.status?.name || 'Unknown',
         labels: issue.fields.labels || [],
         issueType: issue.fields.issuetype?.name || 'Unknown',
-        description: jsonPayload?.description || issue.fields.summary,
-        requestUid: jsonPayload?.request_uid || null,
-        agentUid: jsonPayload?.agent_uid || null,
-        username: jsonPayload?.username || null,
-        category: jsonPayload?.category || null,
-        auditEvent: jsonPayload?.audit_event || null,
-        alertName: jsonPayload?.alert_name || null
+        description: ticketDescription,
+        requestUid: requestUid,
+        agentUid: jsonPayload?.agent_uid || jsonPayload?.account_info?.agent_uid || null,
+        username: username,
+        category: jsonPayload?.category || (isPedmEnriched ? 'endpoint_privilege_manager' : null),
+        auditEvent: jsonPayload?.audit_event || (isPedmEnriched ? 'approval_request_created' : null),
+        alertName: jsonPayload?.alert_name || (isPedmEnriched ? 'PEDM Approval Request' : null)
       };
     });
     

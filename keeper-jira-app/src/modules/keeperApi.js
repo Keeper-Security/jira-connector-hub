@@ -343,6 +343,62 @@ async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
 // ============================================================================
 
 /**
+ * Extract PEDM approval data from various API response formats
+ * Handles different structures returned by Commander API v2
+ * @param {Object} rawData - Raw API response
+ * @returns {Object|null} - Extracted approval details or null
+ */
+function extractPedmApprovalData(rawData) {
+  if (!rawData) return null;
+
+  // Structure 1: Direct data array - { status: 'success', data: [...] }
+  if (rawData.status === 'success' && Array.isArray(rawData.data) && rawData.data.length > 0) {
+    return rawData.data[0];
+  }
+
+  // Structure 2: Direct array response - [{ approval_uid: ... }]
+  if (Array.isArray(rawData) && rawData.length > 0) {
+    return rawData[0];
+  }
+
+  // Structure 3: Result wrapper - { result: { data: [...] } } or { result: [...] }
+  if (rawData.result) {
+    if (Array.isArray(rawData.result) && rawData.result.length > 0) {
+      return rawData.result[0];
+    }
+    if (rawData.result.data && Array.isArray(rawData.result.data) && rawData.result.data.length > 0) {
+      return rawData.result.data[0];
+    }
+    // If result is directly the approval object
+    if (rawData.result.approval_uid || rawData.result.account_info) {
+      return rawData.result;
+    }
+  }
+
+  // Structure 4: Data wrapper - { data: { ... } } (single object, not array)
+  if (rawData.data && !Array.isArray(rawData.data) && (rawData.data.approval_uid || rawData.data.account_info)) {
+    return rawData.data;
+  }
+
+  // Structure 5: Direct approval object at root
+  if (rawData.approval_uid || rawData.account_info) {
+    return rawData;
+  }
+
+  // Structure 6: Output field contains JSON string (Commander CLI output format)
+  if (rawData.output && typeof rawData.output === 'string') {
+    try {
+      const parsed = JSON.parse(rawData.output);
+      return extractPedmApprovalData(parsed); // Recursively extract from parsed output
+    } catch (e) {
+      // Not JSON, ignore
+    }
+  }
+
+  return null;
+}
+
+/**
  * Fetch PEDM approval details from Keeper API with auto-sync fallback
  * @param {string} requestUid - The request UID to fetch details for
  * @returns {Promise<Object|null>} - Approval details or null if failed
@@ -359,9 +415,9 @@ export async function fetchPedmApprovalDetails(requestUid) {
     const viewCommand = `pedm approval view ${requestUid} --format=json`;
 
     // Execute view command using API v2
-    let data;
+    let rawData;
     try {
-      data = await executeCommandAsync(baseUrl, apiKey, viewCommand);
+      rawData = await executeCommandAsync(baseUrl, apiKey, viewCommand);
     } catch (error) {
       // Check if request doesn't exist
       const errorText = String(error.message || '');
@@ -383,18 +439,16 @@ export async function fetchPedmApprovalDetails(requestUid) {
 
       // Retry view command after sync
       try {
-        data = await executeCommandAsync(baseUrl, apiKey, viewCommand);
+        rawData = await executeCommandAsync(baseUrl, apiKey, viewCommand);
       } catch (retryError) {
         return null;
       }
     }
 
-    // Validate and return data
-    if (data && data.status === 'success' && data.data && data.data.length > 0) {
-      return data.data[0];
-    }
-
-    return null;
+    // Extract approval data from various possible response structures
+    const approvalData = extractPedmApprovalData(rawData);
+    
+    return approvalData || null;
   } catch (error) {
     return null;
   }
