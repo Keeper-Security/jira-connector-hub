@@ -716,20 +716,12 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (parameters.action) {
         command += ` -a ${parameters.action}`;
       }
-      // Add optional permission flags only when set to 'on'
-      // Only include permissions that are explicitly granted
-      if (parameters.manage_records === true) {
-        command += ` -p on`;
-      }
-      if (parameters.manage_users === true) {
-        command += ` -o on`;
-      }
-      if (parameters.can_share === true) {
-        command += ` -s on`;
-      }
-      if (parameters.can_edit === true) {
-        command += ` -d on`;
-      }
+      // Always include ALL four permission flags explicitly with either 'on' or 'off'
+      // Never omit a flag — omitting defaults to the shared folder's settings, which may grant unintended permissions
+      command += ` -p ${parameters.manage_records === true ? 'on' : 'off'}`;  // User permission: Can manage records
+      command += ` -o ${parameters.manage_users === true ? 'on' : 'off'}`;    // User permission: Can manage users
+      command += ` -s ${parameters.can_share === true ? 'on' : 'off'}`;       // Record permission: Can be shared
+      command += ` -d ${parameters.can_edit === true ? 'on' : 'off'}`;        // Record permission: Can be modified
       // Add expiration options
       if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
         // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
