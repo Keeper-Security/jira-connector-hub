@@ -1,0 +1,43 @@
+/* TabBar Component Styles */
+.tab-bar {
+  display: flex;
+  border-bottom: 2px solid #DFE1E6;
+  background-color: #FAFBFC;
+  overflow-x: auto;
+}
+
+.tab-bar-item {
+  flex: 1;
+  text-align: center;
+  padding: 14px 16px;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  background-color: transparent;
+  color: #42526E;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 140px;
+}
+
+.tab-bar-item.active {
+  border-bottom-color: #0052CC;
+  background-color: #FFFFFF;
+  color: #0052CC;
+  font-weight: 600;
+}
+
+.tab-bar-item.disabled {
+  cursor: not-allowed;
+  color: #A5ADBA;
+  opacity: 0.5;
+}
+
+.tab-bar-item:not(.active):not(.disabled):hover {
+  background-color: #F4F5F7;
+}
+

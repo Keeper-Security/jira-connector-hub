@@ -1,0 +1,141 @@
+/* ActionSelector component styles */
+.action-selector-wrapper {
+  margin-bottom: 24px;
+}
+
+.action-selector-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1A1A1A;
+}
+
+.required-mark {
+  color: #FF5630;
+}
+
+.action-selector-button {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #DFE1E6;
+  border-radius: 4px;
+  background-color: white;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.action-selector-button:hover:not(:disabled) {
+  border-color: #0066CC;
+}
+
+.action-selector-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: #F4F5F7;
+}
+
+.action-selector-arrow {
+  color: #6B778C;
+  font-size: 12px;
+}
+
+.action-selector-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #DFE1E6;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  margin-top: 4px;
+  z-index: 1000;
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.action-selector-search {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid #DFE1E6;
+  font-size: 14px;
+  outline: none;
+}
+
+.action-selector-search:focus {
+  border-bottom-color: #0066CC;
+}
+
+.action-selector-items {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.action-selector-item {
+  padding: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #F4F5F7;
+  transition: background-color 0.15s;
+}
+
+.action-selector-item:hover {
+  background-color: #F4F5F7;
+}
+
+.action-selector-item.selected {
+  background-color: #E6F2FF;
+}
+
+.action-selector-item:last-child {
+  border-bottom: none;
+}
+
+.action-selector-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1A1A1A;
+  margin-bottom: 4px;
+}
+
+.action-selector-item-description {
+  font-size: 12px;
+  color: #6B778C;
+  line-height: 1.4;
+}
+
+.action-selector-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: #6B778C;
+  font-size: 14px;
+}
+
+.action-selector-info {
+  margin-top: 12px;
+  padding: 12px;
+  background-color: #F4F5F7;
+  border-radius: 4px;
+}
+
+.action-selector-info-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6B778C;
+  margin-bottom: 4px;
+}
+
+.action-selector-info-description {
+  font-size: 13px;
+  color: #1A1A1A;
+  line-height: 1.4;
+}
+
+
