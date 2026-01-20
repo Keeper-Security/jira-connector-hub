@@ -645,7 +645,7 @@ const IssuePanel = () => {
           { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP (e.g., db.company.com)', parentType: 'host', subField: 'hostName' },
           { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 5432, 27017)', parentType: 'host', subField: 'port' },
           { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Database username' },
-          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN:rand,24' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
       },
@@ -673,7 +673,7 @@ const IssuePanel = () => {
           { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP (e.g., web.company.com)', parentType: 'host', subField: 'hostName' },
           { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 22)', parentType: 'host', subField: 'port' },
           { name: 'login', label: 'Username', type: 'text', required: false, placeholder: 'Server username' },
-          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN:rand,20' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
       },
