@@ -1,4 +1,4 @@
-# Keeper for Jira
+# Keeper Security for Jira Cloud
 
 Atlassian Forge application that integrates the Keeper platform with Jira Cloud. Manage credentials, secrets, and privileged access workflows directly from your Jira issues.
 
@@ -20,7 +20,7 @@ Atlassian Forge application that integrates the Keeper platform with Jira Cloud.
 ### Centralized Configuration
 - Global settings page for API configuration
 - Built-in connection verification and status monitoring
-- Web trigger configuration for PEDM webhook integration
+- Web trigger configuration for EPM webhook integration
 
 ## Architecture
 
@@ -224,15 +224,8 @@ forge deploy -e production
 - [Jira Workflow Documentation](https://docs.keeper.io/en/keeperpam/secrets-manager/integrations/jira-workflow)
 - [Keeper Commander CLI Documentation](https://docs.keeper.io/en/keeperpam/commander-cli/overview)
 - [Service Mode REST API](https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api)
-- [API v2 Usage Guide](https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api/api-usage)
 - [Atlassian Forge Platform](https://developer.atlassian.com/platform/forge/)
 
 ## Support
 
-- **Technical Support**: commander@keepersecurity.com
-- **Keeper Documentation**: [docs.keeper.io](https://docs.keeper.io)
-- **Forge Documentation**: [developer.atlassian.com/platform/forge](https://developer.atlassian.com/platform/forge/)
-
-## License
-
-MIT License - See LICENSE file for details.
+Please open a Github issue or contact Keeper [customer support](https://www.keepersecurity.com/support.html)
