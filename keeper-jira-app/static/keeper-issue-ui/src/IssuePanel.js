@@ -1,150 +1,22 @@
 import React, { useState, useEffect, useRef } from "react";
-import { invoke } from "@forge/bridge";
 
 import Button from "@atlaskit/button";
 import SectionMessage from "@atlaskit/section-message";
 import Spinner from "@atlaskit/spinner";
-import Badge from "@atlaskit/badge";
-import Select from "@atlaskit/select";
 
 // Icons
 import SuccessIcon from "@atlaskit/icon/glyph/check-circle";
 import ErrorIcon from "@atlaskit/icon/glyph/error";
-import InfoIcon from "@atlaskit/icon/glyph/info";
 import LockIcon from "@atlaskit/icon/glyph/lock";
+import CrossIcon from "@atlaskit/icon/glyph/cross";
 
-// Keeper action options with required fields based on CLI documentation
-const keeperActionOptions = [
-  { 
-    value: 'record-add', 
-    label: 'Create New Secret', 
-    description: 'Create new secret after approval.',
-    fields: [
-      { name: 'recordType', label: 'Record Type', type: 'select', required: true, options: [], placeholder: 'Select record type' }
-    ]
-  },
-  { 
-    value: 'record-update', 
-    label: 'Update Record', 
-    description: 'Update existing record fields. Only fill in the fields you want to change.',
-    fields: [
-      { name: 'record', label: 'Record ID/Title', type: 'text', required: true, placeholder: 'Record ID or title to update' },
-      { name: 'title', label: 'Title', type: 'text', required: false, placeholder: 'Title' },
-      { name: 'recordType', label: 'Record Type', type: 'select', required: false, options: [], placeholder: 'Record Type' },
-      { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username' },
-      { name: 'password', label: 'Password', type: 'text', required: false, placeholder: 'Password' },
-      { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'URL' },
-      { name: 'email', label: 'Email', type: 'email', required: false, placeholder: 'Email' },
-      { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Notes' },
-      { name: 'force', label: 'Force Update', type: 'checkbox', required: false, description: 'Ignore warnings and force the update' }
-    ]
-  },
-  { 
-    value: 'record-permission', 
-    label: 'Record Permission', 
-    description: 'Grant or revoke record permissions for all users in shared folder.',
-    requiresSharedFolderSelection: true,
-    fields: [
-      { name: 'sharedFolder', label: 'Shared Folder', type: 'folder-select', required: true, placeholder: 'Select shared folder' },
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'revoke'], placeholder: 'Select action' },
-      { name: 'can_share', label: 'Can Share Records', type: 'checkbox', required: false, description: 'Allow sharing records' },
-      { name: 'can_edit', label: 'Can Edit Records', type: 'checkbox', required: false, description: 'Allow modifying records in the folder' },
-      { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply permission changes to all sub folders' },
-      { name: 'dry_run', label: 'Dry Run', type: 'checkbox', required: false, description: 'Display permission changes without actually changing them' }
-    ]
-  },
-  { 
-    value: 'share-record', 
-    label: 'Share Record', 
-    description: 'Grant or revoke user access to record(s).',
-    fields: [
-      { name: 'record', label: 'Record UID/Path', type: 'text', required: true, placeholder: 'Record UID, path, or folder path' },
-      { name: 'user', label: 'Email', type: 'email', required: true, placeholder: 'Email of account to edit permissions for' },
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'revoke', 'owner', 'cancel'], placeholder: 'Select action' },
-      { name: 'can_share', label: 'Allow Sharing', type: 'checkbox', required: false, description: 'Allow user to share record' },
-      { name: 'can_write', label: 'Allow Writing', type: 'checkbox', required: false, description: 'Allow user to modify record' },
-      { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply to shared folder hierarchy' }
-    ]
-  },
-  { 
-    value: 'share-folder', 
-    label: 'Share Folder', 
-    description: 'Grant or remove user/team access to folder with specific permissions.',
-    fields: [
-      { name: 'folder', label: 'Folder UID', type: 'text', required: true, placeholder: 'Folder UID to share' },
-      { name: 'user', label: 'Email/Team', type: 'text', required: true, placeholder: 'Email, team name, or * for all' },
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'remove'], placeholder: 'Select action' },
-      { name: 'manage_records', label: 'Can Manage Records', type: 'checkbox', required: false, description: 'Allow user to manage records in folder' },
-      { name: 'manage_users', label: 'Can Manage Users', type: 'checkbox', required: false, description: 'Allow user to manage other users access' },
-      { name: 'can_share', label: 'Can Share Records', type: 'checkbox', required: false, description: 'Allow user to share records (records only)' },
-      { name: 'can_edit', label: 'Can Edit Records', type: 'checkbox', required: false, description: 'Allow user to modify records (records only)' }
-    ]
-  },
-  { 
-    value: 'pam-action-rotate', 
-    label: 'PAM Action Rotate', 
-    description: 'Rotate passwords for PAM resources based on record UID or folder.',
-    requiresFolderOrRecordSelection: true,
-    fields: [
-      { name: 'target_type', label: 'Target Type', type: 'select', required: true, options: ['record', 'folder'], placeholder: 'Select target type' },
-      { name: 'recordUid', label: 'Record UID', type: 'record-select', required: false, placeholder: 'Select PAM record' },
-      { name: 'folder', label: 'Folder', type: 'folder-select', required: false, placeholder: 'Select folder' },
-      { name: 'dry_run', label: 'Dry Run', type: 'checkbox', required: false, description: 'Enable dry-run mode to test without actually rotating' }
-    ]
-  },
-  { 
-    value: 'audit-report', 
-    label: 'Audit Report', 
-    description: 'Generate audit logs for tracking Keeper activity.',
-    fields: [
-      { name: 'report_type', label: 'Report Type', type: 'select', required: true, options: ['raw', 'dim', 'hour', 'day', 'week', 'month'], placeholder: 'Select report type' },
-      { name: 'report_format', label: 'Format', type: 'select', required: true, options: ['table', 'csv', 'json'], placeholder: 'Output format' },
-      { name: 'max_events', label: 'Max Events', type: 'number', required: false, placeholder: 'Maximum number of events (default: 1000)' }
-    ]
-  },
-  { 
-    value: 'compliance-report', 
-    label: 'Compliance Report', 
-    description: 'Provide compliance-related reporting for audits.',
-    fields: [
-      { name: 'report_format', label: 'Format', type: 'select', required: true, options: ['table', 'csv', 'json'], placeholder: 'Output format' },
-      { name: 'node', label: 'Node', type: 'text', required: false, placeholder: 'Specific node (optional)' }
-    ]
-  },
-  { 
-    value: 'enterprise-user', 
-    label: 'Enterprise User', 
-    description: 'Manage enterprise users (add, update, delete).',
-    fields: [
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['add', 'update', 'delete'], placeholder: 'Select action' },
-      { name: 'email', label: 'User Email', type: 'email', required: true, placeholder: 'User email address' },
-      { name: 'name', label: 'Display Name', type: 'text', required: false, placeholder: 'User display name' },
-      { name: 'node', label: 'Node', type: 'text', required: false, placeholder: 'Organization node' }
-    ]
-  },
-  { 
-    value: 'enterprise-team', 
-    label: 'Enterprise Team', 
-    description: 'Manage teams (add, delete, add/remove users).',
-    fields: [
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['add', 'delete', 'add-user', 'remove-user'], placeholder: 'Select action' },
-      { name: 'team', label: 'Team Name', type: 'text', required: true, placeholder: 'Team name' },
-      { name: 'user', label: 'User Email', type: 'email', required: false, placeholder: 'User email (for add/remove user actions)' },
-      { name: 'node', label: 'Node', type: 'text', required: false, placeholder: 'Organization node' }
-    ]
-  },
-  { 
-    value: 'enterprise-role', 
-    label: 'Enterprise Role', 
-    description: 'Manage roles (add, delete, update permissions).',
-    fields: [
-      { name: 'action', label: 'Action', type: 'select', required: true, options: ['add', 'delete', 'update'], placeholder: 'Select action' },
-      { name: 'role', label: 'Role Name', type: 'text', required: true, placeholder: 'Role name' },
-      { name: 'node', label: 'Node', type: 'text', required: false, placeholder: 'Organization node' },
-      { name: 'permissions', label: 'Permissions', type: 'text', required: false, placeholder: 'Role permissions (comma-separated)' }
-    ]
-  }
-];
+import { KEEPER_ACTION_OPTIONS, PAGINATION_SETTINGS } from "./constants";
+import * as api from "./services/api";
+import PedmApprovalPanel from "./components/issue/PedmApprovalPanel";
+import "./styles/IssuePanel.css";
+
+// Keeper action options - using imported constant
+const keeperActionOptions = KEEPER_ACTION_OPTIONS;
 
 const IssuePanel = () => {
   const [issueContext, setIssueContext] = useState(null);
@@ -152,23 +24,6 @@ const IssuePanel = () => {
   const [lastResult, setLastResult] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedAction, setSelectedAction] = useState(null);
-  
-  useEffect(() => {
-    // Trigger any necessary actions when selectedAction changes
-    if (selectedAction?.value === 'record-permission') {
-      // Fetch shared folders for record-permission command
-      fetchKeeperFolders();
-    }
-    if (selectedAction?.value === 'pam-action-rotate') {
-      // Fetch PAM resources for pam-action-rotate command
-      fetchPamResources();
-      fetchKeeperFolders(); // Still need folders for folder-based rotation
-    }
-    if (selectedAction?.value === 'record-update') {
-      // Fetch records for the update record dropdown
-      fetchKeeperRecords();
-    }
-  }, [selectedAction]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -183,30 +38,23 @@ const IssuePanel = () => {
   const [keeperFolders, setKeeperFolders] = useState([]);
   const [loadingFolders, setLoadingFolders] = useState(false);
   
-  // PAM-specific resources
-  const [pamResources, setPamResources] = useState([]);
-  const [loadingPamResources, setLoadingPamResources] = useState(false);
-  const [selectedPamResource, setSelectedPamResource] = useState(null);
-  const [pamResourceSearchTerm, setPamResourceSearchTerm] = useState("");
-  const [showPamResourceDropdown, setShowPamResourceDropdown] = useState(false);
-  const [pamResourceCurrentPage, setPamResourceCurrentPage] = useState(1);
-  
   // Rejection functionality
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
   const [showRejectionForm, setShowRejectionForm] = useState(false);
   const [rejectionResult, setRejectionResult] = useState(null);
   const [selectedFolder, setSelectedFolder] = useState(null);
+  
+  // Save request message state
+  const [saveRequestMessage, setSaveRequestMessage] = useState(null); // { type: 'success' | 'error', message: 'text', timestamp: 'ISO string', showTimestamp: boolean }
+  const [showStoredRequestMessage, setShowStoredRequestMessage] = useState(true); // Control visibility of stored request dialog
+  const [showWorkflowInfo, setShowWorkflowInfo] = useState(true); // Control visibility of workflow info dialog
   const [folderSearchTerm, setFolderSearchTerm] = useState("");
   const [showFolderDropdown, setShowFolderDropdown] = useState(false);
   const [folderCurrentPage, setFolderCurrentPage] = useState(1);
   
   // Record-update specific states
   const [selectedRecordForUpdate, setSelectedRecordForUpdate] = useState(null);
-  
-  useEffect(() => {
-    // Handle selectedRecordForUpdate changes
-  }, [selectedRecordForUpdate]);
   const [recordForUpdateSearchTerm, setRecordForUpdateSearchTerm] = useState("");
   const [showRecordForUpdateDropdown, setShowRecordForUpdateDropdown] = useState(false);
   const [recordForUpdateCurrentPage, setRecordForUpdateCurrentPage] = useState(1);
@@ -215,55 +63,143 @@ const IssuePanel = () => {
   const [resolvedAddresses, setResolvedAddresses] = useState({}); // Cache for resolved address references
   const [loadingAddresses, setLoadingAddresses] = useState(new Set()); // Track loading address references
   const [showPinCode, setShowPinCode] = useState(false); // Toggle for PIN code visibility
-  const [showAddressDropdown, setShowAddressDropdown] = useState(false); // Address dropdown visibility
-  const [showNewAddressModal, setShowNewAddressModal] = useState(false); // New address modal visibility
-  const [newAddressFormData, setNewAddressFormData] = useState({}); // Form data for new address
-  const [addressTemplate, setAddressTemplate] = useState({});
-  const [addressRecords, setAddressRecords] = useState([]); // Existing address records
-  const [loadingAddressRecords, setLoadingAddressRecords] = useState(false); // Loading state for address records // Template for address record type
-  const [loadingAddressTemplate, setLoadingAddressTemplate] = useState(false); // Loading state for address template
-  const [dynamicCustomFields, setDynamicCustomFields] = useState([]);
-  const [manualCustomFields, setManualCustomFields] = useState([]);
+  const [showSecureNote, setShowSecureNote] = useState(false); // Toggle for secure note visibility
+  const [showLicenseKey, setShowLicenseKey] = useState(false); // Toggle for license key visibility
+  const [showPrivateKey, setShowPrivateKey] = useState(false); // Toggle for SSH private key visibility
+  const [showPublicKey, setShowPublicKey] = useState(false); // Toggle for SSH public key visibility
+  const [showPassword, setShowPassword] = useState(false); // Toggle for password visibility
+  const [phoneEntries, setPhoneEntries] = useState([]); // Dynamic phone entries - starts empty, populated from record or user adds
   const [recordTypes, setRecordTypes] = useState([]);
   const [loadingRecordTypes, setLoadingRecordTypes] = useState(false);
   const [recordTypeTemplate, setRecordTypeTemplate] = useState({});
   const [loadingTemplate, setLoadingTemplate] = useState(false);
   const [templateFields, setTemplateFields] = useState([]);
+  const [templateError, setTemplateError] = useState(null); // Track template loading errors
   const [originalRecordType, setOriginalRecordType] = useState(null); // Track original record type
   const [originalFormData, setOriginalFormData] = useState({}); // Store original form data
+  const [originalComplexFields, setOriginalComplexFields] = useState({}); // Store original complex field values for merging (name, address, host, etc.)
   
   // New workflow states
   const [isAdmin, setIsAdmin] = useState(false); // Track if current user is admin
   const [storedRequestData, setStoredRequestData] = useState(null); // Store user's saved request
   const [hasStoredData, setHasStoredData] = useState(false); // Track if data has been stored
   const [isUpdating, setIsUpdating] = useState(false); // Track update operation
+  const [isRestrictedWebhookTicket, setIsRestrictedWebhookTicket] = useState(false); // Track if ticket is admin-only webhook ticket
   
   
-  const itemsPerPage = 5;
-  const recordsPerPage = 3;
-  const foldersPerPage = 3;
+  // Expiration warning modal for share-record action
+  const [showExpirationWarningModal, setShowExpirationWarningModal] = useState(false);
+  const [pendingExpirationValue, setPendingExpirationValue] = useState(null);
+  
+  // Email validation state
+  const [emailValidationError, setEmailValidationError] = useState(null);
+  
+  // Pagination settings - using imported constants
+  const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
+  const recordsPerPage = PAGINATION_SETTINGS.RECORDS_PER_PAGE;
+  const foldersPerPage = PAGINATION_SETTINGS.FOLDERS_PER_PAGE;
+
+  // Centralized error handler for API calls
+  const handleApiError = (error, defaultMessage = "An error occurred") => {
+    // Helper function to check if content contains HTML
+    const containsHtml = (text) => {
+      if (typeof text !== 'string') return false;
+      return /<\/?[a-z][\s\S]*>/i.test(text);
+    };
+    
+    // Try to extract error message from various possible locations
+    let errorMessage = '';
+    
+    // Check if error is a string - skip if it contains HTML
+    if (typeof error === 'string' && !containsHtml(error)) {
+      errorMessage = error;
+    } 
+    // Check error.error - skip if it contains HTML
+    else if (error.error && !containsHtml(error.error)) {
+      errorMessage = error.error;
+    }
+    // Check error.message - skip if it contains HTML
+    else if (error.message && !containsHtml(error.message)) {
+      errorMessage = error.message;
+    }
+    
+    // If no valid message found (or all contained HTML), use default
+    if (!errorMessage || errorMessage.trim().length === 0) {
+      errorMessage = defaultMessage;
+    }
+    
+    // If message is too long (likely an error dump), use default message
+    if (errorMessage.length > 500) {
+      errorMessage = defaultMessage;
+    }
+    
+    // If we have a valid error message, use it
+    if (errorMessage && errorMessage !== defaultMessage && errorMessage.trim().length > 0) {
+      return errorMessage;
+    }
+    
+    // Otherwise, check for HTTP error codes and provide ngrok-related guidance
+    let errorStatus = error.status || error.statusCode;
+    
+    if (!errorStatus && error.message) {
+      // Try to extract status code from error message
+      const statusMatch = error.message.match(/\b(401|403|400|500|502|503|504)\b/);
+      if (statusMatch) {
+        errorStatus = parseInt(statusMatch[1], 10);
+      }
+    }
+    
+    // Handle specific error codes with ngrok configuration messages
+    if (errorStatus === 401 || errorStatus === 403 || errorStatus === 400 || 
+        errorStatus === 500 || errorStatus === 502 || errorStatus === 503 || errorStatus === 504) {
+      const statusText = errorStatus === 401 ? 'Unauthorized (401)' :
+                        errorStatus === 403 ? 'Forbidden (403)' :
+                        errorStatus === 400 ? 'Bad Request (400)' :
+                        errorStatus === 500 ? 'Internal Server Error (500)' :
+                        errorStatus === 502 ? 'Bad Gateway (502)' :
+                        errorStatus === 503 ? 'Service Unavailable (503)' :
+                        errorStatus === 504 ? 'Gateway Timeout (504)' :
+                        `Error (${errorStatus})`;
+      
+      if (isAdmin) {
+        return `${statusText}: Please check your URL and ngrok configuration. Ensure the ngrok tunnel is active and the URL is correctly configured in the app settings.`;
+      } else {
+        return `${statusText}: Unable to connect to the server. Please ask your administrator to check the ngrok configuration and ensure the service is running properly.`;
+      }
+    }
+    
+    return errorMessage;
+  };
 
   // Get keeper action options with dynamic record types
   const getKeeperActionOptions = () => {
     const dynamicRecordTypeOptions = recordTypes;
 
-    return keeperActionOptions.map(action => {
-      if (action.value === 'record-update' || action.value === 'record-add') {
-        return {
-          ...action,
-          fields: action.fields.map(field => {
-            if (field.name === 'recordType') {
-              return {
-                ...field,
-                options: dynamicRecordTypeOptions
-              };
-            }
-            return field;
-          })
-        };
-      }
-      return action;
-    });
+    return keeperActionOptions
+      .map(action => {
+        if (action.value === 'record-update' || action.value === 'record-add') {
+          return {
+            ...action,
+            fields: action.fields.map(field => {
+              if (field.name === 'recordType') {
+                return {
+                  ...field,
+                  options: dynamicRecordTypeOptions
+                };
+              }
+              return field;
+            })
+          };
+        }
+        return action;
+      })
+      .filter(action => {
+        // Hide "Create New Secret" (record-add) and "Update Record" (record-update) from non-admin users
+        if ((action.value === 'record-add' || action.value === 'record-update') && !isAdmin) {
+          return false;
+        }
+        return true;
+      });
   };
 
   // Filter and paginate options
@@ -285,27 +221,13 @@ const IssuePanel = () => {
   const recordStartIndex = (recordCurrentPage - 1) * recordsPerPage;
   const paginatedRecords = filteredRecords.slice(recordStartIndex, recordStartIndex + recordsPerPage);
 
-  // Filter and paginate PAM resources
-  const filteredPamResources = pamResources.filter(resource =>
-    (resource.title || resource.record_uid)?.toLowerCase().includes(pamResourceSearchTerm.toLowerCase()) ||
-    (resource.record_type || resource.type || '')?.toLowerCase().includes(pamResourceSearchTerm.toLowerCase())
-  );
-  const totalPamResourcePages = Math.ceil(filteredPamResources.length / recordsPerPage);
-  const pamResourceStartIndex = (pamResourceCurrentPage - 1) * recordsPerPage;
-  const paginatedPamResources = filteredPamResources.slice(pamResourceStartIndex, pamResourceStartIndex + recordsPerPage);
-
   // Filter and paginate folders
   const getFilteredFolders = () => {
     let foldersToFilter = keeperFolders;
     
-    // For record-permission, only show shared folders (flags contains "S")
-    if (selectedAction?.value === 'record-permission') {
+    // For record-permission and share-folder, only show shared folders (flags contains "S")
+    if (selectedAction?.value === 'record-permission' || selectedAction?.value === 'share-folder') {
       foldersToFilter = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
-    }
-    
-    // For pam-action-rotate, show all folders (no filtering)
-    if (selectedAction?.value === 'pam-action-rotate') {
-      foldersToFilter = keeperFolders;
     }
     
     // Apply search filter
@@ -347,18 +269,21 @@ const IssuePanel = () => {
     setRecordForUpdateCurrentPage(1);
   }, [recordForUpdateSearchTerm]);
 
-  // Reset PAM resource pagination when PAM resource search changes
-  useEffect(() => {
-    setPamResourceCurrentPage(1);
-  }, [pamResourceSearchTerm]);
-
   // Fetch Keeper records when needed
   const fetchKeeperRecords = async () => {
     setLoadingRecords(true);
     try {
-      const result = await invoke("getKeeperRecords");
+      const result = await api.getKeeperRecords();
       setKeeperRecords(result.records || []);
     } catch (error) {
+      // Handle error
+      const errorMessage = handleApiError(error, "Failed to fetch Keeper records");
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setKeeperRecords([]);
     } finally {
       setLoadingRecords(false);
@@ -369,36 +294,22 @@ const IssuePanel = () => {
   const fetchKeeperFolders = async () => {
     setLoadingFolders(true);
     try {
-      const result = await invoke("getKeeperFolders");
+      const result = await api.getKeeperFolders();
       setKeeperFolders(result.folders || []);
     } catch (error) {
+      // Handle error
+      const errorMessage = handleApiError(error, "Failed to fetch Keeper folders");
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setKeeperFolders([]);
     } finally {
       setLoadingFolders(false);
     }
   };
-
-  // Fetch PAM resources by filtering Keeper records for PAM types
-  const fetchPamResources = async () => {
-    setLoadingPamResources(true);
-    try {
-      const result = await invoke("getKeeperRecords");
-      
-      // Filter for PAM-specific record types
-      const pamRecordTypes = ['pamMachine', 'pamUser', 'pamDatabase', 'pamDirectory', 'pamRemoteBrowser'];
-      const pamResources = (result.records || []).filter(record => {
-        const recordType = record.record_type || record.type || '';
-        return pamRecordTypes.includes(recordType);
-      });
-      
-      setPamResources(pamResources);
-    } catch (error) {
-      setPamResources([]);
-    } finally {
-      setLoadingPamResources(false);
-    }
-  };
-
   // Flag to track if we're preserving stored data
   const [isPreservingStoredData, setIsPreservingStoredData] = useState(false);
   const isPreservingStoredDataRef = useRef(false);
@@ -407,7 +318,7 @@ const IssuePanel = () => {
   const fetchKeeperRecordDetails = async (recordUid, preserveStoredData = null) => {
     setLoadingRecordDetails(true);
     try {
-      const result = await invoke("getKeeperRecordDetails", { recordUid });
+      const result = await api.getKeeperRecordDetails(recordUid);
       
       // The API returns { success: true, recordDetails: {...} }
       // The recordDetails contains the actual record data
@@ -462,17 +373,76 @@ const IssuePanel = () => {
                 }
               }
             }
-            // Handle other complex field types as custom fields
-            else if (field.type === 'bankAccount' && field.value && field.value.length > 0) {
-              const bankData = field.value[0];
-              if (bankData && typeof bankData === 'object') {
-                if (bankData.accountNumber) existingValues.custom_accountNumber = bankData.accountNumber;
-                if (bankData.routingNumber) existingValues.custom_routingNumber = bankData.routingNumber;
-                if (bankData.accountType) existingValues.custom_accountType = bankData.accountType;
+          });
+        }
+        
+        // Extract and store original complex field values for merging during updates
+        // This ensures we can merge partial updates with existing values
+        const complexFields = {};
+        
+        // Check TOP LEVEL properties first (Keeper stores name, address, etc. at top level for some record types)
+        if (details.name && typeof details.name === 'object') {
+          complexFields.name = { ...details.name };
+        }
+        if (details.address && typeof details.address === 'object') {
+          complexFields.address = { ...details.address };
+        }
+        if (details.host && typeof details.host === 'object') {
+          complexFields.host = { ...details.host };
+        }
+        if (details.pamHostname && typeof details.pamHostname === 'object') {
+          complexFields.pamHostname = { ...details.pamHostname };
+        }
+        if (details.keyPair && typeof details.keyPair === 'object') {
+          complexFields.keyPair = { ...details.keyPair };
+        }
+        
+        // Check CUSTOM array (pamUser and other record types store complex fields here)
+        if (details.custom && Array.isArray(details.custom)) {
+          details.custom.forEach(field => {
+            if (field.value && field.value.length > 0) {
+              const fieldValue = field.value[0];
+              if (typeof fieldValue === 'object' && fieldValue !== null) {
+                // Only set if not already found at top level
+                if (field.type === 'name' && !complexFields.name) {
+                  complexFields.name = { ...fieldValue };
+                } else if (field.type === 'address' && !complexFields.address) {
+                  complexFields.address = { ...fieldValue };
+                } else if (field.type === 'host' && !complexFields.host) {
+                  complexFields.host = { ...fieldValue };
+                } else if (field.type === 'pamHostname' && !complexFields.pamHostname) {
+                  complexFields.pamHostname = { ...fieldValue };
+                } else if (field.type === 'keyPair' && !complexFields.keyPair) {
+                  complexFields.keyPair = { ...fieldValue };
+                }
               }
             }
           });
         }
+        
+        // Also check fields array as fallback (some record types store data there)
+        if (details.fields && Array.isArray(details.fields)) {
+          details.fields.forEach(field => {
+            if (field.value && field.value.length > 0) {
+              const fieldValue = field.value[0];
+              if (typeof fieldValue === 'object' && fieldValue !== null) {
+                // Only set if not already found
+                if (field.type === 'name' && !complexFields.name) {
+                  complexFields.name = { ...fieldValue };
+                } else if (field.type === 'address' && !complexFields.address) {
+                  complexFields.address = { ...fieldValue };
+                } else if (field.type === 'host' && !complexFields.host) {
+                  complexFields.host = { ...fieldValue };
+                } else if (field.type === 'pamHostname' && !complexFields.pamHostname) {
+                  complexFields.pamHostname = { ...fieldValue };
+                } else if (field.type === 'keyPair' && !complexFields.keyPair) {
+                  complexFields.keyPair = { ...fieldValue };
+                }
+              }
+            }
+          });
+        }
+        setOriginalComplexFields(complexFields);
         
         // Ensure all standard fields have at least empty string values
         if (!existingValues.login) existingValues.login = '';
@@ -483,52 +453,14 @@ const IssuePanel = () => {
         
         // Create dynamic custom fields based on actual record data from fields array
         const customFields = [];
-        const standardFieldTypes = ['title', 'login', 'password', 'url', 'email', 'notes', 'name', 'cardRef', 'fileRef', 'oneTimeCode'];
+        const standardFieldTypes = ['title', 'login', 'password', 'url', 'email', 'notes', 'name', 'oneTimeCode'];
         
         if (details.fields && Array.isArray(details.fields)) {
           details.fields.forEach(field => {
             // Skip standard field types and empty fields
             if (!standardFieldTypes.includes(field.type) && field.value && field.value.length > 0) {
-              // Handle complex field types (like bankAccount) as custom fields
-              if (field.type === 'bankAccount' && field.value[0] && typeof field.value[0] === 'object') {
-                const bankData = field.value[0];
-                
-                // Create separate custom fields for each bank account property
-                if (bankData.accountNumber) {
-                  customFields.push({
-                    name: 'custom_accountNumber',
-                    displayName: 'Account Number',
-                    value: bankData.accountNumber,
-                    label: 'Account Number',
-                    type: 'text',
-                    placeholder: `Current: ${bankData.accountNumber}`
-                  });
-                }
-                
-                if (bankData.routingNumber) {
-                  customFields.push({
-                    name: 'custom_routingNumber',
-                    displayName: 'Routing Number',
-                    value: bankData.routingNumber,
-                    label: 'Routing Number',
-                    type: 'text',
-                    placeholder: `Current: ${bankData.routingNumber}`
-                  });
-                }
-                
-                if (bankData.accountType) {
-                  customFields.push({
-                    name: 'custom_accountType',
-                    displayName: 'Account Type',
-                    value: bankData.accountType,
-                    label: 'Account Type',
-                    type: 'text',
-                    placeholder: `Current: ${bankData.accountType}`
-                  });
-                }
-              }
-              // Handle other field types as simple custom fields
-              else if (typeof field.value[0] === 'string') {
+              // Handle field types as simple custom fields
+              if (typeof field.value[0] === 'string') {
                 customFields.push({
                   name: field.type,
                   displayName: field.type,
@@ -545,39 +477,15 @@ const IssuePanel = () => {
           });
         }
         
-        // Also check for any other custom fields in the response
-        if (details.custom && Array.isArray(details.custom)) {
-          details.custom.forEach(customField => {
-            if (customField.name && customField.value) {
-              customFields.push({
-                name: `custom_${customField.name}`,
-                displayName: customField.name,
-                value: customField.value,
-                label: `${customField.name.charAt(0).toUpperCase() + customField.name.slice(1)}`,
-                type: 'text',
-                placeholder: customField.name
-              });
-              
-              existingValues[`custom_${customField.name}`] = customField.value || '';
-            }
-          });
-        }
-        
         // For record-update, don't populate custom fields with existing values
         // User should see empty fields and fill only what they want to change
         // Store custom field definitions for reference but don't set their values
         const blankCustomFields = customFields.map(field => ({
           ...field,
           value: '', // Keep field definition but clear the value
+          required: false, // For update, no fields are required - only fill what you want to change
           placeholder: `Enter new ${field.displayName.toLowerCase()} (leave blank to keep current)`
         }));
-        
-        // Only set initial custom fields if template processing isn't happening yet
-        if (!loadingTemplate && !loadingRecordTypes) {
-          setDynamicCustomFields(blankCustomFields);
-        } else {
-          setDynamicCustomFields([]);
-        }
         
         // For record-update action, keep fields blank by default
         // If user has previously saved data for this record, restore their values
@@ -613,11 +521,14 @@ const IssuePanel = () => {
         } else {
           // Show blank fields for different/new record
           
-          // Set blank form data for new record
+          // Set blank form data for new record with the original record type
+          // Complex JSON fields (name, address, host, etc.) are merged at submission time
+          // to prevent data loss while keeping the form fields blank for partial updates
           const blankFormData = {
             record: recordUid,
-            recordType: recordDetails?.recordType || 'login'
+            recordType: details.type || details.record_type || existingValues.recordType || ''
           };
+          
           setFormData(blankFormData);
           
           // Reset flags after processing
@@ -636,6 +547,31 @@ const IssuePanel = () => {
           
           // Fetch template and map record details to form fields
           fetchRecordTypeTemplate(details.type, details);
+          
+          // Populate phone entries for contact records
+          if (details.type === 'contact' && details.fields && Array.isArray(details.fields)) {
+            const phoneFields = details.fields.filter(f => f.type === 'phone');
+            if (phoneFields.length > 0) {
+              const existingPhones = phoneFields.map((phone, idx) => {
+                const phoneValue = phone.value?.[0] || {};
+                const phoneNumber = phoneValue.number || '';
+                return {
+                  id: idx + 1,
+                  region: phoneValue.region || 'US',
+                  number: phoneNumber,
+                  originalNumber: phoneNumber, // Store original for masking
+                  ext: phoneValue.ext || '',
+                  type: phoneValue.type || 'Mobile',
+                  isNew: false,
+                  isEdited: false
+                };
+              }).filter(entry => entry.number);
+              
+              if (existingPhones.length > 0) {
+                setPhoneEntries(existingPhones);
+              }
+            }
+          }
         }
       }
       
@@ -644,34 +580,333 @@ const IssuePanel = () => {
       fetchRecordTypes();
       
     } catch (error) {
+      // Handle error
+      const errorMessage = handleApiError(error, "Failed to fetch record details");
+      
+      setLastResult({ 
+        success: false, 
+        message: errorMessage
+      });
+      
       setRecordDetails({});
-      setDynamicCustomFields([]);
     } finally {
       setLoadingRecordDetails(false);
     }
   };
 
-  // Fetch Keeper record types
-  const fetchRecordTypes = async () => {
+  // Fetch Keeper record types - using static list
+  const fetchRecordTypes = () => {
     setLoadingRecordTypes(true);
-    try {
-      const result = await invoke("getRecordTypes");
-      
-      // Transform the response to match the select options format
-      if (result && result.data && Array.isArray(result.data)) {
-        const transformedOptions = result.data.map(recordType => ({
-          label: recordType.content,
-          value: recordType.content
-        }));
-        setRecordTypes(transformedOptions);
-      } else {
-        setRecordTypes([]);
-      }
-    } catch (error) {
-      setRecordTypes([]);
-    } finally {
+    
+    // Static list of record types
+    const staticRecordTypes = [
+      { label: 'Contact', value: 'contact' },
+      { label: 'Database', value: 'databaseCredentials' },
+      { label: 'Secure Note', value: 'encryptedNotes' },
+      { label: 'Login', value: 'login' },
+      { label: 'Membership', value: 'membership' },
+      { label: 'Server', value: 'serverCredentials' },
+      { label: 'Software License', value: 'softwareLicense' },
+      { label: 'SSH Keys', value: 'sshKeys' }
+    ];
+    
+    setRecordTypes(staticRecordTypes);
       setLoadingRecordTypes(false);
-    }
+  };
+
+  // Static field templates for each record type
+  const getStaticRecordTypeTemplate = (recordType) => {
+    const templates = {
+      'login': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Enter record title' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username or email' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://example.com' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'contact': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Contact name (e.g., John Smith)' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: true, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: true, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'text.company', label: 'Company', type: 'text', required: false, placeholder: 'Company name (e.g., ABC Corporation)' },
+          { name: 'email', label: 'Email', type: 'email', required: false, placeholder: 'email@example.com' },
+          { name: 'phoneNumbers', label: 'Phone Number', type: 'phoneEntries', required: false },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'databaseCredentials': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Database name' },
+          { name: 'text.type', label: 'Database Type', type: 'text', required: false, placeholder: 'e.g., PostgreSQL, MySQL, MongoDB' },
+          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP (e.g., db.company.com)', parentType: 'host', subField: 'hostName' },
+          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 5432, 27017)', parentType: 'host', subField: 'port' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Database username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'encryptedNotes': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Note title (e.g., Important Information, Recovery Codes)' },
+          { name: 'note', label: 'Secured Note', type: 'secureTextarea', required: false, placeholder: 'Enter your secured/confidential note content...' },
+          { name: 'date', label: 'Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' }
+        ]
+      },
+      'membership': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Membership name (e.g., Gold\'s Gym, IEEE Membership)' },
+          { name: 'accountNumber', label: 'Account Number', type: 'text', required: false, placeholder: 'Membership ID (e.g., GYM123456)' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'serverCredentials': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Server name (e.g., Production Web Server)' },
+          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP (e.g., web.company.com)', parentType: 'host', subField: 'hostName' },
+          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 22)', parentType: 'host', subField: 'port' },
+          { name: 'login', label: 'Username', type: 'text', required: false, placeholder: 'Server username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password or $GEN' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'softwareLicense': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Software name' },
+          { name: 'licenseNumber', label: 'License Key', type: 'secureText', required: false, placeholder: 'License key or serial number' },
+          { name: 'expirationDate', label: 'Expiration Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'date.dateActive', label: 'Activation Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'sshKeys': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'SSH key name' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'SSH username' },
+          { name: 'keyPair_privateKey', label: 'Private Key', type: 'secureTextareaPrivateKey', required: false, placeholder: 'Paste private key here...', parentType: 'keyPair', subField: 'privateKey' },
+          { name: 'keyPair_publicKey', label: 'Public Key', type: 'secureTextareaPublicKey', required: false, placeholder: 'Paste public key here...', parentType: 'keyPair', subField: 'publicKey' },
+          { name: 'passphrase', label: 'Passphrase', type: 'password', required: false, placeholder: 'Key passphrase' },
+          { name: 'host_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'host', subField: 'hostName' },
+          { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port (default: 22)', parentType: 'host', subField: 'port' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'bankAccount': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Account name (e.g., Chase Checking)' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'Account holder first name', parentType: 'name', subField: 'first' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Account holder last name', parentType: 'name', subField: 'last' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Online banking username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Online banking password' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://bank.com' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'bankCard': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Card name (e.g., Chase Sapphire)' },
+          { name: 'text.cardholderName', label: 'Cardholder Name', type: 'text', required: false, placeholder: 'Name on card' },
+          { name: 'pinCode', label: 'PIN', type: 'password', required: false, placeholder: 'Card PIN' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Online account username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Online account password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'address': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Address name (e.g., Home Address)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'wifiCredentials': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Network name (e.g., Home WiFi)' },
+          { name: 'text.ssid', label: 'SSID', type: 'text', required: false, placeholder: 'Network SSID' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'WiFi password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'driverLicense': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'License description' },
+          { name: 'accountNumber', label: 'License Number', type: 'text', required: false, placeholder: 'Driver license number' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'birthDate', label: 'Birth Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'expirationDate', label: 'Expiration Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'passport': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Passport description (e.g., US Passport)' },
+          { name: 'accountNumber', label: 'Passport Number', type: 'text', required: false, placeholder: 'Passport number' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'birthDate', label: 'Birth Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'expirationDate', label: 'Expiration Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'date', label: 'Issue Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'healthInsurance': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Insurance name (e.g., Blue Cross)' },
+          { name: 'accountNumber', label: 'Member ID', type: 'text', required: false, placeholder: 'Member/Policy number' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Portal username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Portal password' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://insurance.com' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'birthCertificate': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Birth certificate description' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'birthDate', label: 'Birth Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'ssnCard': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'SSN Card description' },
+          { name: 'accountNumber', label: 'SSN', type: 'secureText', required: false, placeholder: 'Social Security Number' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'photo': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Photo description' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'file': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'File description' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamDatabase': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Database name (e.g., Production Oracle DB)' },
+          { name: 'pamHostname_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'pamHostname', subField: 'hostName' },
+          { name: 'pamHostname_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 1521)', parentType: 'pamHostname', subField: 'port' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Database username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Database password' },
+          { name: 'text.database', label: 'Database', type: 'text', required: false, placeholder: 'Database name/SID' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamDirectory': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Directory name (e.g., Corporate AD)' },
+          { name: 'pamHostname_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'pamHostname', subField: 'hostName' },
+          { name: 'pamHostname_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 389)', parentType: 'pamHostname', subField: 'port' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Admin username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Admin password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamMachine': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Machine name (e.g., Production Web Server)' },
+          { name: 'pamHostname_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'pamHostname', subField: 'hostName' },
+          { name: 'pamHostname_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 22)', parentType: 'pamHostname', subField: 'port' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamUser': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'User description (e.g., Database Admin User)' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamRemoteBrowser': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Session name (e.g., Salesforce Admin)' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://app.example.com' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'general': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Record title' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username or identifier' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://example.com' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamAwsConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'AWS Configuration name' },
+          { name: 'text.awsId', label: 'AWS ID', type: 'text', required: true, placeholder: 'AWS Account ID' },
+          { name: 'secret.accessKeyId', label: 'Access Key ID', type: 'secureText', required: false, placeholder: 'AWS Access Key ID' },
+          { name: 'multiline.regionNames', label: 'Region Names', type: 'textarea', required: false, placeholder: 'AWS Regions (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamAzureConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Azure Configuration name' },
+          { name: 'text.azureId', label: 'Azure ID', type: 'text', required: true, placeholder: 'Azure Account ID' },
+          { name: 'secret.clientId', label: 'Client ID', type: 'secureText', required: true, placeholder: 'Azure Client/Application ID' },
+          { name: 'multiline.resourceGroups', label: 'Resource Groups', type: 'textarea', required: false, placeholder: 'Resource groups (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamLocalConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Local Configuration name' },
+          { name: 'text.localId', label: 'Local ID', type: 'text', required: true, placeholder: 'Local identifier' },
+          { name: 'multiline.portMapping', label: 'Port Mapping', type: 'textarea', required: false, placeholder: 'Port mappings (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamNetworkConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Network Configuration name' },
+          { name: 'text.networkId', label: 'Network ID', type: 'text', required: false, placeholder: 'Network identifier' },
+          { name: 'multiline.portMapping', label: 'Port Mapping', type: 'textarea', required: false, placeholder: 'Port mappings (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamDomainConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Domain Configuration name' },
+          { name: 'pamHostname_hostName', label: 'Host', type: 'text', required: false, placeholder: 'Domain controller hostname', parentType: 'pamHostname', subField: 'hostName' },
+          { name: 'pamHostname_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 389)', parentType: 'pamHostname', subField: 'port' },
+          { name: 'text.pamDomainId', label: 'Domain ID', type: 'text', required: false, placeholder: 'Domain identifier' },
+          { name: 'multiline.portMapping', label: 'Port Mapping', type: 'textarea', required: false, placeholder: 'Port mappings (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      }
+    };
+    
+    return templates[recordType] || { fields: [] };
   };
 
   // Check user role and load stored data
@@ -687,12 +922,12 @@ const IssuePanel = () => {
       setIsLoadingStoredData(true);
       
       // Check if current user is admin by calling the backend
-      const userRole = await invoke("getUserRole", { issueKey: context.issueKey });
+      const userRole = await api.getUserRole(context.issueKey);
       setIsAdmin(userRole.isAdmin || false);
       
       // If admin, try to load any stored request data
       if (userRole.isAdmin) {
-        const storedData = await invoke("getStoredRequestData", { issueKey: context.issueKey });
+        const storedData = await api.getStoredRequestData(context.issueKey);
         if (storedData && storedData.data) {
           setStoredRequestData(storedData.data);
           setHasStoredData(true);
@@ -738,7 +973,7 @@ const IssuePanel = () => {
         }
       } else {
         // For regular users, check if they have previously stored data
-        const storedData = await invoke("getStoredRequestData", { issueKey: context.issueKey });
+        const storedData = await api.getStoredRequestData(context.issueKey);
         if (storedData && storedData.data) {
           setHasStoredData(true);
           // Pre-populate their own stored data
@@ -795,15 +1030,18 @@ const IssuePanel = () => {
   // Save/Update form data
   const updateFormData = async () => {
     if (!selectedAction) {
-      alert("Please select an action first");
+      setSaveRequestMessage({ type: 'error', message: 'Please select an action first' });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
       return;
     }
     
     if (!issueContext?.issueKey) {
-      alert("Issue context not loaded. Please refresh the page.");
+      setSaveRequestMessage({ type: 'error', message: 'Issue context not loaded. Please refresh the page.' });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
       return;
     }
     
+    // Save directly for all users - backend will auto-assign to random project admin only on first save (not on updates)
     setIsUpdating(true);
     try {
       // Include temporary address data if present
@@ -816,6 +1054,7 @@ const IssuePanel = () => {
         }
       }
       
+      const now = new Date();
       const requestData = {
         selectedAction,
         formData,
@@ -823,21 +1062,42 @@ const IssuePanel = () => {
         selectedRecordForUpdate,
         selectedFolder,
         tempAddressData, // Store temporary address data
-        timestamp: new Date().toISOString()
+        timestamp: now.toISOString()
       };
       
-      const result = await invoke("storeRequestData", { 
-        issueKey: issueContext.issueKey,
-        requestData 
+      // Format the same timestamp for the JIRA comment (same format used in UI)
+      const formattedTimestamp = now.toLocaleString('en-US', {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
       });
+      
+      const result = await api.storeRequestData(
+        issueContext.issueKey,
+        requestData,
+        formattedTimestamp
+      );
       
       if (result.success) {
         setStoredRequestData(requestData);
         setHasStoredData(true);
-        alert("Request data saved successfully! An admin can now review and approve your request.");
+        // Don't show success message - the "Request Saved" dialog box already shows this info
       }
     } catch (error) {
-      alert("Failed to save request data. Please try again.");
+      // Handle error
+      const errorMessage = handleApiError(error, "Failed to save request data. Please try again.");
+      
+      // Only show error messages - the "Request Saved" dialog handles success
+      setSaveRequestMessage({ 
+        type: 'error', 
+        message: errorMessage,
+        showTimestamp: false
+      });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
     } finally {
       setIsUpdating(false);
     }
@@ -958,13 +1218,14 @@ const IssuePanel = () => {
     } catch (error) {
       
       // Cache error state to prevent infinite retries
+      const errorMessage = handleApiError(error, 'Failed to load address');
       setResolvedAddresses(prev => ({
         ...prev,
         [addressUid]: {
           record_uid: addressUid,
           type: 'address',
           title: 'Address Error',
-          error: error.message || 'Failed to load address',
+          error: errorMessage,
           hasError: true
         }
       }));
@@ -978,108 +1239,21 @@ const IssuePanel = () => {
     }
   };
 
-  // Get display value for address reference
-  const getAddressDisplayValue = (addressUid) => {
-    if (!addressUid) {
-      return "No address selected";
-    }
-    
-    // First, check if we have temporary address data in form data (regardless of UID)
-    const hasTemporaryAddressData = formData.street1 || formData.street2 || formData.city || 
-                                   formData.state || formData.zip || formData.country;
-    
-    if (hasTemporaryAddressData) {
-      // Show the full address details from form data
-      const addressParts = [];
-      if (formData.street1) addressParts.push(formData.street1);
-      if (formData.street2) addressParts.push(formData.street2);
-      if (formData.city) addressParts.push(formData.city);
-      if (formData.state) addressParts.push(formData.state);
-      if (formData.zip) addressParts.push(formData.zip);
-      if (formData.country) addressParts.push(formData.country);
-      
-      if (addressParts.length > 0) {
-        const fullAddress = addressParts.join(', ');
-        return ` ${fullAddress} (Pending Creation)`;
-      }
-    }
-    
-    // Check if this is a temporary address first (before checking cache)
-    if (addressUid.startsWith('temp_addr_')) {
-      const addressDetails = resolvedAddresses[addressUid];
-      if (addressDetails && addressDetails.isTemporary) {
-        // Show the full address details for temporary addresses
-        const addressParts = [];
-        if (addressDetails.tempData) {
-          if (addressDetails.tempData.street1) addressParts.push(addressDetails.tempData.street1);
-          if (addressDetails.tempData.street2) addressParts.push(addressDetails.tempData.street2);
-          if (addressDetails.tempData.city) addressParts.push(addressDetails.tempData.city);
-          if (addressDetails.tempData.state) addressParts.push(addressDetails.tempData.state);
-          if (addressDetails.tempData.zip) addressParts.push(addressDetails.tempData.zip);
-          if (addressDetails.tempData.country) addressParts.push(addressDetails.tempData.country);
-        }
-        
-        const fullAddress = addressParts.length > 0 ? addressParts.join(', ') : addressDetails.title;
-        return ` ${fullAddress} (Pending Creation)`;
-      }
-      
-      // Fallback to generic message for temporary addresses
-      return " Address (Pending Creation)";
-    }
-    
-    // Handle old/invalid address UIDs that might cause errors
-    if (addressUid.startsWith('addr_') && !addressUid.startsWith('temp_addr_')) {
-      const addressDetails = resolvedAddresses[addressUid];
-      if (addressDetails) {
-        // Handle error states
-        if (addressDetails.hasError) {
-          return `Error: ${addressDetails.error}`;
-        }
-        if (addressDetails.notFound) {
-          return `Address not found: ${addressUid}`;
-        }
-        return formatAddressDisplay(addressDetails);
-      }
-      
-      // For old address UIDs, only show invalid message if no temporary data is available
-      if (!hasTemporaryAddressData) {
-        return ` Invalid Address Reference: ${addressUid}`;
-      }
-      // If we have temporary data, show that instead
-      return "No address selected";
-    }
-    
-    const addressDetails = resolvedAddresses[addressUid];
-    
-    // Prioritize cached result over loading state
-    if (addressDetails) {
-      // Handle error states
-      if (addressDetails.hasError) {
-        return `Error: ${addressDetails.error}`;
-      }
-      if (addressDetails.notFound) {
-        return `Address not found: ${addressUid}`;
-      }
-      return formatAddressDisplay(addressDetails);
-    }
-    
-    if (loadingAddresses.has(addressUid)) {
-      return "Loading address...";
-    }
-    
-    // Try to trigger resolution if not already loading (only for real addresses)
-    if (!loadingAddresses.has(addressUid)) {
-      resolveAndCacheAddress(addressUid);
-    }
-    
-    // Return UID as fallback while loading
-    return addressUid;
-  };
 
   // Clear stored data from backend
   const clearStoredData = async () => {
     try {
-      await invoke("clearStoredRequestData");
+      // Check if issueContext is available
+      if (!issueContext || !issueContext.issueKey) {
+        throw new Error('Issue context not available. Please refresh the page.');
+      }
+      
+      // Pass issueKey to the backend
+      const result = await api.clearStoredRequestData(issueContext.issueKey);
+      
+      if (!result || !result.success) {
+        throw new Error(result?.error || 'Failed to clear stored data');
+      }
       
       // Clear all form data and reset state
       setFormData({});
@@ -1089,181 +1263,43 @@ const IssuePanel = () => {
       setSelectedFolder(null);
       setResolvedAddresses({});
       setLoadingAddresses(new Set());
-      setShowNewAddressModal(false);
-      setNewAddressFormData({});
-      setAddressTemplate(null);
-      setLoadingAddressTemplate(false);
-      setDynamicCustomFields([]);
-      setTempAddressData({});
+      // Clear stored request data states
+      setStoredRequestData(null);
+      setHasStoredData(false);
+      setShowStoredRequestMessage(true); // Reset for next time data is saved
       
-    } catch (error) {
-    }
-  };
-
-
-  // Fetch address records for dropdown
-  const fetchAddressRecords = async () => {
-    setLoadingAddressRecords(true);
-    try {
-      const result = await invoke("getKeeperRecords");
+      // Reset record-update specific states
+      setRecordDetails({});
+      setRecordTypeTemplate({});
+      setTemplateFields([]);
       
-      // Filter for address type records
-      const addressRecords = (result.records || []).filter(record => {
-        const recordType = record.record_type || record.type || '';
-        return recordType === 'address';
+      // Show success message
+      setSaveRequestMessage({ 
+        type: 'success', 
+        message: 'All stored data has been cleared. You can now start fresh with a new request.',
+        showTimestamp: false
       });
+      setTimeout(() => setSaveRequestMessage(null), 5000);
       
-      setAddressRecords(addressRecords);
     } catch (error) {
-      setAddressRecords([]);
-    } finally {
-      setLoadingAddressRecords(false);
+      const errorMessage = handleApiError(error, 'Failed to clear stored data. Please try again.');
+      
+      setSaveRequestMessage({ 
+        type: 'error', 
+        message: errorMessage,
+        showTimestamp: false
+      });
+      setTimeout(() => setSaveRequestMessage(null), 8000);
     }
   };
 
-  // Fetch address template for new address creation
-  const fetchAddressTemplate = async () => {
-    setLoadingAddressTemplate(true);
-    try {
-      const result = await invoke("getRecordTypeTemplate", { recordType: "address" });
-      
-      if (result && result.data) {
-        setAddressTemplate(result.data);
-        
-        // Process template fields to initialize form data dynamically
-        const initialFormData = {
-          title: ''
-        };
-        
-        // Initialize address fields if they exist in the template
-        if (result.data.fields && Array.isArray(result.data.fields)) {
-          result.data.fields.forEach(field => {
-            if (field.type === 'address' && field.value && Array.isArray(field.value) && field.value.length > 0) {
-              const addressFields = field.value[0];
-              // Initialize all address sub-fields
-              if (addressFields.street1) initialFormData.street1 = '';
-              if (addressFields.street2) initialFormData.street2 = '';
-              if (addressFields.city) initialFormData.city = '';
-              if (addressFields.state) initialFormData.state = '';
-              if (addressFields.zip) initialFormData.zip = '';
-              if (addressFields.country) initialFormData.country = '';
-            }
-          });
-        }
-        
-        // Initialize notes field if available
-        if (result.data.notes) {
-          initialFormData.notes = '';
-        }
-        
-        setNewAddressFormData(initialFormData);
-      }
-    } catch (error) {
-    } finally {
-      setLoadingAddressTemplate(false);
-    }
-  };
-
-  // Handle new address creation
-  const handleNewAddress = async () => {
-    setShowAddressDropdown(false);
-    // Show modal immediately for instant response
-    setShowNewAddressModal(true);
-    // Fetch template in background - modal will show loading state
-    await fetchAddressTemplate();
-  };
-
-  // Handle address form field changes
-  const handleAddressFieldChange = (fieldName, value) => {
-    setNewAddressFormData(prev => ({
-      ...prev,
-      [fieldName]: value
-    }));
-  };
-
-  // Save new address record
-  const saveNewAddress = async () => {
-    try {
-      // Generate a temporary UID for the address (will be replaced with real UID during approval)
-      const tempAddressUid = `temp_addr_${Date.now()}`;
-      
-      // Create temporary address record for display purposes
-      const tempAddressRecord = {
-        record_uid: tempAddressUid,
-        type: 'address',
-        title: newAddressFormData.title,
-        fields: [
-          {
-            type: 'address',
-            value: [{
-              street1: newAddressFormData.street1 || '',
-              street2: newAddressFormData.street2 || '',
-              city: newAddressFormData.city || '',
-              state: newAddressFormData.state || '',
-              zip: newAddressFormData.zip || '',
-              country: newAddressFormData.country || ''
-            }]
-          }
-        ],
-        notes: newAddressFormData.notes || '',
-        isTemporary: true, // Mark as temporary
-        tempData: {
-          title: newAddressFormData.title,
-          street1: newAddressFormData.street1 || '',
-          street2: newAddressFormData.street2 || '',
-          city: newAddressFormData.city || '',
-          state: newAddressFormData.state || '',
-          zip: newAddressFormData.zip || '',
-          country: newAddressFormData.country || '',
-          notes: newAddressFormData.notes || ''
-        }
-      };
-      
-      // Cache the temporary address for immediate display
-      setResolvedAddresses(prev => ({
-        ...prev,
-        [tempAddressUid]: tempAddressRecord
-      }));
-      
-      // Update the addressRef field with temporary address UID
-      handleInputChange('addressRef', tempAddressUid);
-      
-      // Also store the individual address fields in form data for display purposes
-      // This ensures we can reconstruct the full address even if cache is not available
-      const addressFields = {
-        addressRef: tempAddressUid,
-        street1: newAddressFormData.street1 || '',
-        street2: newAddressFormData.street2 || '',
-        city: newAddressFormData.city || '',
-        state: newAddressFormData.state || '',
-        zip: newAddressFormData.zip || '',
-        country: newAddressFormData.country || '',
-        addressNotes: newAddressFormData.notes || ''
-      };
-      
-      // Update form data with all address fields
-      setFormData(prev => ({
-        ...prev,
-        ...addressFields
-      }));
-      
-      // Close modal
-      setShowNewAddressModal(false);
-      
-      // Clear the form data
-      setNewAddressFormData({});
-      
-      
-    } catch (error) {
-      alert("Error saving address. Please try again.");
-    }
-  };
 
   // Fetch record type template when record type is changed
-  const fetchRecordTypeTemplate = async (recordType, recordDetailsForMapping = null) => {
+  // Now using static templates instead of API call
+  const fetchRecordTypeTemplate = (recordType, recordDetailsForMapping = null) => {
     
-    // Clear custom fields immediately when template processing starts
-    setDynamicCustomFields([]);
+    // Clear custom fields and error immediately when template processing starts
+    setTemplateError(null);
     
     if (!recordType) {
       setRecordTypeTemplate({});
@@ -1273,506 +1309,40 @@ const IssuePanel = () => {
 
     setLoadingTemplate(true);
     
-    try {
-      const result = await invoke("getRecordTypeTemplate", { recordType });
-        
-        if (result && result.template) {
-          setRecordTypeTemplate(result.template);
-        
-        // Extract template fields for rendering
-        const fields = result.template.fields || [];
-        
-        
-        const processedFields = [];
-        
-        // First, add top-level fields from template (title, notes)
-        if (result.template.title !== undefined) {
-          processedFields.push({
-            name: 'title',
-            label: 'Title',
-            type: 'text',
-            required: true, // Title is typically required for new records
-            placeholder: 'Enter record title',
-            templateField: true,
-            isTopLevel: true
-          });
-        }
-        
-        if (result.template.notes !== undefined) {
-          processedFields.push({
-            name: 'notes',
-            label: 'Notes',
-            type: 'textarea',
-            required: false,
-            placeholder: 'Enter notes (optional)',
-            templateField: true,
-            isTopLevel: true
-          });
-        }
-        
-        // Process fields - handle both $ref and type properties
-        fields
-          .forEach((field, index) => {
-            // Try to determine field type from available properties
-            let fieldType = field.$ref || field.type || null;
-            
-            // If no clear field type, skip
-            if (!fieldType) {
-              return;
-            }
-            
-            // Handle reference fields with proper labels
-            
-            let fieldLabel = fieldType.charAt(0).toUpperCase() + fieldType.slice(1);
-            
-            // Use custom label if provided
-            if (field.label) {
-              fieldLabel = field.label.charAt(0).toUpperCase() + field.label.slice(1);
-            }
-            
-            // Enhance labels for complex field types
-            fieldLabel = enhanceFieldLabel(fieldType, fieldLabel);
-            
-            // Handle complex field types based on their schema or value structure
-            if (fieldType === 'name') {
-              // Create separate fields for name components
-              // If no value structure, create default name structure
-              const nameStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                ? field.value[0] 
-                : { first: "text", middle: "text", last: "text" };
-              if (nameStructure.first !== undefined) {
-                processedFields.push({
-                  name: 'name_first',
-                  label: 'First Name',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'First Name',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'name',
-                  subField: 'first'
-                });
-              }
-              if (nameStructure.middle !== undefined) {
-                processedFields.push({
-                  name: 'name_middle',
-                  label: 'Middle Name',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Middle Name',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'name',
-                  subField: 'middle'
-                });
-              }
-              if (nameStructure.last !== undefined) {
-                processedFields.push({
-                  name: 'name_last',
-                  label: 'Last Name',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'Last Name',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'name',
-                  subField: 'last'
-                });
-              }
-            } else if (fieldType === 'phone') {
-              // Create separate fields for phone components
-              // If no value structure, create default phone structure
-              const phoneStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object'
-                ? field.value[0]
-                : { number: "text", ext: "text", type: "", region: "US" };
-              if (phoneStructure.number !== undefined) {
-                processedFields.push({
-                  name: 'phone_number',
-                  label: 'Phone Number',
-                  type: 'tel',
-                  required: field.required || false,
-                  placeholder: '+1 (555) 123-4567',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'phone',
-                  subField: 'number'
-                });
-              }
-              if (phoneStructure.ext !== undefined) {
-                processedFields.push({
-                  name: 'phone_ext',
-                  label: 'Extension',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Ext',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'phone',
-                  subField: 'ext'
-                });
-              }
-              if (phoneStructure.type !== undefined) {
-                processedFields.push({
-                  name: 'phone_type',
-                  label: 'Phone Type',
-                  type: 'select',
-                  required: false,
-                  options: [
-                    { value: '', label: 'Select Type' },
-                    { value: 'Home', label: 'Home' },
-                    { value: 'Work', label: 'Work' },
-                    { value: 'Mobile', label: 'Mobile' },
-                    { value: 'Other', label: 'Other' }
-                  ],
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'phone',
-                  subField: 'type'
-                });
-              }
-            } else if (fieldType === 'address') {
-              // Create separate fields for address components based on API response
-              // API shows: city, country, state, street1, street2, zip
-              const addressStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                ? field.value[0] 
-                : { street1: "text", street2: "text", city: "text", state: "text", zip: "text", country: "text" };
-              
-              if (addressStructure.street1 !== undefined) {
-                processedFields.push({
-                  name: 'address_street1',
-                  label: 'Street Address 1',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'Enter street address',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'street1'
-                });
-              }
-              if (addressStructure.street2 !== undefined) {
-                processedFields.push({
-                  name: 'address_street2',
-                  label: 'Street Address 2',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Apartment, suite, etc. (optional)',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'street2'
-                });
-              }
-              if (addressStructure.city !== undefined) {
-                processedFields.push({
-                  name: 'address_city',
-                  label: 'City',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'Enter city',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'city'
-                });
-              }
-              if (addressStructure.state !== undefined) {
-                processedFields.push({
-                  name: 'address_state',
-                  label: 'State/Province',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Enter state or province',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'state'
-                });
-              }
-              if (addressStructure.zip !== undefined) {
-                processedFields.push({
-                  name: 'address_zip',
-                  label: 'ZIP/Postal Code',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Enter ZIP or postal code',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'zip'
-                });
-              }
-              if (addressStructure.country !== undefined) {
-                processedFields.push({
-                  name: 'address_country',
-                  label: 'Country',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Enter country',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'address',
-                  subField: 'country'
-                });
-              }
-            } else if (fieldType === 'paymentCard') {
-              // Create separate fields for payment card components based on API response
-              // API shows: cardNumber, cardExpirationDate, cardSecurityCode
-              const cardStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                ? field.value[0] 
-                : { cardNumber: "text", cardExpirationDate: "text", cardSecurityCode: "text" };
-              
-              if (cardStructure.cardNumber !== undefined) {
-                processedFields.push({
-                  name: 'paymentCard_cardNumber',
-                  label: 'Card Number',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: '•••• •••• •••• 1234',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'paymentCard',
-                  subField: 'cardNumber'
-                });
-              }
-              if (cardStructure.cardExpirationDate !== undefined) {
-                // Split expiration date into month and year fields (stored as MM/YYYY format)
-                processedFields.push({
-                  name: 'paymentCard_cardExpirationMonth',
-                  label: 'Expiration Month',
-                  type: 'select',
-                  required: field.required || false,
-                  options: [
-                    { value: '', label: 'Month' },
-                    { value: '01', label: '01 - January' },
-                    { value: '02', label: '02 - February' },
-                    { value: '03', label: '03 - March' },
-                    { value: '04', label: '04 - April' },
-                    { value: '05', label: '05 - May' },
-                    { value: '06', label: '06 - June' },
-                    { value: '07', label: '07 - July' },
-                    { value: '08', label: '08 - August' },
-                    { value: '09', label: '09 - September' },
-                    { value: '10', label: '10 - October' },
-                    { value: '11', label: '11 - November' },
-                    { value: '12', label: '12 - December' }
-                  ],
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'paymentCard',
-                  subField: 'cardExpirationMonth'
-                });
-                
-                processedFields.push({
-                  name: 'paymentCard_cardExpirationYear',
-                  label: 'Expiration Year',
-                  type: 'select',
-                  required: field.required || false,
-                  options: [
-                    { value: '', label: 'Year' },
-                    ...Array.from({ length: 20 }, (_, i) => {
-                      const year = new Date().getFullYear() + i;
-                      return { value: year.toString(), label: year.toString() };
-                    })
-                  ],
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'paymentCard',
-                  subField: 'cardExpirationYear'
-                });
-              }
-              if (cardStructure.cardSecurityCode !== undefined) {
-                processedFields.push({
-                  name: 'paymentCard_cardSecurityCode',
-                  label: 'Security Code (CVV)',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: '123',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'paymentCard',
-                  subField: 'cardSecurityCode'
-                });
-              }
-            } else if (fieldType === 'addressRef') {
-              // Handle address reference field
-              processedFields.push({
-                name: 'addressRef',
-                label: 'Address',
-                type: 'addressRef', // Special type for address reference
-                required: field.required || false,
-                placeholder: 'Select or add address...',
-                templateField: true,
-                originalField: field,
-                isComplexType: false,
-                parentType: 'addressRef'
-              });
-            } else if (fieldType === 'fileRef') {
-              // Handle file reference field
-              processedFields.push({
-                name: 'fileRef',
-                label: 'Files',
-                type: 'fileRef', // Special type for file reference
-                required: field.required || false,
-                placeholder: 'Select files...',
-                templateField: true,
-                originalField: field,
-                isComplexType: false,
-                parentType: 'fileRef'
-              });
-            } else if (fieldType === 'cardRef') {
-              // Handle payment card reference field
-              processedFields.push({
-                name: 'cardRef',
-                label: 'Payment Card',
-                type: 'cardRef', // Special type for card reference
-                required: field.required || false,
-                placeholder: 'Select payment card...',
-                templateField: true,
-                originalField: field,
-                isComplexType: false,
-                parentType: 'cardRef'
-              });
-            } else if (fieldType === 'bankAccount') {
-              // Create separate fields for bank account components
-              // If no value structure, create default bank account structure
-              const bankStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object'
-                ? field.value[0]
-                : { accountNumber: "text", accountType: "", otherType: "text", routingNumber: "text" };
-                
-              if (bankStructure.accountNumber !== undefined) {
-                processedFields.push({
-                  name: 'bankAccount_accountNumber',
-                  label: 'Account Number',
-                  type: 'text',
-                  required: field.required || false,
-                  placeholder: 'Enter account number',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'bankAccount',
-                  subField: 'accountNumber'
-                });
-              }
-              if (bankStructure.routingNumber !== undefined) {
-                processedFields.push({
-                  name: 'bankAccount_routingNumber',
-                  label: 'Routing Number',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Enter routing number',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'bankAccount',
-                  subField: 'routingNumber'
-                });
-              }
-              if (bankStructure.accountType !== undefined) {
-                processedFields.push({
-                  name: 'bankAccount_accountType',
-                  label: 'Account Type',
-                  type: 'select',
-                  required: false,
-                  options: [
-                    { value: '', label: 'Select Account Type' },
-                    { value: 'checking', label: 'Checking' },
-                    { value: 'savings', label: 'Savings' },
-                    { value: 'other', label: 'Other' }
-                  ],
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'bankAccount',
-                  subField: 'accountType'
-                });
-              }
-              if (bankStructure.otherType !== undefined) {
-                processedFields.push({
-                  name: 'bankAccount_otherType',
-                  label: 'Other Account Type',
-                  type: 'text',
-                  required: false,
-                  placeholder: 'Specify other account type',
-                  templateField: true,
-                  originalField: field,
-                  isComplexType: true,
-                  parentType: 'bankAccount',
-                  subField: 'otherType'
-                });
-              }
-            } else {
-              // Handle simple field types
-              processedFields.push({
-                name: fieldType,
-                label: fieldLabel,
-                type: getInputTypeForField(fieldType),
-                required: field.required || false,
-                placeholder: getPlaceholderForField(fieldType, fieldLabel),
-                templateField: true,
-                originalField: field, // Keep reference to original field for complex types
-                isComplexType: isComplexFieldType(fieldType)
-              });
-            }
-          });
+    // Use static template instead of API call
+    const staticTemplate = getStaticRecordTypeTemplate(recordType);
+    
+    if (staticTemplate && staticTemplate.fields && staticTemplate.fields.length > 0) {
+      setRecordTypeTemplate(staticTemplate);
+      
+      // Process static fields directly - they're already in the correct format
+      const processedFields = staticTemplate.fields.map(field => ({
+        ...field,
+        templateField: true
+      }));
         
         setTemplateFields(processedFields);
-        
-        // Map existing record values to template fields
-        const detailsToUse = recordDetailsForMapping || recordDetails;
-        if (detailsToUse && Object.keys(detailsToUse).length > 0) {
-        // Clear existing form data for template fields to start fresh, but preserve recordType
-        const clearedFormData = { ...formData };
-        processedFields.forEach(field => {
-          delete clearedFormData[field.name];
-        });
-        
-        // Ensure recordType is preserved in cleared data to avoid losing user selection
-        if (formData.recordType) {
-          clearedFormData.recordType = formData.recordType;
-        } else if (detailsToUse && detailsToUse.type) {
-          // If no user selection, use the original record type
-          clearedFormData.recordType = detailsToUse.type;
-        }
-        
-        // Call mapping function with cleared form data and provided record details
-        mapExistingValuesToTemplateWithClearedData(processedFields, clearedFormData, detailsToUse);
-        } else {
-        }
-        
+      setTemplateError(null);
+      
+      // Map existing record values to template fields if provided
+      if (recordDetailsForMapping && Object.keys(recordDetailsForMapping).length > 0) {
+        mapExistingValuesToTemplateWithClearedData(processedFields, { ...formData }, recordDetailsForMapping);
+      }
       } else {
         setRecordTypeTemplate({});
         setTemplateFields([]);
-      }
-    } catch (error) {
-      setRecordTypeTemplate({});
-      setTemplateFields([]);
+      setTemplateError(`No template found for record type: ${recordType}`);
     }
     
     setLoadingTemplate(false);
   };
 
   // Enhanced template fetching function that preserves and maps current form data
-  const fetchRecordTypeTemplateWithFormMapping = async (recordType, currentFormData) => {
+  // Now using static templates instead of API call
+  const fetchRecordTypeTemplateWithFormMapping = (recordType, currentFormData) => {
     
-    // Clear custom fields immediately when template processing starts
-    setDynamicCustomFields([]);
+    // Clear custom fields and error immediately when template processing starts
+    setTemplateError(null);
     
     if (!recordType) {
       setRecordTypeTemplate({});
@@ -1782,404 +1352,27 @@ const IssuePanel = () => {
 
     setLoadingTemplate(true);
     
-    try {
-      const result = await invoke("getRecordTypeTemplate", { recordType });
-        
-        if (result && result.template) {
-          const template = result.template;
-          setRecordTypeTemplate(template);
-          
-          // Process fields from template
-          const fields = template.fields || [];
-          
-          
-          const processedFields = [];
-          
-          // First, add top-level fields from template (title, notes)
-          if (template.title !== undefined) {
-            processedFields.push({
-              name: 'title',
-              label: 'Title',
-              type: 'text',
-              required: true, // Title is typically required for new records
-              placeholder: 'Enter record title',
-              templateField: true,
-              isTopLevel: true
-            });
-          }
-          
-          if (template.notes !== undefined) {
-            processedFields.push({
-              name: 'notes',
-              label: 'Notes',
-              type: 'textarea',
-              required: false,
-              placeholder: 'Enter notes (optional)',
-              templateField: true,
-              isTopLevel: true
-            });
-          }
-          
-          // Process fields - handle both $ref and type properties
-          fields
-            .forEach((field, index) => {
-              // Try to determine field type from available properties
-              let fieldType = null;
-              
-              // Check for $ref first
-              if (field['$ref']) {
-                fieldType = field['$ref'];
-              } else if (field.type) {
-                fieldType = field.type;
-              } else {
-                return; // Skip fields without identifiable types
-              }
-              
-              
-              // Handle complex field types that need to be broken down into sub-fields
-              if (fieldType === 'name') {
-                // If no value structure, create default name structure
-                const nameStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                  ? field.value[0] 
-                  : { first: "text", middle: "text", last: "text" };
-                if (nameStructure.first !== undefined) {
-                  processedFields.push({
-                    name: 'name_first',
-                    label: 'First Name',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'First Name',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'name',
-                    subField: 'first'
-                  });
-                }
-                if (nameStructure.middle !== undefined) {
-                  processedFields.push({
-                    name: 'name_middle',
-                    label: 'Middle Name',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Middle Name',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'name',
-                    subField: 'middle'
-                  });
-                }
-                if (nameStructure.last !== undefined) {
-                  processedFields.push({
-                    name: 'name_last',
-                    label: 'Last Name',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Last Name',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'name',
-                    subField: 'last'
-                  });
-                }
-              } else if (fieldType === 'phone') {
-                // If no value structure, create default phone structure
-                const phoneStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object'
-                  ? field.value[0]
-                  : { number: "text", ext: "text", type: "", region: "US" };
-                if (phoneStructure.number !== undefined) {
-                  processedFields.push({
-                    name: 'phone_number',
-                    label: 'Phone Number',
-                    type: 'tel',
-                    required: field.required || false,
-                    placeholder: '+1 (555) 123-4567',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'phone',
-                    subField: 'number'
-                  });
-                }
-                if (phoneStructure.ext !== undefined) {
-                  processedFields.push({
-                    name: 'phone_ext',
-                    label: 'Extension',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Ext',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'phone',
-                    subField: 'ext'
-                  });
-                }
-                if (phoneStructure.type !== undefined) {
-                  processedFields.push({
-                    name: 'phone_type',
-                    label: 'Phone Type',
-                    type: 'select',
-                    required: false,
-                    options: [
-                      { value: 'Home', label: 'Home' },
-                      { value: 'Work', label: 'Work' },
-                      { value: 'Mobile', label: 'Mobile' },
-                      { value: 'Main', label: 'Main' },
-                      { value: 'Other', label: 'Other' }
-                    ],
-                    placeholder: 'Phone Type',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'phone',
-                    subField: 'type'
-                  });
-                }
-              } else if (fieldType === 'address') {
-                // If no value structure, create default address structure
-                const addressStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                  ? field.value[0] 
-                  : { street1: "text", street2: "text", city: "text", state: "text", zip: "text", country: "text" };
-                
-                if (addressStructure.street1 !== undefined) {
-                  processedFields.push({
-                    name: 'address_street1',
-                    label: 'Street Address 1',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Enter street address',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'street1'
-                  });
-                }
-                if (addressStructure.street2 !== undefined) {
-                  processedFields.push({
-                    name: 'address_street2',
-                    label: 'Street Address 2',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Apartment, suite, etc. (optional)',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'street2'
-                  });
-                }
-                if (addressStructure.city !== undefined) {
-                  processedFields.push({
-                    name: 'address_city',
-                    label: 'City',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Enter city',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'city'
-                  });
-                }
-                if (addressStructure.state !== undefined) {
-                  processedFields.push({
-                    name: 'address_state',
-                    label: 'State/Province',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Enter state or province',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'state'
-                  });
-                }
-                if (addressStructure.zip !== undefined) {
-                  processedFields.push({
-                    name: 'address_zip',
-                    label: 'ZIP/Postal Code',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Enter ZIP or postal code',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'zip'
-                  });
-                }
-                if (addressStructure.country !== undefined) {
-                  processedFields.push({
-                    name: 'address_country',
-                    label: 'Country',
-                    type: 'text',
-                    required: false,
-                    placeholder: 'Enter country',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'address',
-                    subField: 'country'
-                  });
-                }
-              } else if (fieldType === 'paymentCard') {
-                // If no value structure, create default card structure
-                const cardStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                  ? field.value[0] 
-                  : { cardNumber: "text", cardExpirationDate: "text", cardSecurityCode: "text" };
-                
-                if (cardStructure.cardNumber !== undefined) {
-                  processedFields.push({
-                    name: 'paymentCard_cardNumber',
-                    label: 'Card Number',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: '•••• •••• •••• 1234',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'paymentCard',
-                    subField: 'cardNumber'
-                  });
-                }
-                if (cardStructure.cardExpirationDate !== undefined) {
-                  // Split expiration date into month and year fields (stored as MM/YYYY format)
-                  processedFields.push({
-                    name: 'paymentCard_cardExpirationMonth',
-                    label: 'Expiration Month',
-                    type: 'select',
-                    required: field.required || false,
-                    options: [
-                      { value: '01', label: '01 - January' },
-                      { value: '02', label: '02 - February' },
-                      { value: '03', label: '03 - March' },
-                      { value: '04', label: '04 - April' },
-                      { value: '05', label: '05 - May' },
-                      { value: '06', label: '06 - June' },
-                      { value: '07', label: '07 - July' },
-                      { value: '08', label: '08 - August' },
-                      { value: '09', label: '09 - September' },
-                      { value: '10', label: '10 - October' },
-                      { value: '11', label: '11 - November' },
-                      { value: '12', label: '12 - December' }
-                    ],
-                    placeholder: 'Month',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'paymentCard',
-                    subField: 'cardExpirationMonth'
-                  });
-                  
-                  processedFields.push({
-                    name: 'paymentCard_cardExpirationYear',
-                    label: 'Expiration Year',
-                    type: 'select',
-                    required: field.required || false,
-                    options: [
-                      { value: '2024', label: '2024' },
-                      { value: '2025', label: '2025' },
-                      { value: '2026', label: '2026' },
-                      { value: '2027', label: '2027' },
-                      { value: '2028', label: '2028' },
-                      { value: '2029', label: '2029' },
-                      { value: '2030', label: '2030' },
-                      { value: '2031', label: '2031' },
-                      { value: '2032', label: '2032' },
-                      { value: '2033', label: '2033' },
-                      { value: '2034', label: '2034' }
-                    ],
-                    placeholder: 'Year',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'paymentCard',
-                    subField: 'cardExpirationYear'
-                  });
-                }
-                if (cardStructure.cardSecurityCode !== undefined) {
-                  processedFields.push({
-                    name: 'paymentCard_cardSecurityCode',
-                    label: 'Security Code (CVV)',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: '123',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'paymentCard',
-                    subField: 'cardSecurityCode'
-                  });
-                }
-              } else if (fieldType === 'bankAccount') {
-                // If no value structure, create default bank account structure
-                const bankStructure = field.value && field.value.length > 0 && typeof field.value[0] === 'object' 
-                  ? field.value[0] 
-                  : { accountNumber: "text", routingNumber: "text", accountType: "text" };
-                
-                if (bankStructure.accountNumber !== undefined) {
-                  processedFields.push({
-                    name: 'bankAccount_accountNumber',
-                    label: 'Account Number',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Account number',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'bankAccount',
-                    subField: 'accountNumber'
-                  });
-                }
-                if (bankStructure.routingNumber !== undefined) {
-                  processedFields.push({
-                    name: 'bankAccount_routingNumber',
-                    label: 'Routing Number',
-                    type: 'text',
-                    required: field.required || false,
-                    placeholder: 'Routing number',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'bankAccount',
-                    subField: 'routingNumber'
-                  });
-                }
-                if (bankStructure.accountType !== undefined) {
-                  processedFields.push({
-                    name: 'bankAccount_accountType',
-                    label: 'Account Type',
-                    type: 'select',
-                    required: false,
-                    options: [
-                      { value: 'checking', label: 'Checking' },
-                      { value: 'savings', label: 'Savings' },
-                      { value: 'other', label: 'Other' }
-                    ],
-                    placeholder: 'Account type',
-                    originalType: fieldType,
-                    isComplexType: true,
-                    parentType: 'bankAccount',
-                    subField: 'accountType'
-                  });
-                }
-              } else {
-                // Handle simple field types directly
-                const inputType = getInputTypeForField(fieldType);
-                const enhancedLabel = enhanceFieldLabel(fieldType, field.label || fieldType);
-                const placeholder = getPlaceholderForField(fieldType, enhancedLabel);
-                
-                processedFields.push({
-                  name: fieldType,
-                  label: enhancedLabel,
-                  type: inputType,
-                  required: field.required || false,
-                  placeholder: placeholder,
-                  originalType: fieldType
-                });
-              }
-            });
+    // Use static template instead of API call
+    const staticTemplate = getStaticRecordTypeTemplate(recordType);
+    
+    if (staticTemplate && staticTemplate.fields && staticTemplate.fields.length > 0) {
+      setRecordTypeTemplate(staticTemplate);
+      
+      // Process static fields directly - they're already in the correct format
+      const processedFields = staticTemplate.fields.map(field => ({
+        ...field,
+        templateField: true
+      }));
           
           setTemplateFields(processedFields);
+      setTemplateError(null);
           
           // Map current form data to new template fields
           mapCurrentFormDataToTemplate(processedFields, currentFormData, recordType);
-          
         } else {
           setRecordTypeTemplate({});
           setTemplateFields([]);
-        }
-      } catch (error) {
-        setRecordTypeTemplate({});
-        setTemplateFields([]);
+      setTemplateError(`No template found for record type: ${recordType}`);
       }
     
     setLoadingTemplate(false);
@@ -2191,13 +1384,28 @@ const IssuePanel = () => {
     const selectedRecordType = currentFormData.recordType;
     const actualOriginalRecordType = originalRecordType; // Always use the true original record type
     const isReturningToOriginalType = selectedRecordType === actualOriginalRecordType;
+    const isRecordUpdateAction = selectedAction?.value === 'record-update';
     
     
     const templateFieldNames = templateFields.map(f => f.name);
     
     // SIMPLE LOGIC: Handle the three main scenarios
     if (isReturningToOriginalType) {
-      // Scenario 3: Returning to original record type - reset completely
+      // For record-update action: keep fields blank when returning to original type
+      // User should only fill in fields they want to update
+      if (isRecordUpdateAction) {
+        const blankFormData = {
+          record: currentFormData.record,
+          recordType: selectedRecordType
+        };
+        
+        if (!isPreservingStoredDataRef.current) {
+          setFormData(blankFormData);
+        }
+        return;
+      }
+      
+      // Scenario 3: Returning to original record type - reset completely (for non-update actions)
       const restoredFormData = { ...originalFormData, recordType: selectedRecordType };
       
       // Ensure address is resolved for UI consistency
@@ -2231,8 +1439,6 @@ const IssuePanel = () => {
           return cleanRestoredData;
         });
       }
-      setDynamicCustomFields([]);
-      
       // Verify form data update
       setTimeout(() => {
       }, 50);
@@ -2265,6 +1471,20 @@ const IssuePanel = () => {
       return;
     }
     
+    // For record-update action: keep fields blank when switching record types
+    // User should only fill in fields they want to update
+    if (isRecordUpdateAction) {
+      const blankFormData = {
+        record: currentFormData.record,
+        recordType: selectedRecordType
+      };
+      
+      if (!isPreservingStoredDataRef.current) {
+        setFormData(blankFormData);
+      }
+      return;
+    }
+    
     // Build new form data starting with core fields
     const newFormData = {
       record: currentFormData.record,
@@ -2277,18 +1497,9 @@ const IssuePanel = () => {
     // Get ALL fields with values (current form data + original form data)
     const allFieldsWithValues = { ...originalFormData, ...currentFormData };
     
-    // Filter out fields from current custom fields to prevent nesting
-    const currentCustomFieldNames = dynamicCustomFields.map(cf => cf.originalFieldName || cf.id);
-    const oldCustomFields = Object.keys(allFieldsWithValues).filter(key => 
-      currentCustomFieldNames.includes(key) && !templateFieldNames.includes(key)
-    );
-    if (oldCustomFields.length > 0) {
-    }
-    
     const fieldsWithValues = Object.keys(allFieldsWithValues).filter(key => 
       allFieldsWithValues[key] && allFieldsWithValues[key] !== '' && 
       !['record', 'recordType', 'title'].includes(key) &&
-      !(currentCustomFieldNames.includes(key) && !templateFieldNames.includes(key)) && // Exclude old custom fields from processing
       !key.startsWith('_lastAddressUpdate') && !key.startsWith('_addressRefresh') // Exclude artificial UI fields
     );
     
@@ -2296,17 +1507,12 @@ const IssuePanel = () => {
     Object.keys(allFieldsWithValues).forEach(fieldName => {
       const fieldValue = allFieldsWithValues[fieldName];
       
-        // Skip core fields, empty values, OLD CUSTOM FIELDS, and ARTIFICIAL UI FIELDS
-        const isOldCustomField = currentCustomFieldNames.includes(fieldName) && !templateFieldNames.includes(fieldName);
+        // Skip core fields, empty values, and ARTIFICIAL UI FIELDS
         const isArtificialField = fieldName.startsWith('_lastAddressUpdate') || fieldName.startsWith('_addressRefresh');
         
         if (['record', 'recordType', 'title'].includes(fieldName) || 
             !fieldValue || fieldValue === '' || 
-            isOldCustomField || isArtificialField) {
-          if (isOldCustomField) {
-          }
-          if (isArtificialField) {
-          }
+            isArtificialField) {
           return;
         }
       
@@ -2329,7 +1535,7 @@ const IssuePanel = () => {
         return;
       }
       
-      // Check for partial matches (e.g., accountNumber -> bankAccount_accountNumber)
+      // Check for partial matches (e.g., fieldName -> parentType_fieldName)
       const partialMatch = templateFields.find(tf => 
         tf.name.includes(fieldName) || 
         tf.name.endsWith('_' + fieldName) ||
@@ -2354,20 +1560,24 @@ const IssuePanel = () => {
       });
     });
     
-    // Handle unmatched fields as custom fields  
+    // Handle unmatched fields as custom fields
+    // NOTE: Only preserve unmatched fields for record-update action
+    // This prevents fields like name_first, name_last from being sent when switching from Contact to Server
+    // For record-add and any other action, unmatched fields should be discarded
+    const shouldPreserveUnmatchedFields = selectedAction?.value === 'record-update';
     
-    if (unmatchedFields.length > 0) {
-      
+    if (unmatchedFields.length > 0 && shouldPreserveUnmatchedFields) {
+      // Only preserve unmatched fields explicitly for record-update action
       const customFields = unmatchedFields.map((field, index) => {
-        // Clean the field name by removing prefixes (e.g., paymentCard_cardNumber -> cardNumber)
+        // Clean the field name by removing prefixes (e.g., parentType_fieldName -> fieldName)
         let cleanFieldName = field.originalFieldName;
         
         // Extract base field name from prefixed names
         if (cleanFieldName.includes('_')) {
           const parts = cleanFieldName.split('_');
           if (parts.length === 2) {
-            // For patterns like paymentCard_cardNumber, bankAccount_accountNumber
-            cleanFieldName = parts[1]; // Take the last part (cardNumber, accountNumber, etc.)
+            // For patterns like parentType_fieldName
+            cleanFieldName = parts[1]; // Take the last part
           } else {
             // For more complex patterns, take the last part
             cleanFieldName = parts[parts.length - 1];
@@ -2407,9 +1617,6 @@ const IssuePanel = () => {
         };
       });
       
-      setDynamicCustomFields(customFields);
-    } else {
-      setDynamicCustomFields([]);
     }
     
     // Update form data
@@ -2443,6 +1650,8 @@ const IssuePanel = () => {
       case 'expirationDate':
       case 'date':
         return 'date';
+      case 'datetime-local':
+        return 'datetime-local';
       case 'login':
       case 'username':
       case 'title':
@@ -2452,19 +1661,8 @@ const IssuePanel = () => {
       case 'passkey':
       case 'oneTimeCode':
       case 'otp':
-      case 'accountNumber':
-      case 'groupNumber':
       case 'host':
-      case 'paymentCard':
-      case 'bankAccount':
-      case 'securityQuestion':
         return 'text';
-      case 'addressRef':
-        return 'addressRef';
-      case 'fileRef':
-        return 'fileRef';
-      case 'cardRef':
-        return 'cardRef';
       default:
         return 'text';
     }
@@ -2485,8 +1683,6 @@ const IssuePanel = () => {
 
     
     // Clear existing custom fields first
-    setDynamicCustomFields([]);
-
     // Map top-level fields (title, etc.)
     if (detailsToUse.title && templateFieldTypes.includes('title')) {
       updatedFormData.title = detailsToUse.title;
@@ -2551,55 +1747,6 @@ const IssuePanel = () => {
           }
           if (fieldValue.country && templateFields.find(tf => tf.name === 'address_country')) {
             updatedFormData.address_country = fieldValue.country;
-          }
-        } else if (fieldType === 'paymentCard' && typeof fieldValue === 'object' && fieldValue !== null) {
-          // Map payment card components to separate template fields
-          if (fieldValue.cardNumber && templateFields.find(tf => tf.name === 'paymentCard_cardNumber')) {
-            updatedFormData.paymentCard_cardNumber = fieldValue.cardNumber;
-            mappedFieldTypes.add('paymentCard');
-          }
-          if (fieldValue.cardExpirationDate) {
-            // Parse MM/YYYY format into separate month and year fields
-            const expirationParts = fieldValue.cardExpirationDate.split('/');
-            if (expirationParts.length === 2) {
-              const [month, year] = expirationParts;
-              if (templateFields.find(tf => tf.name === 'paymentCard_cardExpirationMonth')) {
-                updatedFormData.paymentCard_cardExpirationMonth = month;
-              }
-              if (templateFields.find(tf => tf.name === 'paymentCard_cardExpirationYear')) {
-                updatedFormData.paymentCard_cardExpirationYear = year;
-              }
-            } else {
-            }
-          }
-          if (fieldValue.cardSecurityCode && templateFields.find(tf => tf.name === 'paymentCard_cardSecurityCode')) {
-            updatedFormData.paymentCard_cardSecurityCode = fieldValue.cardSecurityCode;
-          }
-        } else if (fieldType === 'addressRef') {
-          // Handle address reference field - value comes as array with UID
-          const addressUid = Array.isArray(fieldValue) ? fieldValue[0] : fieldValue;
-          
-          if (addressUid && typeof addressUid === 'string' && templateFields.find(tf => tf.name === 'addressRef')) {
-            updatedFormData.addressRef = addressUid; // Store the address UID
-            mappedFieldTypes.add('addressRef');
-            
-            // Resolve the address reference asynchronously
-            resolveAndCacheAddress(addressUid);
-          }
-        } else if (fieldType === 'bankAccount' && typeof fieldValue === 'object' && fieldValue !== null) {
-          // Map bank account components to separate template fields
-          if (fieldValue.accountNumber && templateFields.find(tf => tf.name === 'bankAccount_accountNumber')) {
-            updatedFormData.bankAccount_accountNumber = fieldValue.accountNumber;
-            mappedFieldTypes.add('bankAccount');
-          }
-          if (fieldValue.routingNumber && templateFields.find(tf => tf.name === 'bankAccount_routingNumber')) {
-            updatedFormData.bankAccount_routingNumber = fieldValue.routingNumber;
-          }
-          if (fieldValue.accountType && templateFields.find(tf => tf.name === 'bankAccount_accountType')) {
-            updatedFormData.bankAccount_accountType = fieldValue.accountType;
-          }
-          if (fieldValue.otherType && templateFields.find(tf => tf.name === 'bankAccount_otherType')) {
-            updatedFormData.bankAccount_otherType = fieldValue.otherType;
           }
         } else {
           // Handle simple field types
@@ -2695,6 +1842,31 @@ const IssuePanel = () => {
       setFormData(cleanedFormData);
     }
     
+    // Populate phone entries if template has phoneEntries field (for contact records)
+    const hasPhoneEntriesField = templateFields.find(tf => tf.type === 'phoneEntries');
+    if (hasPhoneEntriesField && detailsToUse?.fields && !isPreservingStoredDataRef.current) {
+      const phoneFields = detailsToUse.fields.filter(f => f.type === 'phone');
+      if (phoneFields.length > 0) {
+        const existingPhoneEntries = phoneFields.map((phone, idx) => {
+          const phoneValue = phone.value?.[0] || {};
+          return {
+            id: idx + 1,
+            region: phoneValue.region || 'US',
+            number: phoneValue.number || '',
+            ext: phoneValue.ext || '',
+            type: phoneValue.type || 'Mobile'
+          };
+        }).filter(entry => entry.number); // Only include entries with numbers
+        
+        if (existingPhoneEntries.length > 0) {
+          setPhoneEntries(existingPhoneEntries);
+        } else {
+          // No phones - keep empty (user can add via + button)
+          setPhoneEntries([]);
+        }
+      }
+    }
+    
     // If this is the initial load for the original record type, update originalFormData with all expanded fields
     if (cleanedFormData.recordType === originalRecordType && detailsToUse) {
       setOriginalFormData(cleanedFormData);
@@ -2710,8 +1882,8 @@ const IssuePanel = () => {
         if (cleanFieldName.includes('_')) {
           const parts = cleanFieldName.split('_');
           if (parts.length === 2) {
-            // For patterns like paymentCard_cardNumber, bankAccount_accountNumber
-            cleanFieldName = parts[1]; // Take the last part (cardNumber, accountNumber, etc.)
+            // For patterns like parentType_fieldName
+            cleanFieldName = parts[1]; // Take the last part
           } else {
             // For more complex patterns, take the last part
             cleanFieldName = parts[parts.length - 1];
@@ -2727,9 +1899,6 @@ const IssuePanel = () => {
         };
       });
       
-      setDynamicCustomFields(cleanedCustomFields);
-    } else {
-      setDynamicCustomFields([]);
     }
 
   };
@@ -2748,8 +1917,6 @@ const IssuePanel = () => {
 
     
     // Clear existing custom fields first
-    setDynamicCustomFields([]);
-
     // Map top-level fields (title, etc.)
     if (recordDetails.title && templateFieldTypes.includes('title')) {
       updatedFormData.title = recordDetails.title;
@@ -2814,55 +1981,6 @@ const IssuePanel = () => {
           }
           if (fieldValue.country && templateFields.find(tf => tf.name === 'address_country')) {
             updatedFormData.address_country = fieldValue.country;
-          }
-        } else if (fieldType === 'paymentCard' && typeof fieldValue === 'object' && fieldValue !== null) {
-          // Map payment card components to separate template fields
-          if (fieldValue.cardNumber && templateFields.find(tf => tf.name === 'paymentCard_cardNumber')) {
-            updatedFormData.paymentCard_cardNumber = fieldValue.cardNumber;
-            mappedFieldTypes.add('paymentCard');
-          }
-          if (fieldValue.cardExpirationDate) {
-            // Parse MM/YYYY format into separate month and year fields
-            const expirationParts = fieldValue.cardExpirationDate.split('/');
-            if (expirationParts.length === 2) {
-              const [month, year] = expirationParts;
-              if (templateFields.find(tf => tf.name === 'paymentCard_cardExpirationMonth')) {
-                updatedFormData.paymentCard_cardExpirationMonth = month;
-              }
-              if (templateFields.find(tf => tf.name === 'paymentCard_cardExpirationYear')) {
-                updatedFormData.paymentCard_cardExpirationYear = year;
-              }
-            } else {
-            }
-          }
-          if (fieldValue.cardSecurityCode && templateFields.find(tf => tf.name === 'paymentCard_cardSecurityCode')) {
-            updatedFormData.paymentCard_cardSecurityCode = fieldValue.cardSecurityCode;
-          }
-        } else if (fieldType === 'addressRef') {
-          // Handle address reference field - value comes as array with UID
-          const addressUid = Array.isArray(fieldValue) ? fieldValue[0] : fieldValue;
-          
-          if (addressUid && typeof addressUid === 'string' && templateFields.find(tf => tf.name === 'addressRef')) {
-            updatedFormData.addressRef = addressUid; // Store the address UID
-            mappedFieldTypes.add('addressRef');
-            
-            // Resolve the address reference asynchronously
-            resolveAndCacheAddress(addressUid);
-          }
-        } else if (fieldType === 'bankAccount' && typeof fieldValue === 'object' && fieldValue !== null) {
-          // Map bank account components to separate template fields
-          if (fieldValue.accountNumber && templateFields.find(tf => tf.name === 'bankAccount_accountNumber')) {
-            updatedFormData.bankAccount_accountNumber = fieldValue.accountNumber;
-            mappedFieldTypes.add('bankAccount');
-          }
-          if (fieldValue.routingNumber && templateFields.find(tf => tf.name === 'bankAccount_routingNumber')) {
-            updatedFormData.bankAccount_routingNumber = fieldValue.routingNumber;
-          }
-          if (fieldValue.accountType && templateFields.find(tf => tf.name === 'bankAccount_accountType')) {
-            updatedFormData.bankAccount_accountType = fieldValue.accountType;
-          }
-          if (fieldValue.otherType && templateFields.find(tf => tf.name === 'bankAccount_otherType')) {
-            updatedFormData.bankAccount_otherType = fieldValue.otherType;
           }
         } else {
           // Handle simple field types
@@ -2944,6 +2062,31 @@ const IssuePanel = () => {
       setFormData(cleanedFormData);
     }
     
+    // Populate phone entries if template has phoneEntries field (for contact records)
+    const hasPhoneEntriesFieldLegacy = templateFields.find(tf => tf.type === 'phoneEntries');
+    if (hasPhoneEntriesFieldLegacy && recordDetails?.fields && !isPreservingStoredDataRef.current) {
+      const phoneFieldsLegacy = recordDetails.fields.filter(f => f.type === 'phone');
+      if (phoneFieldsLegacy.length > 0) {
+        const existingPhoneEntriesLegacy = phoneFieldsLegacy.map((phone, idx) => {
+          const phoneValue = phone.value?.[0] || {};
+          return {
+            id: idx + 1,
+            region: phoneValue.region || 'US',
+            number: phoneValue.number || '',
+            ext: phoneValue.ext || '',
+            type: phoneValue.type || 'Mobile'
+          };
+        }).filter(entry => entry.number);
+        
+        if (existingPhoneEntriesLegacy.length > 0) {
+          setPhoneEntries(existingPhoneEntriesLegacy);
+        } else {
+          // No phones - keep empty (user can add via + button)
+          setPhoneEntries([]);
+        }
+      }
+    }
+    
     // If this is the initial load for the original record type, update originalFormData with all expanded fields
     if (cleanedFormData.recordType === originalRecordType && recordDetailsToUse) {
       setOriginalFormData(cleanedFormData);
@@ -2959,8 +2102,8 @@ const IssuePanel = () => {
         if (cleanFieldName.includes('_')) {
           const parts = cleanFieldName.split('_');
           if (parts.length === 2) {
-            // For patterns like paymentCard_cardNumber, bankAccount_accountNumber
-            cleanFieldName = parts[1]; // Take the last part (cardNumber, accountNumber, etc.)
+            // For patterns like parentType_fieldName
+            cleanFieldName = parts[1]; // Take the last part
           } else {
             // For more complex patterns, take the last part
             cleanFieldName = parts[parts.length - 1];
@@ -2976,9 +2119,6 @@ const IssuePanel = () => {
         };
       });
       
-      setDynamicCustomFields(cleanedCustomFields);
-    } else {
-      setDynamicCustomFields([]);
     }
 
   };
@@ -3010,23 +2150,6 @@ const IssuePanel = () => {
           if (value.hostName) hostParts.push(value.hostName);
           if (value.port) hostParts.push(`:${value.port}`);
           return hostParts.join('');
-        }
-        return String(value);
-        
-      case 'paymentCard':
-        // Handle payment card object structure: {cardNumber, expirationDate, securityCode}
-        if (typeof value === 'object' && value !== null) {
-          return value.cardNumber ? `****-****-****-${String(value.cardNumber).slice(-4)}` : '';
-        }
-        return String(value);
-        
-      case 'bankAccount':
-        // Handle bank account object structure
-        if (typeof value === 'object' && value !== null) {
-          const parts = [];
-          if (value.accountNumber) parts.push(`Account: ${value.accountNumber}`);
-          if (value.accountType) parts.push(`Type: ${value.accountType}`);
-          return parts.length > 0 ? parts.join(' | ') : '';
         }
         return String(value);
         
@@ -3096,102 +2219,34 @@ const IssuePanel = () => {
     };
   };
 
-  // Helper function to enhance field labels for better UX
-  const enhanceFieldLabel = (fieldType, currentLabel) => {
-    const labelMap = {
-      'login': 'Username/Login',
-      'password': 'Password',
-      'url': 'Website URL',
-      'email': 'Email Address',
-      'phone': 'Phone Number',
-      'name': 'Full Name',
-      'company': 'Company Name',
-      'title': 'Title',
-      'notes': 'Notes',
-      'note': 'Notes',
-      'address': 'Address Information',
-      'birthDate': 'Birth Date',
-      'expirationDate': 'Expiration Date',
-      'paymentCard': 'Payment Card Information',
-      'bankAccount': 'Bank Account Information',
-      'host': 'Host/Server',
-      'securityQuestion': 'Security Question',
-      'pinCode': 'PIN Code',
-      'oneTimeCode': 'Two-Factor Code',
-      'otp': 'One-Time Password',
-      'passkey': 'Passkey',
-      'keyPair': 'Key Pair',
-      'licenseNumber': 'License Number',
-      'multiline': 'Text Area',
-      'accountNumber': 'Account Number',
-      'groupNumber': 'Group Number',
-      'addressRef': 'Address',
-      'fileRef': 'Files',
-      'cardRef': 'Payment Card'
-    };
-    
-    return labelMap[fieldType] || currentLabel;
-  };
+  // Validate email addresses (supports comma-separated multiple emails)
+  const validateEmails = (emailString) => {
+    if (!emailString || emailString.trim() === '') {
+      return { isValid: false, errors: ['Email is required'] };
+    }
 
-  // Helper function to get appropriate placeholders for field types
-  const getPlaceholderForField = (fieldType, fieldLabel) => {
-    const placeholderMap = {
-      'login': 'Enter username or email',
-      'password': 'Enter password',
-      'url': 'https://example.com',
-      'email': 'user@example.com',
-      'phone': '+1 (555) 123-4567',
-      'name': 'First Middle Last',
-      'company': 'Company name',
-      'title': 'Record title',
-      'notes': 'Enter additional notes...',
-      'note': 'Enter notes...',
-      'address': 'Street, City, State, ZIP',
-      'birthDate': 'MM/DD/YYYY',
-      'expirationDate': 'MM/DD/YYYY',
-      'paymentCard': '•••• •••• •••• 1234',
-      'bankAccount': 'Bank account details',
-      'host': 'hostname:port',
-      'securityQuestion': 'Question and answer',
-      'pinCode': 'Enter PIN',
-      'oneTimeCode': 'TOTP code',
-      'otp': 'One-time password',
-      'passkey': 'Passkey information',
-      'keyPair': 'Private key',
-      'licenseNumber': 'License number',
-      'multiline': 'Enter multiple lines of text...',
-      'accountNumber': 'Account number',
-      'groupNumber': 'Group number'
-    };
-    
-    return placeholderMap[fieldType] || `Enter ${fieldLabel.toLowerCase()}`;
-  };
+    // Split by comma and trim each email
+    const emails = emailString.split(',').map(email => email.trim());
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const invalidEmails = [];
 
-  // Helper function to identify complex field types
-  const isComplexFieldType = (fieldType) => {
-    const complexTypes = [
-      'name', 'paymentCard', 'bankAccount', 'host', 'address', 
-      'securityQuestion', 'keyPair', 'phone', 'email'
-    ];
-    return complexTypes.includes(fieldType);
-  };
-
-  // Remove a custom field
-  const removeCustomField = (fieldIdentifier) => {
-    
-    // Remove from dynamic custom fields array - handle both 'name' and 'id' properties
-    setDynamicCustomFields(prev => prev.filter(field => 
-      (field.name !== fieldIdentifier) && 
-      (field.id !== fieldIdentifier)
-    ));
-    
-    // Remove from form data
-    setFormData(prev => {
-      const newFormData = { ...prev };
-      delete newFormData[fieldIdentifier];
-      return newFormData;
+    emails.forEach(email => {
+      if (!emailRegex.test(email)) {
+        invalidEmails.push(email);
+      }
     });
-    
+
+    if (invalidEmails.length > 0) {
+      return {
+        isValid: false,
+        errors: [`Invalid email format: ${invalidEmails.join(', ')}`]
+      };
+    }
+
+    return {
+      isValid: true,
+      errors: []
+    };
   };
 
   // Render grouped template fields with sophisticated UI like Keeper vault
@@ -3200,36 +2255,26 @@ const IssuePanel = () => {
       return null;
     }
 
-    // Group fields by their parent type (name, phone) or treat as individual
-    const fieldGroups = {};
-    const individualFields = [];
-
-    
-    templateFields.forEach((field) => {
-      if (field.parentType) {
-        // This is a complex field component (name_first, phone_number, etc.)
-        if (!fieldGroups[field.parentType]) {
-          fieldGroups[field.parentType] = [];
-        }
-        fieldGroups[field.parentType].push(field);
-      } else {
-        // This is an individual field
-        if (field.name === 'addressRef') {
-        }
-        individualFields.push(field);
-      }
-    });
-
-
     const renderElements = [];
+    const renderedGroups = new Set(); // Track which groups have been rendered
 
-    // Render grouped complex fields
-    Object.keys(fieldGroups).forEach((groupType) => {
-      const groupFields = fieldGroups[groupType];
+    // Render fields in order, grouping related fields when encountered
+    templateFields.forEach((field, index) => {
+      if (field.parentType) {
+        // This is a complex field component - check if we've already rendered this group
+        if (renderedGroups.has(field.parentType)) {
+          return; // Skip - already rendered as part of group
+        }
+        
+        // Mark group as rendered
+        renderedGroups.add(field.parentType);
+        
+        // Get all fields for this group
+        const groupFields = templateFields.filter(f => f.parentType === field.parentType);
+        const groupType = field.parentType;
       const groupLabel = groupType === 'name' ? 'Name' : 
                         groupType === 'phone' ? 'Phone Number' : 
-                        groupType === 'bankAccount' ? 'Bank Account' : 
-                        groupType;
+                          null; // Don't show header for host and other groups
 
       if (groupType === 'name') {
         // Render Name group with First/Middle/Last layout
@@ -3238,45 +2283,22 @@ const IssuePanel = () => {
         const lastField = groupFields.find(f => f.subField === 'last');
 
         renderElements.push(
-          <div key={`group-${groupType}`} style={{ marginBottom: "20px" }}>
-            <div style={{ 
-              fontSize: "14px", 
-              fontWeight: "600", 
-              color: "#1A1A1A", 
-              marginBottom: "8px" 
-            }}>
-              {groupLabel}
-            </div>
+          <div key={`group-${groupType}`} className="field-group">
+              {groupLabel && <div className="field-group-header">{groupLabel}</div>}
             
             {/* First and Middle Name Row */}
-            <div style={{ 
-              display: "flex", 
-              gap: "12px", 
-              marginBottom: "12px" 
-            }}>
+            <div className="field-row">
               {firstField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
-                    {firstField.label} {firstField.required && <span style={{ color: '#FF5630' }}>*</span>}
+                <div className="field-col">
+                  <label className="form-label">
+                    {firstField.label} {firstField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                   </label>
                   {renderFormInput(firstField)}
                 </div>
               )}
               {middleField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
+                <div className="field-col">
+                  <label className="form-label">
                     {middleField.label}
                   </label>
                   {renderFormInput(middleField)}
@@ -3286,15 +2308,9 @@ const IssuePanel = () => {
             
             {/* Last Name Row */}
             {lastField && (
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: "4px", 
-                  fontSize: "13px", 
-                  fontWeight: "500", 
-                  color: "#1A1A1A" 
-                }}>
-                  {lastField.label} {lastField.required && <span style={{ color: '#FF5630' }}>*</span>}
+              <div className="mb-12">
+                <label className="form-label">
+                  {lastField.label} {lastField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                 </label>
                 {renderFormInput(lastField)}
               </div>
@@ -3308,61 +2324,32 @@ const IssuePanel = () => {
         const typeField = groupFields.find(f => f.subField === 'type');
 
         renderElements.push(
-          <div key={`group-${groupType}`} style={{ marginBottom: "20px" }}>
-            <div style={{ 
-              fontSize: "14px", 
-              fontWeight: "600", 
-              color: "#1A1A1A", 
-              marginBottom: "8px" 
-            }}>
-              {groupLabel}
-            </div>
+          <div key={`group-${groupType}`} className="field-group">
+              {groupLabel && <div className="field-group-header">{groupLabel}</div>}
             
             {/* Phone Number */}
             {numberField && (
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: "4px", 
-                  fontSize: "13px", 
-                  fontWeight: "500", 
-                  color: "#1A1A1A" 
-                }}>
-                  {numberField.label} {numberField.required && <span style={{ color: '#FF5630' }}>*</span>}
+              <div className="mb-12">
+                <label className="form-label">
+                  {numberField.label} {numberField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                 </label>
                 {renderFormInput(numberField)}
               </div>
             )}
             
             {/* Extension and Type Row */}
-            <div style={{ 
-              display: "flex", 
-              gap: "12px", 
-              marginBottom: "12px" 
-            }}>
+            <div className="field-row">
               {extField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
+                <div className="field-col">
+                  <label className="form-label">
                     {extField.label}
                   </label>
                   {renderFormInput(extField)}
                 </div>
               )}
               {typeField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
+                <div className="field-col">
+                  <label className="form-label">
                     {typeField.label}
                   </label>
                   {renderFormInput(typeField)}
@@ -3371,143 +2358,62 @@ const IssuePanel = () => {
             </div>
           </div>
         );
-      } else if (groupType === 'bankAccount') {
-        // Render Bank Account group with Account Number/Routing Number/Account Type layout
-        const accountNumberField = groupFields.find(f => f.subField === 'accountNumber');
-        const routingNumberField = groupFields.find(f => f.subField === 'routingNumber');
-        const accountTypeField = groupFields.find(f => f.subField === 'accountType');
-        const otherTypeField = groupFields.find(f => f.subField === 'otherType');
+        } else if (groupType === 'host') {
+          // Render Host group without header - just Host and Port fields inline
+          const hostNameField = groupFields.find(f => f.subField === 'hostName');
+          const portField = groupFields.find(f => f.subField === 'port');
 
         renderElements.push(
-          <div key={`group-${groupType}`} style={{ marginBottom: "20px" }}>
-            <div style={{ 
-              fontSize: "14px", 
-              fontWeight: "600", 
-              color: "#1A1A1A", 
-              marginBottom: "8px" 
-            }}>
-              {groupLabel}
-            </div>
-            
-            {/* Account Number */}
-            {accountNumberField && (
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: "4px", 
-                  fontSize: "13px", 
-                  fontWeight: "500", 
-                  color: "#1A1A1A" 
-                }}>
-                  {accountNumberField.label} {accountNumberField.required && <span style={{ color: '#FF5630' }}>*</span>}
-                </label>
-                {renderFormInput(accountNumberField)}
-              </div>
-            )}
-            
-            {/* Routing Number and Account Type Row */}
-            <div style={{ 
-              display: "flex", 
-              gap: "12px", 
-              marginBottom: "12px" 
-            }}>
-              {routingNumberField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
-                    {routingNumberField.label}
+          <div key={`group-${groupType}`} className="field-group">
+            <div className="field-row">
+                {hostNameField && (
+                  <div className="field-col field-col-flex-2">
+                  <label className="form-label">
+                      {hostNameField.label} {hostNameField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                   </label>
-                  {renderFormInput(routingNumberField)}
+                    {renderFormInput(hostNameField)}
                 </div>
               )}
-              {accountTypeField && (
-                <div style={{ flex: "1" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
-                    {accountTypeField.label}
+                {portField && (
+                  <div className="field-col field-col-flex-1">
+                  <label className="form-label">
+                      {portField.label}
                   </label>
-                  {renderFormInput(accountTypeField)}
+                    {renderFormInput(portField)}
                 </div>
               )}
             </div>
-            
-            {/* Other Account Type */}
-            {otherTypeField && (
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: "4px", 
-                  fontSize: "13px", 
-                  fontWeight: "500", 
-                  color: "#1A1A1A" 
-                }}>
-                  {otherTypeField.label}
-                </label>
-                {renderFormInput(otherTypeField)}
-              </div>
-            )}
           </div>
         );
       } else {
-        // Render other complex field groups
+          // Render other complex field groups without header
         renderElements.push(
-          <div key={`group-${groupType}`} style={{ marginBottom: "20px" }}>
-            <div style={{ 
-              fontSize: "14px", 
-              fontWeight: "600", 
-              color: "#1A1A1A", 
-              marginBottom: "8px" 
-            }}>
-              {groupLabel}
-            </div>
-            {groupFields.map((field) => {
-              
-              return (
-                <div key={field.name} style={{ marginBottom: "12px" }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: "4px", 
-                    fontSize: "13px", 
-                    fontWeight: "500", 
-                    color: "#1A1A1A" 
-                  }}>
-                    {field.label} {field.required && <span style={{ color: '#FF5630' }}>*</span>}
+          <div key={`group-${groupType}`} className="field-group">
+              {groupFields.map((gField) => (
+                <div key={gField.name} className="mb-12">
+                  <label className="form-label">
+                    {gField.label} {gField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
                   </label>
-                {renderFormInput(field)}
+                  {renderFormInput(gField)}
               </div>
-            )})}
+              ))}
           </div>
         );
       }
-    });
-
-    // Render individual fields
-    individualFields.forEach((field) => {
-      
+      } else {
+        // This is an individual field - render it directly
       renderElements.push(
-        <div key={field.name} style={{ marginBottom: "16px" }}>
-          <label style={{ 
-            display: "block", 
-            marginBottom: "4px", 
-            fontSize: "13px", 
-            fontWeight: "500", 
-            color: "#1A1A1A" 
-          }}>
-            {field.label} {field.required && <span style={{ color: '#FF5630' }}>*</span>} {field.templateField && <span style={{ color: '#666', fontSize: '11px' }}>(Template)</span>}
-          </label>
+        <div key={field.name} className="mb-16">
+          {/* Don't show label for phoneEntries type - it has its own header */}
+          {field.type !== 'phoneEntries' && (
+            <label className="form-label">
+                {field.label} {field.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
+            </label>
+          )}
           {renderFormInput(field)}
         </div>
       );
+      }
     });
 
     return renderElements;
@@ -3544,43 +2450,136 @@ const IssuePanel = () => {
       setRecordForUpdateCurrentPage(1);
       setRecordDetails({});
       setLoadingRecordDetails(false);
-      setDynamicCustomFields([]);
-      setManualCustomFields([]);
       setRecordTypeTemplate({});
       setTemplateFields([]);
       setLoadingTemplate(false);
+      
+      // Clear email validation error
+      setEmailValidationError(null);
     }
     
     // Update previous action
     setPreviousAction(selectedAction);
     
+    // Auto-populate email field for non-admin users when share-record or share-folder is selected
+    // BUT don't overwrite if email already exists (from stored data or previous input)
+    if (selectedAction && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') && 
+        !isAdmin && issueContext?.currentUserEmail && actionActuallyChanged && !isLoadingStoredData && !hasStoredData) {
+      setFormData(prev => ({
+        ...prev,
+        user: prev.user || issueContext.currentUserEmail  // Only set if user field is empty
+      }));
+    }
+    
+    // Skip API calls for non-admin users when config is missing (they only submit requests)
+    const shouldFetchData = issueContext?.hasConfig || isAdmin;
+    
     // Fetch records when share-record or record-update is selected (but not when loading stored data)
-    if (selectedAction && (selectedAction.value === 'share-record' || selectedAction.value === 'record-update') && !isLoadingStoredData) {
+    // Only fetch if config exists or user is admin
+    if (selectedAction && (selectedAction.value === 'share-record' || selectedAction.value === 'record-update') && !isLoadingStoredData && shouldFetchData) {
       fetchKeeperRecords();
     }
     
-    // Fetch record types when record-add or record-update is selected (but not when loading stored data)
-    if (selectedAction && (selectedAction.value === 'record-add' || selectedAction.value === 'record-update') && !isLoadingStoredData) {
-      fetchRecordTypes();
-    }
-    
-    // Fetch folders when share-folder, record-permission, or pam-action-rotate is selected
-    if (selectedAction && (selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission' || selectedAction.value === 'pam-action-rotate')) {
+    // Fetch folders when share-record is selected (for the new folder dropdown)
+    // Only fetch if config exists or user is admin
+    if (selectedAction && selectedAction.value === 'share-record' && !isLoadingStoredData && shouldFetchData) {
       fetchKeeperFolders();
     }
     
-    // Fetch PAM resources when pam-action-rotate is selected
-    if (selectedAction && selectedAction.value === 'pam-action-rotate') {
-      fetchPamResources();
+    // Fetch record types when record-add or record-update is selected (but not when loading stored data)
+    // Only fetch if config exists or user is admin
+    if (selectedAction && (selectedAction.value === 'record-add' || selectedAction.value === 'record-update') && !isLoadingStoredData && shouldFetchData) {
+      fetchRecordTypes();
     }
-  }, [selectedAction, isLoadingStoredData]);
+    
+    // Fetch folders when share-folder or record-permission is selected
+    // Only fetch if config exists or user is admin
+    if (selectedAction && (selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission') && shouldFetchData) {
+      fetchKeeperFolders();
+    }
+  }, [selectedAction, isLoadingStoredData, isAdmin, issueContext]);
+
+  // Auto-dismiss workflow info dialog after 5 seconds
+  useEffect(() => {
+    if (showWorkflowInfo && (issueContext?.hasConfig || !isAdmin) && !isLoading && !isLoadingStoredData) {
+      const timer = setTimeout(() => {
+        setShowWorkflowInfo(false);
+      }, 5000); // 5 seconds
+      
+      return () => clearTimeout(timer);
+    }
+  }, [showWorkflowInfo, issueContext, isLoading, isLoadingStoredData]);
 
   // Handle form input changes
   const handleInputChange = (fieldName, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [fieldName]: value
-    }));
+    // Validate email field for admin users
+    if (fieldName === 'user' && isAdmin && (selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder')) {
+      const validation = validateEmails(value);
+      if (!validation.isValid) {
+        setEmailValidationError(validation.errors[0]);
+      } else {
+        setEmailValidationError(null);
+      }
+    }
+    
+    // Special handling for share-record action: mutual exclusivity between record and sharedFolder
+    if (selectedAction?.value === 'share-record') {
+      if (fieldName === 'record' && value) {
+        // When record is selected, clear sharedFolder and disable recursive
+        setFormData(prev => ({
+          ...prev,
+          [fieldName]: value,
+          sharedFolder: null,
+          recursive: false
+        }));
+        setSelectedFolder(null);
+        return;
+      }
+      
+      if (fieldName === 'sharedFolder' && value) {
+        // When sharedFolder is selected, clear record
+        setFormData(prev => ({
+          ...prev,
+          [fieldName]: value,
+          record: null
+        }));
+        setSelectedRecord(null);
+        return;
+      }
+    }
+    
+    // Special handling for share-record and share-folder actions: show modal when expiration changes to non-none
+    if ((selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder') && fieldName === 'expiration_type') {
+      if (value && value !== 'none') {
+        // Store the pending value and show the warning modal
+        setPendingExpirationValue(value);
+        setShowExpirationWarningModal(true);
+        return; // Don't update formData yet - wait for user confirmation
+      }
+    }
+    
+    setFormData(prev => {
+      const newData = {
+        ...prev,
+        [fieldName]: value
+      };
+      
+      // Clear can_share when expiration is set for share-record action
+      if (selectedAction?.value === 'share-record' && fieldName === 'expiration_type') {
+        if (value && value !== 'none') {
+          newData.can_share = false;
+        }
+      }
+      
+      // Clear manage_users when expiration is set for share-folder action
+      if (selectedAction?.value === 'share-folder' && fieldName === 'expiration_type') {
+        if (value && value !== 'none') {
+          newData.manage_users = false;
+        }
+      }
+      
+      return newData;
+    });
     
     // Special handling for addressRef fields - trigger address resolution
     if (fieldName === 'addressRef' && value) {
@@ -3588,60 +2587,85 @@ const IssuePanel = () => {
     }
   };
 
+  // Handle expiration warning modal confirmation
+  const handleExpirationWarningConfirm = () => {
+    if (pendingExpirationValue) {
+      setFormData(prev => {
+        const newData = {
+          ...prev,
+          expiration_type: pendingExpirationValue
+        };
+        
+        // Clear can_share for share-record action
+        if (selectedAction?.value === 'share-record') {
+          newData.can_share = false;
+        }
+        
+        // Clear manage_users for share-folder action
+        if (selectedAction?.value === 'share-folder') {
+          newData.manage_users = false;
+        }
+        
+        return newData;
+      });
+    }
+    setShowExpirationWarningModal(false);
+    setPendingExpirationValue(null);
+  };
+
+  // Handle expiration warning modal cancellation
+  const handleExpirationWarningCancel = () => {
+    setShowExpirationWarningModal(false);
+    setPendingExpirationValue(null);
+    // Keep the expiration_type at its current value (don't change it)
+  };
+
   // Add manual custom field
-  const addManualCustomField = () => {
-    const fieldId = `manual_custom_${Date.now()}`;
-    const newField = {
-      id: fieldId,
-      name: '',
-      value: '',
-      placeholder: 'Enter custom field name'
-    };
-    setManualCustomFields(prev => [...prev, newField]);
-  };
-
-  // Remove manual custom field
-  const removeManualCustomField = (fieldId) => {
-    setManualCustomFields(prev => prev.filter(field => field.id !== fieldId));
-    // Also remove from form data
-    setFormData(prev => {
-      const newData = { ...prev };
-      const fieldToRemove = manualCustomFields.find(field => field.id === fieldId);
-      if (fieldToRemove && fieldToRemove.name) {
-        delete newData[fieldToRemove.name];
-      }
-      return newData;
-    });
-  };
-
-  // Update manual custom field name
-  const updateManualCustomFieldName = (fieldId, newName) => {
-    setManualCustomFields(prev => 
-      prev.map(field => 
-        field.id === fieldId ? { ...field, name: newName, placeholder: `Enter value for ${newName || 'custom field'}` } : field
-      )
-    );
-  };
-
-
   // Validate required fields
   const validateForm = () => {
     if (!selectedAction?.fields) return true;
     
     // Special handling for share-record action
     if (selectedAction.value === 'share-record') {
-      // Check if record is selected
-      if (!selectedRecord) {
-        return false;
+      // For non-admin users, requirements and action fields are mandatory
+      if (!isAdmin) {
+        if (!formData['requirements'] || formData['requirements'].trim() === '') {
+          return false;
+        }
+        if (!formData['action'] || formData['action'].trim() === '') {
+          return false;
+        }
+        return true;
       }
       
+      // For admin users, check required fields
       // Check if action is selected
       if (!formData['action'] || formData['action'].trim() === '') {
         return false;
       }
       
-      // Check if user/email is entered
+      // Check if user/email is entered and valid
       if (!formData['user'] || formData['user'].trim() === '') {
+        return false;
+      }
+      
+      // Validate email format (single or comma-separated)
+      const emailValidation = validateEmails(formData['user']);
+      if (!emailValidation.isValid) {
+        return false;
+      }
+      
+      // For "cancel" action, email and action are required, plus either record OR folder
+      if (formData['action'] === 'cancel') {
+        // Must have either record or folder selected
+        if (!selectedRecord && !selectedFolder) {
+          return false;
+        }
+        return true;
+      }
+      
+      // For other actions (grant, revoke, owner), check if record or folder is selected
+      if (!selectedRecord && !selectedFolder) {
         return false;
       }
       
@@ -3655,13 +2679,42 @@ const IssuePanel = () => {
         return false;
       }
       
-      // For record-update, only record selection is required
-      // All other fields are optional for updates
+      // For record-update, at least one field must be provided to update
+      // Check standard fields (excluding 'record' which is just the identifier and 'force' which is a modifier)
+      const standardUpdateFields = ['title', 'login', 'password', 'url', 'email', 'notes', 'recordType'];
+      const hasStandardFieldValue = standardUpdateFields.some(fieldName => {
+        const value = formData[fieldName];
+        return value !== undefined && value !== null && value !== '' && String(value).trim() !== '';
+      });
+      
+      // Check template fields for any values
+      const hasTemplateFieldValue = templateFields.some(field => {
+        const value = formData[field.name];
+        return value !== undefined && value !== null && value !== '' && String(value).trim() !== '';
+      });
+      
+      // At least one update field must have a value
+      if (!hasStandardFieldValue && !hasTemplateFieldValue) {
+        return false;
+      }
+      
       return true;
     }
     
     // Special handling for share-folder action
     if (selectedAction.value === 'share-folder') {
+      // For non-admin users, requirements and action fields are mandatory
+      if (!isAdmin) {
+        if (!formData['requirements'] || formData['requirements'].trim() === '') {
+          return false;
+        }
+        if (!formData['action'] || formData['action'].trim() === '') {
+          return false;
+        }
+        return true;
+      }
+      
+      // For admin users, check required fields
       // Check if folder is selected
       if (!selectedFolder) {
         return false;
@@ -3672,8 +2725,14 @@ const IssuePanel = () => {
         return false;
       }
       
-      // Check if user/email is entered
+      // Check if user/email is entered and valid
       if (!formData['user'] || formData['user'].trim() === '') {
+        return false;
+      }
+      
+      // Validate email format (single or comma-separated)
+      const emailValidation = validateEmails(formData['user']);
+      if (!emailValidation.isValid) {
         return false;
       }
       
@@ -3682,6 +2741,15 @@ const IssuePanel = () => {
     
     // Special handling for record-permission action
     if (selectedAction.value === 'record-permission') {
+      // For non-admin users, requirements field is mandatory
+      if (!isAdmin) {
+        if (!formData['requirements'] || formData['requirements'].trim() === '') {
+          return false;
+        }
+        return true;
+      }
+      
+      // For admin users, check required fields
       // Check if folder is selected
       if (!selectedFolder) {
         return false;
@@ -3692,29 +2760,10 @@ const IssuePanel = () => {
         return false;
       }
       
-      // At least one permission flag should be set
-      const hasPermissionFlags = formData.can_share || formData.can_edit;
-      if (!hasPermissionFlags) {
-        return false;
-      }
-      
-      return true;
-    }
-    
-    // Special handling for pam-action-rotate action
-    if (selectedAction.value === 'pam-action-rotate') {
-      // Target type is required
-      if (!formData.target_type || formData.target_type === '') {
-        return false;
-      }
-      
-      // Based on target type, either PAM resource or folder must be selected
-      if (formData.target_type === 'record') {
-        if (!selectedPamResource) {
-          return false;
-        }
-      } else if (formData.target_type === 'folder') {
-        if (!selectedFolder) {
+      // For revoke action, at least one permission flag (can_share or can_edit) must be selected
+      if (formData.action === 'revoke') {
+        const hasPermissionFlags = formData.can_share || formData.can_edit;
+        if (!hasPermissionFlags) {
           return false;
         }
       }
@@ -3756,26 +2805,13 @@ const IssuePanel = () => {
     return true;
   };
 
-  // Format card number for display (4-4-4-4 format)
-  const formatCardNumber = (cardNumber) => {
-    if (!cardNumber) return '';
-    // Remove all non-digits and format as groups of 4
-    const digits = cardNumber.replace(/\D/g, '');
-    return digits.replace(/(\d{4})/g, '$1 ').trim();
-  };
-
-  // Parse formatted card number back to digits only
-  const parseCardNumber = (formatted) => {
-    return formatted.replace(/\s/g, '');
-  };
-
   // Render form input based on field type
   const renderFormInput = (field) => {
     let value = formData[field.name] || '';
     
-    // Special formatting for card number display
-    if (field.name === 'paymentCard_cardNumber') {
-      value = formatCardNumber(value);
+    // Default expiration_type to 'none' if not set
+    if (field.name === 'expiration_type' && !value) {
+      value = 'none';
     }
     
     // For record-update, get the current value from record details to check if field has data
@@ -3793,33 +2829,253 @@ const IssuePanel = () => {
     
     // For record-update, show different border color when field has current value (either in form or in record)
     const hasCurrentValue = selectedAction?.value === 'record-update' && (value !== '' || currentRecordValue !== '');
-    const borderColor = isFormDisabled ? '#E0E0E0' : 
-                       hasCurrentValue ? '#006644' :
-                       (field.required && !value && selectedAction?.value !== 'record-update') ? '#FF5630' : '#DFE1E6';
-
-    const baseStyle = {
-      width: '100%',
-      padding: '8px 12px',
-      borderRadius: '4px',
-      border: `1px solid ${borderColor}`,
-      fontSize: '14px',
-      backgroundColor: isFormDisabled ? '#F5F5F5' : hasCurrentValue ? '#F8FFF8' : 'white',
-      color: isFormDisabled ? '#999' : '#000',
-      cursor: isFormDisabled ? 'not-allowed' : 'text',
-      outline: 'none',
-      boxSizing: 'border-box'
+    
+    // Don't show required error for non-admin users in share-record, share-folder, record-permission
+    // EXCEPT for the action field which is now required
+    const isNonAdminInSpecialActions = !isAdmin && 
+      (selectedAction?.value === 'share-record' || 
+       selectedAction?.value === 'share-folder' || 
+       selectedAction?.value === 'record-permission');
+    
+    const isActionFieldRequired = field.name === 'action' && 
+      !isAdmin && 
+      (selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder');
+    
+    const hasRequiredError = field.required && !value && 
+      selectedAction?.value !== 'record-update' && 
+      (!isNonAdminInSpecialActions || isActionFieldRequired);
+    
+    // Generate className for input fields based on state
+    const getInputClassName = (additionalClasses = '') => {
+      const classes = ['input-field'];
+      if (isFormDisabled) classes.push('disabled');
+      if (hasCurrentValue) classes.push('has-value');
+      if (hasRequiredError) classes.push('required-error');
+      if (additionalClasses) classes.push(additionalClasses);
+      return classes.join(' ');
     };
 
 
     switch (field.type) {
+      case 'record-select':
+        // Render record dropdown for share-record action
+        const isCancelSelected = selectedAction?.value === 'share-record' && formData.action === 'cancel';
+        const isRecordFieldDisabled = isFormDisabled || formData.sharedFolder || selectedFolder || isCancelSelected;
+        return (
+          <div className="relative">
+            <input
+              type="text"
+              value={selectedRecord ? selectedRecord.title : ''}
+              placeholder={isRecordFieldDisabled ? 'Disabled (folder selected)' : field.placeholder}
+              disabled={isRecordFieldDisabled}
+              readOnly
+              onClick={() => {
+                if (!isRecordFieldDisabled) {
+                  setShowRecordDropdown(!showRecordDropdown);
+                }
+              }}
+              className={`input-field pointer ${isRecordFieldDisabled ? 'disabled opacity-60' : 'opacity-100'} ${selectedRecord ? 'has-value' : ''}`}
+            />
+            {!isRecordFieldDisabled && (
+              <div className="dropdown-arrow">
+                ▼
+              </div>
+            )}
+            {showRecordDropdown && !isRecordFieldDisabled && keeperRecords.length > 0 && (
+              <>
+                <div
+                  className="dropdown-overlay"
+                  onClick={() => setShowRecordDropdown(false)}
+                />
+                <div className="dropdown-container">
+                  {keeperRecords.map((record, index) => (
+                    <div
+                      key={index}
+                      className="dropdown-item"
+                      onClick={() => {
+                        setSelectedRecord(record);
+                        handleInputChange(field.name, record.record_uid);
+                        setShowRecordDropdown(false);
+                      }}
+                    >
+                      <div className="font-medium text-md text-primary">{record.title}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      
+      case 'folder-select':
+        // Render folder dropdown for share-record action with search and pagination
+        const isCancelSelectedForFolder = selectedAction?.value === 'share-record' && formData.action === 'cancel';
+        // For cancel action, only enable folder dropdown for admin users
+        // For other actions, disable if record is selected
+        const isFolderFieldDisabled = isFormDisabled || 
+          (formData.record || selectedRecord) || 
+          (isCancelSelectedForFolder && !isAdmin);
+        return (
+          <div className="relative">
+            <input
+              type="text"
+              value={selectedFolder ? (selectedFolder.name || selectedFolder.folderPath) : ''}
+              placeholder={
+                isFolderFieldDisabled 
+                  ? (isCancelSelectedForFolder && !isAdmin 
+                      ? 'Folder selection available for admin users only' 
+                      : 'Disabled (record selected)') 
+                  : field.placeholder
+              }
+              disabled={isFolderFieldDisabled}
+              readOnly
+              onClick={() => {
+                if (!isFolderFieldDisabled) {
+                  setShowFolderDropdown(!showFolderDropdown);
+                  if (!showFolderDropdown) {
+                    setFolderSearchTerm('');
+                    setFolderCurrentPage(1);
+                  }
+                }
+              }}
+              className={`input-field pointer ${isFolderFieldDisabled ? 'disabled opacity-60' : 'opacity-100'} ${selectedFolder ? 'has-value' : ''}`}
+            />
+            {!isFolderFieldDisabled && (
+              <div className="dropdown-arrow">
+                ▼
+              </div>
+            )}
+            {showFolderDropdown && !isFolderFieldDisabled && keeperFolders.length > 0 && (() => {
+              // Filter to show only shared folders for share-record action (same logic as share-folder/record-permission)
+              const sharedFolders = selectedAction?.value === 'share-record' 
+                ? keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')))
+                : keeperFolders;
+              
+              // Apply search filter
+              const searchFiltered = sharedFolders.filter(folder =>
+                (folder.name || folder.folderPath || '').toLowerCase().includes(folderSearchTerm.toLowerCase())
+              );
+              
+              // Pagination
+              const totalPages = Math.ceil(searchFiltered.length / foldersPerPage);
+              const startIdx = (folderCurrentPage - 1) * foldersPerPage;
+              const paginatedItems = searchFiltered.slice(startIdx, startIdx + foldersPerPage);
+              
+              return (
+                <>
+                  <div
+                    className="dropdown-overlay"
+                    onClick={() => {
+                      setShowFolderDropdown(false);
+                      setFolderSearchTerm('');
+                      setFolderCurrentPage(1);
+                    }}
+                  />
+                  <div className="folder-dropdown-menu">
+                    {/* Search Input */}
+                    <input
+                      type="text"
+                      value={folderSearchTerm}
+                      onChange={(e) => {
+                        setFolderSearchTerm(e.target.value);
+                        setFolderCurrentPage(1);
+                      }}
+                      placeholder="Search folders..."
+                      autoFocus
+                      className="folder-search-input"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    
+                    {/* Folder List */}
+                    <div className="overflow-y-auto flex-1">
+                      {paginatedItems.length === 0 ? (
+                        <div className="dropdown-no-results">
+                          {sharedFolders.length === 0 ? 'No shared folders found' : 'No matching folders'}
+                        </div>
+                      ) : (
+                        paginatedItems.map((folder, index) => (
+                          <div
+                            key={index}
+                            className="dropdown-item"
+                            onClick={() => {
+                              setSelectedFolder(folder);
+                              handleInputChange(field.name, folder.folderUid || folder.folder_uid);
+                              setShowFolderDropdown(false);
+                              setFolderSearchTerm('');
+                              setFolderCurrentPage(1);
+                            }}
+                          >
+                            <div className="font-medium text-md text-primary">
+                              {folder.name || folder.folderPath}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    
+                    {/* Pagination */}
+                    {totalPages > 1 && (
+                      <div className="pagination-container">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (folderCurrentPage > 1) setFolderCurrentPage(folderCurrentPage - 1);
+                          }}
+                          disabled={folderCurrentPage === 1}
+                          className="pagination-button"
+                        >
+                          Previous
+                        </button>
+                        <span className="pagination-info">
+                          Page {folderCurrentPage} of {totalPages}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (folderCurrentPage < totalPages) setFolderCurrentPage(folderCurrentPage + 1);
+                          }}
+                          disabled={folderCurrentPage === totalPages}
+                          className="pagination-button"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        );
+      
       case 'select':
         if (field.name === 'recordType') {
         }
         
+        // Filter options for share-record action dropdown for non-admin users
+        let filteredOptions = field.options || [];
+        if (selectedAction?.value === 'share-record' && field.name === 'action' && !isAdmin) {
+          // Remove 'cancel' and 'revoke' options for non-admin users
+          filteredOptions = filteredOptions.filter(option => {
+            const optionValue = typeof option === 'string' ? option : option.value;
+            return optionValue !== 'cancel' && optionValue !== 'revoke';
+          });
+        }
+        
+        // Disable expiration_type dropdown when cancel, owner, or revoke action is selected for share-record
+        const isExpirationDisabledForCancel = selectedAction?.value === 'share-record' && 
+                                               field.name === 'expiration_type' && 
+                                               (formData.action === 'cancel' || formData.action === 'owner' || formData.action === 'revoke');
+        
+        // Disable expiration_type dropdown when remove action is selected for share-folder
+        const isExpirationDisabledForRemove = selectedAction?.value === 'share-folder' && 
+                                               field.name === 'expiration_type' && 
+                                               formData.action === 'remove';
+        
         return (
           <select
             value={value}
-            disabled={isFormDisabled}
+            disabled={isFormDisabled || isExpirationDisabledForCancel || isExpirationDisabledForRemove}
             onChange={(e) => {
               const newValue = e.target.value;
               handleInputChange(field.name, newValue);
@@ -3832,21 +3088,83 @@ const IssuePanel = () => {
                 
                 // Clear existing template fields first
                 setTemplateFields([]);
-                setDynamicCustomFields([]);
-                
                 if (newValue && newValue !== '') {
                   fetchRecordTypeTemplateWithFormMapping(newValue, currentFormData);
                 } else {
                   setRecordTypeTemplate({});
                   setTemplateFields([]);
-                  setDynamicCustomFields([]);
                 }
               }
+              
+              // Special handling for share-record action field when "cancel" is selected
+              if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'cancel') {
+                // Clear and disable all checkboxes when cancel is selected
+                // Keep both record and folder selections for admin users (they need to select one)
+                setFormData(prev => ({
+                  ...prev,
+                  action: newValue,
+                  can_share: false,
+                  can_write: false,
+                  recursive: false,
+                  expiration_type: 'none',
+                  expire_at: '',
+                  expire_in: ''
+                }));
+                // Don't clear record or folder - admin can select either one
+              }
+              
+              // Special handling for share-record action field when "owner" is selected
+              if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'owner') {
+                // Clear and disable all checkboxes and expiration when owner is selected
+                // Owner action doesn't support expiration or permission checkboxes
+                setFormData(prev => ({
+                  ...prev,
+                  action: newValue,
+                  can_share: false,
+                  can_write: false,
+                  recursive: false,
+                  expiration_type: 'none',
+                  expire_at: '',
+                  expire_in: ''
+                }));
+              }
+              
+              // Special handling for share-record action field when "revoke" is selected
+              // Per Keeper docs: revoke action NEEDS -s (share), -w (write), -R (recursive) flags
+              // to specify what permissions to revoke. Only expiration is not supported.
+              if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'revoke') {
+                // Only clear expiration when revoke is selected (checkboxes are needed for revoke)
+                setFormData(prev => ({
+                  ...prev,
+                  action: newValue,
+                  expiration_type: 'none',
+                  expire_at: '',
+                  expire_in: ''
+                }));
+              }
+              
+              // Special handling for share-folder action field when "remove" is selected
+              if (selectedAction?.value === 'share-folder' && field.name === 'action' && newValue === 'remove') {
+                // Clear and disable all checkboxes and expiration when remove is selected
+                // Remove action doesn't support expiration or permission checkboxes
+                setFormData(prev => ({
+                  ...prev,
+                  action: newValue,
+                  can_edit: false,
+                  can_share: false,
+                  manage_users: false,
+                  manage_records: false,
+                  expiration_type: 'none',
+                  expire_at: '',
+                  expire_in: ''
+                }));
+              }
             }}
-            style={baseStyle}
+            className={getInputClassName()}
           >
-            <option value="">{field.placeholder}</option>
-            {field.options?.map(option => {
+            {/* Don't show placeholder option for expiration_type field */}
+            {field.name !== 'expiration_type' && <option value="">{field.placeholder}</option>}
+            {filteredOptions.map(option => {
               // Handle both string options and object options {label, value}
               if (typeof option === 'string') {
                 return <option key={option} value={option}>{option}</option>;
@@ -3865,8 +3183,140 @@ const IssuePanel = () => {
             onChange={(e) => handleInputChange(field.name, e.target.value)}
             placeholder={field.placeholder}
             rows={3}
-            style={{...baseStyle, resize: 'vertical', fontFamily: 'inherit'}}
+            className={getInputClassName()}
           />
+        );
+      case 'secureTextarea':
+        // Secure textarea with mask/unmask toggle - JIRA UI style
+        return (
+          <div className="secure-field-container">
+            <textarea
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => handleInputChange(field.name, e.target.value)}
+              placeholder={field.placeholder}
+              rows={4}
+              className={`${getInputClassName()} ${showSecureNote ? 'secure-field-textarea' : 'secure-field-textarea-masked'}`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowSecureNote(!showSecureNote)}
+              disabled={isFormDisabled}
+              title={showSecureNote ? 'Hide note content' : 'Show note content'}
+              className="secure-toggle-btn"
+            >
+              {showSecureNote ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+          </div>
+        );
+      case 'secureTextareaPrivateKey':
+        // Secure textarea for SSH Private Key with mask/unmask toggle
+        return (
+          <div className="secure-field-container">
+            <textarea
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => handleInputChange(field.name, e.target.value)}
+              placeholder={field.placeholder}
+              rows={4}
+              className={`${getInputClassName()} ${showPrivateKey ? 'secure-field-textarea-monospace' : 'secure-field-textarea-monospace-masked'}`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPrivateKey(!showPrivateKey)}
+              disabled={isFormDisabled}
+              title={showPrivateKey ? 'Hide private key' : 'Show private key'}
+              className="secure-toggle-btn"
+            >
+              {showPrivateKey ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+          </div>
+        );
+      case 'secureTextareaPublicKey':
+        // Secure textarea for SSH Public Key with mask/unmask toggle
+        return (
+          <div className="secure-field-container">
+            <textarea
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => handleInputChange(field.name, e.target.value)}
+              placeholder={field.placeholder}
+              rows={3}
+              className={`${getInputClassName()} ${showPublicKey ? 'secure-field-textarea-monospace' : 'secure-field-textarea-monospace-masked'}`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPublicKey(!showPublicKey)}
+              disabled={isFormDisabled}
+              title={showPublicKey ? 'Hide public key' : 'Show public key'}
+              className="secure-toggle-btn"
+            >
+              {showPublicKey ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+          </div>
+        );
+      case 'secureText':
+        // Secure single-line text input with mask/unmask toggle - JIRA UI style
+        return (
+          <div className="secure-field-container">
+            <input
+              type={showLicenseKey ? 'text' : 'password'}
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => handleInputChange(field.name, e.target.value)}
+              placeholder={field.placeholder}
+              className={`${getInputClassName()} secure-field-input`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowLicenseKey(!showLicenseKey)}
+              disabled={isFormDisabled}
+              title={showLicenseKey ? 'Hide content' : 'Show content'}
+              className="secure-toggle-btn-center"
+            >
+              {showLicenseKey ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+              )}
+            </button>
+          </div>
         );
       case 'number':
         return (
@@ -3876,58 +3326,345 @@ const IssuePanel = () => {
             disabled={isFormDisabled}
             onChange={(e) => handleInputChange(field.name, e.target.value)}
             placeholder={field.placeholder}
-            style={baseStyle}
+            className={getInputClassName()}
           />
         );
-      case 'checkbox':
+      case 'dateMMDDYYYY':
+        // Date picker with MM/DD/YYYY format display - JIRA UI style
         return (
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'flex-start', 
-            gap: '10px',
-            padding: '8px 12px',
-            backgroundColor: isFormDisabled ? '#F9F9F9' : '#FAFBFC',
-            borderRadius: '4px',
-            border: '1px solid #DFE1E6',
-            marginBottom: '8px'
-          }}>
+          <div className="secure-field-container">
+            <input
+              type="date"
+              value={value}
+              disabled={isFormDisabled}
+              onChange={(e) => {
+                const dateValue = e.target.value;
+                handleInputChange(field.name, dateValue);
+              }}
+              placeholder={field.placeholder}
+              className={`${getInputClassName()} date-field-input`}
+            />
+            {value && (
+              <div className="date-field-hint">
+                {(() => {
+                  try {
+                    const [year, month, day] = value.split('-');
+                    return `Format: ${month}/${day}/${year}`;
+                  } catch {
+                    return '';
+                  }
+                })()}
+              </div>
+            )}
+          </div>
+        );
+      case 'checkbox':
+        // Special handling for recursive checkbox in share-record action
+        const isRecursiveDisabled = selectedAction?.value === 'share-record' && 
+                                     field.name === 'recursive' && 
+                                     (formData.record || !formData.sharedFolder);
+        
+        // Special handling for can_share checkbox in share-record action
+        const isCanShareDisabled = selectedAction?.value === 'share-record' && 
+                                     field.name === 'can_share' && 
+                                     formData.expiration_type && 
+                                     formData.expiration_type !== 'none';
+        
+        // Special handling for manage_users checkbox in share-folder action
+        const isManageUsersDisabled = selectedAction?.value === 'share-folder' && 
+                                       field.name === 'manage_users' && 
+                                       formData.expiration_type && 
+                                       formData.expiration_type !== 'none';
+        
+        // Disable all checkboxes when "cancel" action is selected for share-record
+        const isCancelActionDisabled = selectedAction?.value === 'share-record' && 
+                                        formData.action === 'cancel' &&
+                                        (field.name === 'can_share' || field.name === 'can_write' || field.name === 'recursive');
+        
+        // Disable all checkboxes when "owner" action is selected for share-record (owner doesn't support permissions)
+        const isOwnerActionDisabled = selectedAction?.value === 'share-record' && 
+                                        formData.action === 'owner' &&
+                                        (field.name === 'can_share' || field.name === 'can_write' || field.name === 'recursive');
+        
+        // Note: For share-record revoke action, checkboxes ARE needed to specify what permissions to revoke
+        // Per Keeper docs: -s (share), -w (write), -R (recursive) are valid flags for revoke action
+        
+        // Disable all checkboxes when "remove" action is selected for share-folder (remove doesn't support permissions or expiration)
+        const isRemoveActionDisabled = selectedAction?.value === 'share-folder' && 
+                                        formData.action === 'remove' &&
+                                        (field.name === 'can_edit' || field.name === 'can_share' || field.name === 'manage_users' || field.name === 'manage_records');
+        
+        const isExpirationDisabled = isCanShareDisabled || isManageUsersDisabled;
+        const checkboxDisabled = isFormDisabled || isExpirationDisabled || isRecursiveDisabled || isCancelActionDisabled || isOwnerActionDisabled || isRemoveActionDisabled;
+        
+        return (
+          <div className={`checkbox-container ${(checkboxDisabled || isExpirationDisabled) ? 'disabled' : ''}`}>
             <input
               type="checkbox"
               checked={value === true || value === 'true'}
-              disabled={isFormDisabled}
+              disabled={checkboxDisabled}
               onChange={(e) => handleInputChange(field.name, e.target.checked)}
-              style={{
-                cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                marginTop: '2px',
-                minWidth: '16px',
-                width: '16px',
-                height: '16px'
-              }}
+              className="checkbox-input"
             />
-            <div style={{ flex: 1 }}>
-              <div style={{ 
-                fontSize: '13px', 
-                fontWeight: '500',
-                color: isFormDisabled ? '#999' : '#1A1A1A',
-                marginBottom: '2px'
-              }}>
+            <div className="checkbox-content">
+              <div className={`checkbox-label ${checkboxDisabled ? 'disabled' : ''}`}>
                 {field.label}
+                {(isCanShareDisabled || isManageUsersDisabled) && (
+                  <span className="checkbox-disabled-msg">
+                    (Disabled due to expiration)
+                  </span>
+                )}
+                {isRecursiveDisabled && (
+                  <span className="checkbox-disabled-msg">
+                    (Only for shared folder)
+                  </span>
+                )}
+                {isOwnerActionDisabled && (
+                  <span className="checkbox-disabled-msg">
+                    (Not supported for Owner action)
+                  </span>
+                )}
+                {isRemoveActionDisabled && (
+                  <span className="checkbox-disabled-msg">
+                    (Not supported for Remove action)
+                  </span>
+                )}
               </div>
               {field.description && (
-                <div style={{ 
-                  fontSize: '11px', 
-                  color: isFormDisabled ? '#999' : '#6B778C',
-                  lineHeight: '1.3'
-                }}>
+                <div className={`field-description ${checkboxDisabled ? 'disabled' : ''}`}>
                   {field.description}
                 </div>
               )}
             </div>
           </div>
         );
+      case 'phoneEntries':
+        // Dynamic phone number entries component - Complete country list from Keeper
+        const countryOptions = [
+          { code: 'AC', label: 'AC (+247)' }, { code: 'AD', label: 'AD (+376)' }, { code: 'AE', label: 'AE (+971)' },
+          { code: 'AF', label: 'AF (+93)' }, { code: 'AG', label: 'AG (+1)' }, { code: 'AI', label: 'AI (+1)' },
+          { code: 'AL', label: 'AL (+355)' }, { code: 'AM', label: 'AM (+374)' }, { code: 'AO', label: 'AO (+244)' },
+          { code: 'AR', label: 'AR (+54)' }, { code: 'AS', label: 'AS (+1)' }, { code: 'AT', label: 'AT (+43)' },
+          { code: 'AU', label: 'AU (+61)' }, { code: 'AW', label: 'AW (+297)' }, { code: 'AX', label: 'AX (+358)' },
+          { code: 'AZ', label: 'AZ (+994)' }, { code: 'BA', label: 'BA (+387)' }, { code: 'BB', label: 'BB (+1)' },
+          { code: 'BD', label: 'BD (+880)' }, { code: 'BE', label: 'BE (+32)' }, { code: 'BF', label: 'BF (+226)' },
+          { code: 'BG', label: 'BG (+359)' }, { code: 'BH', label: 'BH (+973)' }, { code: 'BI', label: 'BI (+257)' },
+          { code: 'BJ', label: 'BJ (+229)' }, { code: 'BL', label: 'BL (+590)' }, { code: 'BM', label: 'BM (+1)' },
+          { code: 'BN', label: 'BN (+673)' }, { code: 'BO', label: 'BO (+591)' }, { code: 'BQ', label: 'BQ (+599)' },
+          { code: 'BR', label: 'BR (+55)' }, { code: 'BS', label: 'BS (+1)' }, { code: 'BT', label: 'BT (+975)' },
+          { code: 'BW', label: 'BW (+267)' }, { code: 'BY', label: 'BY (+375)' }, { code: 'BZ', label: 'BZ (+501)' },
+          { code: 'CA', label: 'CA (+1)' }, { code: 'CC', label: 'CC (+61)' }, { code: 'CD', label: 'CD (+243)' },
+          { code: 'CF', label: 'CF (+236)' }, { code: 'CG', label: 'CG (+242)' }, { code: 'CH', label: 'CH (+41)' },
+          { code: 'CI', label: 'CI (+225)' }, { code: 'CK', label: 'CK (+682)' }, { code: 'CL', label: 'CL (+56)' },
+          { code: 'CM', label: 'CM (+237)' }, { code: 'CN', label: 'CN (+86)' }, { code: 'CO', label: 'CO (+57)' },
+          { code: 'CR', label: 'CR (+506)' }, { code: 'CU', label: 'CU (+53)' }, { code: 'CV', label: 'CV (+238)' },
+          { code: 'CW', label: 'CW (+599)' }, { code: 'CX', label: 'CX (+61)' }, { code: 'CY', label: 'CY (+357)' },
+          { code: 'CZ', label: 'CZ (+420)' }, { code: 'DE', label: 'DE (+49)' }, { code: 'DJ', label: 'DJ (+253)' },
+          { code: 'DK', label: 'DK (+45)' }, { code: 'DM', label: 'DM (+1)' }, { code: 'DO', label: 'DO (+1)' },
+          { code: 'DZ', label: 'DZ (+213)' }, { code: 'EC', label: 'EC (+593)' }, { code: 'EE', label: 'EE (+372)' },
+          { code: 'EG', label: 'EG (+20)' }, { code: 'EH', label: 'EH (+212)' }, { code: 'ER', label: 'ER (+291)' },
+          { code: 'ES', label: 'ES (+34)' }, { code: 'ET', label: 'ET (+251)' }, { code: 'FI', label: 'FI (+358)' },
+          { code: 'FJ', label: 'FJ (+679)' }, { code: 'FK', label: 'FK (+500)' }, { code: 'FM', label: 'FM (+691)' },
+          { code: 'FO', label: 'FO (+298)' }, { code: 'FR', label: 'FR (+33)' }, { code: 'GA', label: 'GA (+241)' },
+          { code: 'GB', label: 'GB (+44)' }, { code: 'GD', label: 'GD (+1)' }, { code: 'GE', label: 'GE (+995)' },
+          { code: 'GF', label: 'GF (+594)' }, { code: 'GG', label: 'GG (+44)' }, { code: 'GH', label: 'GH (+233)' },
+          { code: 'GI', label: 'GI (+350)' }, { code: 'GL', label: 'GL (+299)' }, { code: 'GM', label: 'GM (+220)' },
+          { code: 'GN', label: 'GN (+224)' }, { code: 'GP', label: 'GP (+590)' }, { code: 'GQ', label: 'GQ (+240)' },
+          { code: 'GR', label: 'GR (+30)' }, { code: 'GT', label: 'GT (+502)' }, { code: 'GU', label: 'GU (+1)' },
+          { code: 'GW', label: 'GW (+245)' }, { code: 'GY', label: 'GY (+592)' }, { code: 'HK', label: 'HK (+852)' },
+          { code: 'HN', label: 'HN (+504)' }, { code: 'HR', label: 'HR (+385)' }, { code: 'HT', label: 'HT (+509)' },
+          { code: 'HU', label: 'HU (+36)' }, { code: 'ID', label: 'ID (+62)' }, { code: 'IE', label: 'IE (+353)' },
+          { code: 'IL', label: 'IL (+972)' }, { code: 'IM', label: 'IM (+44)' }, { code: 'IN', label: 'IN (+91)' },
+          { code: 'IO', label: 'IO (+246)' }, { code: 'IQ', label: 'IQ (+964)' }, { code: 'IR', label: 'IR (+98)' },
+          { code: 'IS', label: 'IS (+354)' }, { code: 'IT', label: 'IT (+39)' }, { code: 'JE', label: 'JE (+44)' },
+          { code: 'JM', label: 'JM (+1)' }, { code: 'JO', label: 'JO (+962)' }, { code: 'JP', label: 'JP (+81)' },
+          { code: 'KE', label: 'KE (+254)' }, { code: 'KG', label: 'KG (+996)' }, { code: 'KH', label: 'KH (+855)' },
+          { code: 'KI', label: 'KI (+686)' }, { code: 'KM', label: 'KM (+269)' }, { code: 'KN', label: 'KN (+1)' },
+          { code: 'KP', label: 'KP (+850)' }, { code: 'KR', label: 'KR (+82)' }, { code: 'KW', label: 'KW (+965)' },
+          { code: 'KY', label: 'KY (+1)' }, { code: 'KZ', label: 'KZ (+7)' }, { code: 'LA', label: 'LA (+856)' },
+          { code: 'LB', label: 'LB (+961)' }, { code: 'LC', label: 'LC (+1)' }, { code: 'LI', label: 'LI (+423)' },
+          { code: 'LK', label: 'LK (+94)' }, { code: 'LR', label: 'LR (+231)' }, { code: 'LS', label: 'LS (+266)' },
+          { code: 'LT', label: 'LT (+370)' }, { code: 'LU', label: 'LU (+352)' }, { code: 'LV', label: 'LV (+371)' },
+          { code: 'LY', label: 'LY (+218)' }, { code: 'MA', label: 'MA (+212)' }, { code: 'MC', label: 'MC (+377)' },
+          { code: 'MD', label: 'MD (+373)' }, { code: 'ME', label: 'ME (+382)' }, { code: 'MF', label: 'MF (+590)' },
+          { code: 'MG', label: 'MG (+261)' }, { code: 'MH', label: 'MH (+692)' }, { code: 'MK', label: 'MK (+389)' },
+          { code: 'ML', label: 'ML (+223)' }, { code: 'MM', label: 'MM (+95)' }, { code: 'MN', label: 'MN (+976)' },
+          { code: 'MO', label: 'MO (+853)' }, { code: 'MP', label: 'MP (+1)' }, { code: 'MQ', label: 'MQ (+596)' },
+          { code: 'MR', label: 'MR (+222)' }, { code: 'MS', label: 'MS (+1)' }, { code: 'MT', label: 'MT (+356)' },
+          { code: 'MU', label: 'MU (+230)' }, { code: 'MV', label: 'MV (+960)' }, { code: 'MW', label: 'MW (+265)' },
+          { code: 'MX', label: 'MX (+52)' }, { code: 'MY', label: 'MY (+60)' }, { code: 'MZ', label: 'MZ (+258)' },
+          { code: 'NA', label: 'NA (+264)' }, { code: 'NC', label: 'NC (+687)' }, { code: 'NE', label: 'NE (+227)' },
+          { code: 'NF', label: 'NF (+672)' }, { code: 'NG', label: 'NG (+234)' }, { code: 'NI', label: 'NI (+505)' },
+          { code: 'NL', label: 'NL (+31)' }, { code: 'NO', label: 'NO (+47)' }, { code: 'NP', label: 'NP (+977)' },
+          { code: 'NR', label: 'NR (+674)' }, { code: 'NU', label: 'NU (+683)' }, { code: 'NZ', label: 'NZ (+64)' },
+          { code: 'OM', label: 'OM (+968)' }, { code: 'PA', label: 'PA (+507)' }, { code: 'PE', label: 'PE (+51)' },
+          { code: 'PF', label: 'PF (+689)' }, { code: 'PG', label: 'PG (+675)' }, { code: 'PH', label: 'PH (+63)' },
+          { code: 'PK', label: 'PK (+92)' }, { code: 'PL', label: 'PL (+48)' }, { code: 'PM', label: 'PM (+508)' },
+          { code: 'PR', label: 'PR (+1)' }, { code: 'PS', label: 'PS (+970)' }, { code: 'PT', label: 'PT (+351)' },
+          { code: 'PW', label: 'PW (+680)' }, { code: 'PY', label: 'PY (+595)' }, { code: 'QA', label: 'QA (+974)' },
+          { code: 'RE', label: 'RE (+262)' }, { code: 'RO', label: 'RO (+40)' }, { code: 'RS', label: 'RS (+381)' },
+          { code: 'RU', label: 'RU (+7)' }, { code: 'RW', label: 'RW (+250)' }, { code: 'SA', label: 'SA (+966)' },
+          { code: 'SB', label: 'SB (+677)' }, { code: 'SC', label: 'SC (+248)' }, { code: 'SD', label: 'SD (+249)' },
+          { code: 'SE', label: 'SE (+46)' }, { code: 'SG', label: 'SG (+65)' }, { code: 'SH', label: 'SH (+290)' },
+          { code: 'SI', label: 'SI (+386)' }, { code: 'SJ', label: 'SJ (+47)' }, { code: 'SK', label: 'SK (+421)' },
+          { code: 'SL', label: 'SL (+232)' }, { code: 'SM', label: 'SM (+378)' }, { code: 'SN', label: 'SN (+221)' },
+          { code: 'SO', label: 'SO (+252)' }, { code: 'SR', label: 'SR (+597)' }, { code: 'SS', label: 'SS (+211)' },
+          { code: 'ST', label: 'ST (+239)' }, { code: 'SV', label: 'SV (+503)' }, { code: 'SX', label: 'SX (+1)' },
+          { code: 'SY', label: 'SY (+963)' }, { code: 'SZ', label: 'SZ (+268)' }, { code: 'TA', label: 'TA (+290)' },
+          { code: 'TC', label: 'TC (+1)' }, { code: 'TD', label: 'TD (+235)' }, { code: 'TG', label: 'TG (+228)' },
+          { code: 'TH', label: 'TH (+66)' }, { code: 'TJ', label: 'TJ (+992)' }, { code: 'TK', label: 'TK (+690)' },
+          { code: 'TL', label: 'TL (+670)' }, { code: 'TM', label: 'TM (+993)' }, { code: 'TN', label: 'TN (+216)' },
+          { code: 'TO', label: 'TO (+676)' }, { code: 'TR', label: 'TR (+90)' }, { code: 'TT', label: 'TT (+1)' },
+          { code: 'TV', label: 'TV (+688)' }, { code: 'TW', label: 'TW (+886)' }, { code: 'TZ', label: 'TZ (+255)' },
+          { code: 'UA', label: 'UA (+380)' }, { code: 'UG', label: 'UG (+256)' }, { code: 'US', label: 'US (+1)' },
+          { code: 'UY', label: 'UY (+598)' }, { code: 'UZ', label: 'UZ (+998)' }, { code: 'VA', label: 'VA (+39)' },
+          { code: 'VC', label: 'VC (+1)' }, { code: 'VE', label: 'VE (+58)' }, { code: 'VG', label: 'VG (+1)' },
+          { code: 'VI', label: 'VI (+1)' }, { code: 'VN', label: 'VN (+84)' }, { code: 'VU', label: 'VU (+678)' },
+          { code: 'WF', label: 'WF (+681)' }, { code: 'WS', label: 'WS (+685)' }, { code: 'YE', label: 'YE (+967)' },
+          { code: 'YT', label: 'YT (+262)' }, { code: 'ZA', label: 'ZA (+27)' }, { code: 'ZM', label: 'ZM (+260)' },
+          { code: 'ZW', label: 'ZW (+263)' }
+        ];
+        const phoneTypeOptions = ['Mobile', 'Work', 'Home'];
+        
+        const addPhoneEntry = () => {
+          const newId = Math.max(...phoneEntries.map(e => e.id), 0) + 1;
+          setPhoneEntries([...phoneEntries, { id: newId, region: 'US', number: '', ext: '', type: 'Mobile', isNew: true }]);
+        };
+        
+        const removePhoneEntry = (id) => {
+          const updatedEntries = phoneEntries.filter(e => e.id !== id);
+          setPhoneEntries(updatedEntries);
+        };
+        
+        const updatePhoneEntry = (id, fieldName, fieldValue) => {
+          setPhoneEntries(phoneEntries.map(entry => {
+            if (entry.id === id) {
+              // Mark as edited when number field is changed
+              const isEdited = fieldName === 'number' ? true : entry.isEdited;
+              return { ...entry, [fieldName]: fieldValue, isEdited };
+            }
+            return entry;
+          }));
+        };
+        
+        // Mask phone number - show last 4 digits only
+        const maskPhoneNumber = (number) => {
+          if (!number || number.length <= 4) return '••••••••';
+          return '••••••' + number.slice(-4);
+        };
+        
+        // Show all phone entries (existing from record + newly added)
+        const visiblePhoneEntries = phoneEntries;
+        
+        const renderPhoneRow = (entry) => {
+          // For existing entries that haven't been edited, show masked number
+          const isExistingUnedited = !entry.isNew && !entry.isEdited && entry.number;
+          const displayNumber = isExistingUnedited ? maskPhoneNumber(entry.originalNumber || entry.number) : entry.number;
+          
+          return (
+          <div key={entry.id} className="phone-entry-row">
+            <div className="phone-entry-fields">
+              <div className="phone-field-group">
+                <label className="phone-field-label">Country</label>
+                <select
+                  value={entry.region}
+                  onChange={(e) => updatePhoneEntry(entry.id, 'region', e.target.value)}
+                  disabled={isFormDisabled}
+                  className="phone-country-select"
+                >
+                  {countryOptions.map(opt => (
+                    <option key={opt.code} value={opt.code}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="phone-field-group phone-number-field">
+                <label className="phone-field-label">Phone Number</label>
+                <input
+                  type="tel"
+                  value={isExistingUnedited ? '' : entry.number}
+                  onChange={(e) => updatePhoneEntry(entry.id, 'number', e.target.value.replace(/[^0-9-() ]/g, ''))}
+                  disabled={isFormDisabled}
+                  placeholder={isExistingUnedited ? displayNumber : '555-555-5555'}
+                  className="phone-number-input"
+                />
+              </div>
+              
+              <div className="phone-field-group phone-ext-field">
+                <label className="phone-field-label">Ext.</label>
+                <input
+                  type="text"
+                  value={entry.ext}
+                  onChange={(e) => updatePhoneEntry(entry.id, 'ext', e.target.value)}
+                  disabled={isFormDisabled}
+                  placeholder="Ext."
+                  className="phone-ext-input"
+                />
+              </div>
+              
+              <div className="phone-field-group">
+                <label className="phone-field-label">Type</label>
+                <select
+                  value={entry.type}
+                  onChange={(e) => updatePhoneEntry(entry.id, 'type', e.target.value)}
+                  disabled={isFormDisabled}
+                  className="phone-type-select"
+                >
+                  {phoneTypeOptions.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            <button
+              type="button"
+              onClick={() => removePhoneEntry(entry.id)}
+              disabled={isFormDisabled}
+              className="phone-delete-btn"
+              title="Remove phone number"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+        )};
+        
+        // Only allow one phone entry for contact records
+        const hasPhoneEntry = visiblePhoneEntries.length > 0;
+        
+        return (
+          <div className="phone-entries-container">
+            {/* Show phone entry OR "+ Phone Number" button (only one phone allowed) */}
+            {hasPhoneEntry ? (
+              // Show existing/added phone entry (only first one)
+              visiblePhoneEntries.slice(0, 1).map(renderPhoneRow)
+            ) : (
+              // Show "+ Phone Number" button only if no phone exists
+              <div className="phone-entries-header">
+                <button
+                  type="button"
+                  onClick={addPhoneEntry}
+                  disabled={isFormDisabled}
+                  className="phone-add-btn"
+                  title="Add Phone Number"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="16"/>
+                    <line x1="8" y1="12" x2="16" y2="12"/>
+                  </svg>
+                  <span>{field.label || 'Phone Number'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        );
       case 'folder-select':
         return (
-          <div style={{ position: 'relative' }}>
+          <div className="relative">
             <select
               value={value}
               disabled={isFormDisabled}
@@ -3941,7 +3678,7 @@ const IssuePanel = () => {
                   setSelectedFolder(folder);
                 }
               }}
-              style={baseStyle}
+              className={getInputClassName()}
             >
               <option value="">{field.placeholder || 'Select shared folder'}</option>
               {keeperFolders
@@ -3954,24 +3691,13 @@ const IssuePanel = () => {
             </select>
             
             {loadingFolders && (
-              <div style={{
-                position: 'absolute',
-                right: '12px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                fontSize: '11px',
-                color: '#0066CC'
-              }}>
+              <div className="loading-indicator">
                 Loading...
               </div>
             )}
             
               {!loadingFolders && getFilteredFolders().length === 0 && (
-                <div style={{
-                  fontSize: '11px',
-                  color: '#FF5630',
-                  marginTop: '4px'
-                }}>
+                <div className="error-text">
                   {keeperFolders.length === 0 
                     ? 'No folders found.' 
                     : 'No shared folders found. Only folders with "S" flag (shared folders) are available for record-permission commands.'
@@ -3984,48 +3710,19 @@ const IssuePanel = () => {
         // Special handling for PIN code fields with show/hide toggle
         if (field.name === 'pinCode') {
           return (
-            <div style={{ position: 'relative' }}>
+            <div className="relative">
               <input
                 type={showPinCode ? 'text' : 'password'}
                 value={value}
                 disabled={isFormDisabled}
                 onChange={(e) => handleInputChange(field.name, e.target.value)}
                 placeholder={field.placeholder}
-                style={{
-                  ...baseStyle,
-                  paddingRight: '60px' // Add space for the Show/Hide button
-                }}
+                className={getInputClassName('input-with-button')}
               />
               <button
                 type="button"
                 onClick={() => setShowPinCode(!showPinCode)}
-                onMouseEnter={(e) => {
-                  e.target.style.background = '#e6f2ff';
-                  e.target.style.borderColor = '#0066cc';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.background = '#f4f5f7';
-                  e.target.style.borderColor = '#ddd';
-                }}
-                style={{
-                  position: 'absolute',
-                  right: '8px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: '#f4f5f7',
-                  border: '1px solid #ddd',
-                  cursor: 'pointer',
-                  padding: '4px 8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: '4px',
-                  fontSize: '11px',
-                  height: '28px',
-                  fontWeight: '500',
-                  color: '#6B778C',
-                  transition: 'all 0.2s ease'
-                }}
+                className="toggle-password-btn"
                 title={showPinCode ? 'Hide PIN' : 'Show PIN'}
               >
                 {showPinCode ? 'Hide' : 'Show'}
@@ -4033,431 +3730,105 @@ const IssuePanel = () => {
             </div>
           );
         }
-        // Regular password field
+        // Regular password field with hide/show toggle
         const passwordValidation = validatePassword(value);
         const hasValidationErrors = !passwordValidation.isValid && value && value !== '$GEN';
         
         return (
           <div>
-            <input
-              type="password"
-              value={value}
-              disabled={isFormDisabled}
-              onChange={(e) => handleInputChange(field.name, e.target.value)}
-              placeholder={field.placeholder || "Password or $GEN"}
-              style={{
-                ...baseStyle,
-                borderColor: hasValidationErrors ? '#FF5630' : baseStyle.borderColor
-              }}
-            />
-            <div style={{ 
-              fontSize: "11px", 
-              color: "#1A1A1A", 
-              marginTop: "4px",
-              fontStyle: "italic"
-            }}>
+            <div className="secure-field-container">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={value}
+                disabled={isFormDisabled}
+                onChange={(e) => handleInputChange(field.name, e.target.value)}
+                placeholder={field.placeholder || "Password or $GEN"}
+                className={`${getInputClassName()} secure-field-input ${hasValidationErrors ? 'required-error' : ''}`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                disabled={isFormDisabled}
+                title={showPassword ? 'Hide password' : 'Show password'}
+                className="secure-toggle-btn-center"
+              >
+                {showPassword ? (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                    <line x1="1" y1="1" x2="23" y2="23"/>
+                  </svg>
+                ) : (
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                )}
+              </button>
+            </div>
+            <div className="password-hint">
               Enter your own password or type <strong>$GEN</strong> for automatic password generation
             </div>
             {hasValidationErrors && (
-              <div style={{ 
-                fontSize: "11px", 
-                color: "#FF5630", 
-                marginTop: "4px",
-                fontWeight: "500"
-              }}>
+              <div className="validation-errors">
                 Password requirements:
-                <ul style={{ margin: "2px 0 0 16px", padding: 0 }}>
+                <ul>
                   {passwordValidation.errors.map((error, index) => (
-                    <li key={index} style={{ marginBottom: "2px" }}>{error}</li>
+                    <li key={index}>{error}</li>
                   ))}
                 </ul>
               </div>
             )}
           </div>
         );
-      case 'addressRef':
-        // Special handling for address reference fields
-        const addressUid = value;
-        const displayValue = addressUid ? getAddressDisplayValue(addressUid) : field.placeholder || 'Select or add address...';
-        const isLoading = addressUid && loadingAddresses.has(addressUid);
-        
-        return (
-          <div style={{ position: 'relative' }}>
-            <div
-              style={{
-                ...baseStyle,
-                cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                backgroundColor: isFormDisabled ? '#F5F5F5' : hasCurrentValue ? '#F8FFF8' : 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                minHeight: '42px'
-              }}
-              onClick={() => {
-                if (!isFormDisabled) {
-                  if (!showAddressDropdown) {
-                    // Fetch address records when opening dropdown
-                    fetchAddressRecords();
-                  }
-                  setShowAddressDropdown(!showAddressDropdown);
-                }
-              }}
-            >
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: addressUid ? '#000' : '#999',
-                  fontSize: '14px'
-                }}
-              >
-                {isLoading ? 'Loading address...' : displayValue}
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                {addressUid && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!isFormDisabled) {
-                        handleInputChange(field.name, '');
-                        // Clear from resolved addresses cache
-                        setResolvedAddresses(prev => {
-                          const updated = { ...prev };
-                          delete updated[addressUid];
-                          return updated;
-                        });
-                      }
-                    }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: '4px',
-                      borderRadius: '50%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#6B778C',
-                      fontSize: '16px'
-                    }}
-                    title="Remove address"
-                  >
-                    ×
-                  </button>
-                )}
-                <span
-                  style={{
-                    color: '#6B778C',
-                    fontSize: '12px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  ▼
-                </span>
-              </div>
-            </div>
-            
-            {/* Address Dropdown */}
-            {showAddressDropdown && !isFormDisabled && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  backgroundColor: 'white',
-                  border: '1px solid #DFE1E6',
-                  borderRadius: '4px',
-                  boxShadow: '0 4px 8px rgba(0,0,0,0.1)',
-                  zIndex: 1000,
-                  marginTop: '2px',
-                  maxHeight: '300px',
-                  overflowY: 'auto'
-                }}
-              >
-                {loadingAddressRecords ? (
-                  <div style={{ padding: '12px', textAlign: 'center', color: '#6B778C', fontSize: '13px' }}>
-                    Loading addresses...
-                  </div>
-                ) : (
-                  <>
-                    {/* Current Address (if selected) */}
-                    {addressUid && (
-                      <div
-                        style={{
-                          padding: '12px',
-                          borderBottom: '1px solid #F4F5F7',
-                          cursor: 'pointer',
-                          backgroundColor: 'white'
-                        }}
-                        onClick={() => {
-                          setShowAddressDropdown(false);
-                          // Keep current address selected
-                        }}
-                        onMouseEnter={(e) => { e.target.style.backgroundColor = '#F4F5F7'; }}
-                        onMouseLeave={(e) => { e.target.style.backgroundColor = 'white'; }}
-                      >
-                        <div style={{ fontWeight: '500', fontSize: '13px', color: '#1A1A1A', marginBottom: '4px' }}>
-                          Current Address
-                        </div>
-                        <div style={{ fontSize: '12px', color: '#6B778C', wordBreak: 'break-word' }}>
-                          {displayValue}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Existing Address Records */}
-                    {addressRecords.length > 0 && (
-                      <>
-                        <div style={{ 
-                          padding: '8px 12px', 
-                          backgroundColor: '#F4F5F7', 
-                          fontSize: '11px', 
-                          fontWeight: '600', 
-                          color: '#6B778C',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.5px'
-                        }}>
-                          Existing Addresses ({addressRecords.length})
-                        </div>
-                        {addressRecords.map((record) => {
-                          // Build address display from record fields
-                          const addressParts = [];
-                          if (record.fields) {
-                            record.fields.forEach(field => {
-                              if (field.type === 'address' && field.value && Array.isArray(field.value) && field.value.length > 0) {
-                                const addr = field.value[0];
-                                if (addr.street1) addressParts.push(addr.street1);
-                                if (addr.street2) addressParts.push(addr.street2);
-                                if (addr.city) addressParts.push(addr.city);
-                                if (addr.state) addressParts.push(addr.state);
-                                if (addr.zip) addressParts.push(addr.zip);
-                                if (addr.country) addressParts.push(addr.country);
-                              }
-                            });
-                          }
-                          const fullAddress = addressParts.join(', ');
-                          const displayText = fullAddress || record.title || record.record_uid || 'Address Record';
-
-                          return (
-                            <div
-                              key={record.record_uid}
-                              style={{
-                                padding: '12px',
-                                cursor: 'pointer',
-                                backgroundColor: 'white',
-                                borderBottom: '1px solid #F4F5F7'
-                              }}
-                              onClick={() => {
-                                handleInputChange('addressRef', record.record_uid);
-                                setShowAddressDropdown(false);
-                              }}
-                              onMouseEnter={(e) => { e.target.style.backgroundColor = '#F4F5F7'; }}
-                              onMouseLeave={(e) => { e.target.style.backgroundColor = 'white'; }}
-                            >
-                              <div style={{ fontWeight: '500', fontSize: '13px', color: '#1A1A1A', marginBottom: '4px' }}>
-                                {record.title || 'Address Record'}
-                              </div>
-                              <div style={{ fontSize: '12px', color: '#6B778C', wordBreak: 'break-word' }}>
-                                {displayText}
-                              </div>
-                              <div style={{ fontSize: '11px', color: '#999', marginTop: '2px' }}>
-                                ID: {record.record_uid}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </>
-                    )}
-
-                    {/* New Address Option */}
-                    <div
-                      style={{
-                        padding: '12px',
-                        cursor: 'pointer',
-                        backgroundColor: 'white',
-                        color: '#0052CC',
-                        fontSize: '13px',
-                        fontWeight: '500',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        borderTop: addressRecords.length > 0 ? '1px solid #F4F5F7' : 'none'
-                      }}
-                      onClick={() => {
-                        handleNewAddress();
-                      }}
-                      onMouseEnter={(e) => { e.target.style.backgroundColor = '#F4F5F7'; }}
-                      onMouseLeave={(e) => { e.target.style.backgroundColor = 'white'; }}
-                    >
-                      <span style={{ fontSize: '16px' }}>+</span>
-                      New Address
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-            
-            {/* Click outside to close dropdown */}
-            {showAddressDropdown && (
-              <div
-                style={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  zIndex: 999
-                }}
-                onClick={() => setShowAddressDropdown(false)}
-              />
-            )}
-          </div>
-        );
-      case 'fileRef':
-        // Special handling for file reference fields
-        const fileUid = value;
-        const fileDisplayValue = fileUid ? `File: ${fileUid}` : field.placeholder || 'Select files...';
-        
-        return (
-          <div style={{ position: 'relative' }}>
-            <div
-              style={{
-                ...baseStyle,
-                cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                backgroundColor: isFormDisabled ? '#F5F5F5' : hasCurrentValue ? '#F8FFF8' : 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                minHeight: '42px'
-              }}
-              onClick={() => {
-                if (!isFormDisabled) {
-                  // TODO: Implement file selection logic
-                  alert('File selection functionality will be implemented soon');
-                }
-              }}
-            >
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: fileUid ? '#000' : '#999',
-                  flex: 1
-                }}
-              >
-                {fileDisplayValue}
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                <span style={{ fontSize: '12px', color: '#6B778C' }}>📁</span>
-              </div>
-            </div>
-          </div>
-        );
-      case 'cardRef':
-        // Special handling for payment card reference fields
-        const cardUid = value;
-        const cardDisplayValue = cardUid ? `Card: ${cardUid}` : field.placeholder || 'Select payment card...';
-        
-        return (
-          <div style={{ position: 'relative' }}>
-            <div
-              style={{
-                ...baseStyle,
-                cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                backgroundColor: isFormDisabled ? '#F5F5F5' : hasCurrentValue ? '#F8FFF8' : 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                minHeight: '42px'
-              }}
-              onClick={() => {
-                if (!isFormDisabled) {
-                  // TODO: Implement card selection logic
-                  alert('Payment card selection functionality will be implemented soon');
-                }
-              }}
-            >
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  color: cardUid ? '#000' : '#999',
-                  flex: 1
-                }}
-              >
-                {cardDisplayValue}
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                <span style={{ fontSize: '12px', color: '#6B778C' }}>💳</span>
-              </div>
-            </div>
-          </div>
-        );
       default:
-        // Special handling for card number formatting
-        if (field.name === 'paymentCard_cardNumber') {
-          return (
-            <input
-              type="text"
-              value={value} // Already formatted by renderFormInput
-              disabled={isFormDisabled}
-              onChange={(e) => {
-                // Parse formatted input and store digits only
-                const digitsOnly = parseCardNumber(e.target.value);
-                handleInputChange(field.name, digitsOnly);
-              }}
-              placeholder="•••• •••• •••• 1234"
-              maxLength={19} // 16 digits + 3 spaces
-              style={baseStyle}
-            />
-          );
-        }
-        
         // Use getInputTypeForField to map field types to proper HTML input types
         const inputType = getInputTypeForField(field.type);
         
-        // Special handling for password-like fields to show the $GEN note
+        // Special handling for password-like fields to show the $GEN note with hide/show toggle
         if (inputType === 'password') {
-          const passwordValidation = validatePassword(value);
-          const hasValidationErrors = !passwordValidation.isValid && value && value !== '$GEN';
+          const passwordValidation2 = validatePassword(value);
+          const hasValidationErrors2 = !passwordValidation2.isValid && value && value !== '$GEN';
           
           return (
             <div>
-              <input
-                type="password"
-                value={value}
-                disabled={isFormDisabled}
-                onChange={(e) => handleInputChange(field.name, e.target.value)}
-                placeholder={field.placeholder || "Password or $GEN"}
-                style={{
-                  ...baseStyle,
-                  borderColor: hasValidationErrors ? '#FF5630' : baseStyle.borderColor
-                }}
-              />
-              <div style={{ 
-                fontSize: "11px", 
-                color: "#1A1A1A", 
-                marginTop: "4px",
-                fontStyle: "italic"
-              }}>
+              <div className="secure-field-container">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={value}
+                  disabled={isFormDisabled}
+                  onChange={(e) => handleInputChange(field.name, e.target.value)}
+                  placeholder={field.placeholder || "Password or $GEN"}
+                  className={`${getInputClassName()} secure-field-input ${hasValidationErrors2 ? 'required-error' : ''}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  disabled={isFormDisabled}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  className="secure-toggle-btn-center"
+                >
+                  {showPassword ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                      <line x1="1" y1="1" x2="23" y2="23"/>
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
+              <div className="password-hint">
                 Enter your own password or type <strong>$GEN</strong> for automatic password generation
               </div>
-              {hasValidationErrors && (
-                <div style={{ 
-                  fontSize: "11px", 
-                  color: "#FF5630", 
-                  marginTop: "4px",
-                  fontWeight: "500"
-                }}>
+              {hasValidationErrors2 && (
+                <div className="validation-errors">
                   Password requirements:
-                  <ul style={{ margin: "2px 0 0 16px", padding: 0 }}>
-                    {passwordValidation.errors.map((error, index) => (
-                      <li key={index} style={{ marginBottom: "2px" }}>{error}</li>
+                  <ul>
+                    {passwordValidation2.errors.map((error, index) => (
+                      <li key={index}>{error}</li>
                     ))}
                   </ul>
                 </div>
@@ -4466,14 +3837,56 @@ const IssuePanel = () => {
           );
         }
         
+        // Check if this is the user/email field in share-record or share-folder for non-admin users
+        const isUserFieldForNonAdmin = !isAdmin && 
+                                       field.name === 'user' && 
+                                       (selectedAction?.value === 'share-record' || selectedAction?.value === 'share-folder');
+        
+        // Check if this is a port field (only allow numbers)
+        const isPortField = field.name === 'host_port' || field.name.includes('_port') || field.subField === 'port';
+        
+        // Check if this is a phone number field (only allow numbers and +)
+        const isPhoneField = field.type === 'tel' || field.name === 'phone_number' || field.name.includes('phone_number');
+        
+        // Check if this is a phone extension field (only allow numbers)
+        const isPhoneExtField = field.name === 'phone_ext' || field.name.includes('phone_ext') || field.subField === 'ext';
+        
+        // Handler for port field - only allow numbers
+        const handlePortChange = (e) => {
+          const newValue = e.target.value.replace(/[^0-9]/g, '');
+          handleInputChange(field.name, newValue);
+        };
+        
+        // Handler for phone field - only allow numbers and + (for international codes)
+        const handlePhoneChange = (e) => {
+          const newValue = e.target.value.replace(/[^0-9+]/g, '');
+          handleInputChange(field.name, newValue);
+        };
+        
+        // Handler for phone extension - only allow numbers
+        const handlePhoneExtChange = (e) => {
+          const newValue = e.target.value.replace(/[^0-9]/g, '');
+          handleInputChange(field.name, newValue);
+        };
+        
+        // Determine the onChange handler based on field type
+        const getChangeHandler = () => {
+          if (isPortField) return handlePortChange;
+          if (isPhoneField) return handlePhoneChange;
+          if (isPhoneExtField) return handlePhoneExtChange;
+          return (e) => handleInputChange(field.name, e.target.value);
+        };
+        
         return (
           <input
             type={inputType}
             value={value}
             disabled={isFormDisabled}
-            onChange={(e) => handleInputChange(field.name, e.target.value)}
+            readOnly={isUserFieldForNonAdmin}
+            onChange={getChangeHandler()}
             placeholder={field.placeholder}
-            style={baseStyle}
+            className={`${getInputClassName()} ${isUserFieldForNonAdmin ? 'readonly-field' : ''}`}
+            title={isUserFieldForNonAdmin ? 'This field is auto-populated with your email address' : ''}
           />
         );
     }
@@ -4482,10 +3895,16 @@ const IssuePanel = () => {
   useEffect(() => {
     // Load issue context
     setIsLoading(true);
-    invoke("getIssueContext")
+    api.getIssueContext()
       .then((context) => {
-        
         setIssueContext(context);
+        
+        // Check if this is a restricted webhook ticket (endpoint_privilege_manager + approval_request_created)
+        const labels = context.labels || [];
+        const hasEndpointPrivilegeLabel = labels.includes('endpoint-privilege-manager');
+        const hasApprovalRequestLabel = labels.includes('approval-request-created');
+        const isRestricted = hasEndpointPrivilegeLabel && hasApprovalRequestLabel;
+        setIsRestrictedWebhookTicket(isRestricted);
         
         // Clear any previous stored data to ensure fresh start for new ticket
         setStoredRequestData(null);
@@ -4493,10 +3912,12 @@ const IssuePanel = () => {
         
         // Activate Keeper panel for all users on this issue
         if (context.issueKey) {
-          invoke("activateKeeperPanel", { issueKey: context.issueKey })
+          api.activateKeeperPanel(context.issueKey)
             .then((result) => {
             })
             .catch((error) => {
+              // Log error but don't show to user as this is not critical
+              const errorMessage = handleApiError(error, "Failed to activate Keeper panel");
             });
         }
         
@@ -4512,6 +3933,11 @@ const IssuePanel = () => {
         }
       })
       .catch((error) => {
+        const errorMessage = handleApiError(error, "Failed to load issue context");
+        setLastResult({ 
+          success: false, 
+          message: errorMessage
+        });
         setIsLoading(false);
       });
   }, []);
@@ -4545,13 +3971,34 @@ const IssuePanel = () => {
     setLastResult(null);
 
     try {
+      // Format timestamp with user's local time (same as save/reject requests)
+      const formattedTimestamp = new Date().toLocaleString('en-US', {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
       
       // Prepare final parameters for special actions
       let finalParameters = { ...formData };
       
+      // Add phoneEntries for contact record type
+      if (selectedAction.value === 'record-add' && formData.recordType === 'contact') {
+        // Filter out empty phone entries and add to parameters
+        const validPhoneEntries = phoneEntries.filter(entry => entry.number && entry.number.trim());
+        if (validPhoneEntries.length > 0) {
+          finalParameters.phoneEntries = validPhoneEntries;
+        }
+      }
+      
       if (selectedAction.value === 'share-record' && selectedRecord) {
         // Ensure record field is populated with selected record UID
         finalParameters.record = selectedRecord.record_uid;
+        // Include record title for comment message
+        finalParameters.recordTitle = selectedRecord.title;
         // User/email and action fields are already in formData from manual input
         
       }
@@ -4565,18 +4012,133 @@ const IssuePanel = () => {
         if (finalParameters.password === '••••••••') {
           delete finalParameters.password; // Don't send masked password back
         }
+        
+        // IMPORTANT: Merge existing values for complex JSON fields to prevent data loss
+        // When sending partial updates for fields like name, address, host, etc.,
+        // we need to include existing values to prevent overwriting
+        // Using originalComplexFields which is reliably stored when record is loaded
+        
+        if (originalComplexFields && Object.keys(originalComplexFields).length > 0) {
+          
+          // Merge name fields - preserve existing values if not provided in form
+          if (originalComplexFields.name) {
+            const existingName = originalComplexFields.name;
+            // Check if any name field is being updated
+            const hasNameUpdate = finalParameters.name_first || finalParameters.name_middle || finalParameters.name_last;
+            if (hasNameUpdate) {
+              // Merge: use form value if provided, otherwise use existing value
+              if (!finalParameters.name_first && existingName.first) {
+                finalParameters.name_first = existingName.first;
+              }
+              if (!finalParameters.name_middle && existingName.middle) {
+                finalParameters.name_middle = existingName.middle;
+              }
+              if (!finalParameters.name_last && existingName.last) {
+                finalParameters.name_last = existingName.last;
+              }
+            }
+          }
+          
+          // Merge address fields - preserve existing values if not provided in form
+          if (originalComplexFields.address) {
+            const existingAddr = originalComplexFields.address;
+            const hasAddressUpdate = finalParameters.address_street1 || finalParameters.address_street2 || 
+              finalParameters.address_city || finalParameters.address_state || 
+              finalParameters.address_zip || finalParameters.address_country;
+            if (hasAddressUpdate) {
+              if (!finalParameters.address_street1 && existingAddr.street1) {
+                finalParameters.address_street1 = existingAddr.street1;
+              }
+              if (!finalParameters.address_street2 && existingAddr.street2) {
+                finalParameters.address_street2 = existingAddr.street2;
+              }
+              if (!finalParameters.address_city && existingAddr.city) {
+                finalParameters.address_city = existingAddr.city;
+              }
+              if (!finalParameters.address_state && existingAddr.state) {
+                finalParameters.address_state = existingAddr.state;
+              }
+              if (!finalParameters.address_zip && existingAddr.zip) {
+                finalParameters.address_zip = existingAddr.zip;
+              }
+              if (!finalParameters.address_country && existingAddr.country) {
+                finalParameters.address_country = existingAddr.country;
+              }
+            }
+          }
+          
+          // Merge host fields - preserve existing values if not provided in form
+          if (originalComplexFields.host) {
+            const existingHost = originalComplexFields.host;
+            const hasHostUpdate = finalParameters.host_hostName || finalParameters.host_port;
+            if (hasHostUpdate) {
+              if (!finalParameters.host_hostName && existingHost.hostName) {
+                finalParameters.host_hostName = existingHost.hostName;
+              }
+              if (!finalParameters.host_port && existingHost.port) {
+                finalParameters.host_port = existingHost.port;
+              }
+            }
+          }
+          
+          // Merge pamHostname fields - preserve existing values if not provided in form
+          if (originalComplexFields.pamHostname) {
+            const existingPamHost = originalComplexFields.pamHostname;
+            const hasPamHostUpdate = finalParameters.pamHostname_hostName || finalParameters.pamHostname_port;
+            if (hasPamHostUpdate) {
+              if (!finalParameters.pamHostname_hostName && existingPamHost.hostName) {
+                finalParameters.pamHostname_hostName = existingPamHost.hostName;
+              }
+              if (!finalParameters.pamHostname_port && existingPamHost.port) {
+                finalParameters.pamHostname_port = existingPamHost.port;
+              }
+            }
+          }
+          
+          // Merge keyPair fields - preserve existing values if not provided in form
+          if (originalComplexFields.keyPair) {
+            const existingKeyPair = originalComplexFields.keyPair;
+            const hasKeyPairUpdate = finalParameters.keyPair_privateKey || finalParameters.keyPair_publicKey;
+            if (hasKeyPairUpdate) {
+              if (!finalParameters.keyPair_privateKey && existingKeyPair.privateKey) {
+                finalParameters.keyPair_privateKey = existingKeyPair.privateKey;
+              }
+              if (!finalParameters.keyPair_publicKey && existingKeyPair.publicKey) {
+                finalParameters.keyPair_publicKey = existingKeyPair.publicKey;
+              }
+            }
+          }
+        }
+        
+        // Add phone entries only if modified (new or edited)
+        if (formData.recordType === 'contact') {
+          const modifiedPhoneEntries = phoneEntries.filter(entry => 
+            (entry.isNew || entry.isEdited) && entry.number && entry.number.trim()
+          );
+          if (modifiedPhoneEntries.length > 0) {
+            finalParameters.phoneEntries = modifiedPhoneEntries;
+          }
+        }
       }
       
       if (selectedAction.value === 'share-folder' && selectedFolder) {
         // Ensure folder field is populated with selected folder UID
         finalParameters.folder = selectedFolder.uid || selectedFolder.path || selectedFolder.name;
+        // Include folder title for comment message (only use name, not UID/path)
+        finalParameters.folderTitle = selectedFolder.name;
         // User/email field is already in formData from manual input
         
       }
       
       if (selectedAction.value === 'record-permission' && selectedFolder) {
         // For record-permission command, format follows CLI pattern:
-        // record-permission <folder_uid> --action <grant|revoke> [--user <email>] [--can-share] [--can-edit] [--recursive] [--force] [--dry-run]
+        // record-permission FOLDER_UID -a ACTION [-d] [-s] [-R] [--force]
+        // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R --force
+        // -a = action (grant/revoke)
+        // -d = edit permission flag (can_edit)
+        // -s = share permission flag (can_share)
+        // -R = recursive flag (apply to all sub folders)
+        // --force = force flag (for grant and revoke actions)
         
         // Build the CLI command format
         let commandParts = [
@@ -4584,45 +4146,22 @@ const IssuePanel = () => {
           selectedFolder.folder_uid || selectedFolder.uid || selectedFolder.path || selectedFolder.name
         ];
         
-        // Add required action
+        // Add required action (-a)
         if (finalParameters.action) {
-          commandParts.push('--action', finalParameters.action);
+          commandParts.push('-a', finalParameters.action);
         }
         
-        // Note: No user email needed - record-permission applies to all users in the shared folder
+        // Add edit permission flag (-d) if can_edit is true
+        if (finalParameters.can_edit) commandParts.push('-d');
         
-        // Add permission flags
-        if (finalParameters.can_share) commandParts.push('--can-share');
-        if (finalParameters.can_edit) commandParts.push('--can-edit');
-        if (finalParameters.recursive) commandParts.push('--recursive');
-        if (finalParameters.dry_run) commandParts.push('--dry-run');
+        // Add share permission flag (-s) if can_share is true
+        if (finalParameters.can_share) commandParts.push('-s');
         
-        // Always add --force flag for API execution (no interactive prompts possible)
-        commandParts.push('--force');
+        // Add recursive flag (-R) if recursive is true
+        if (finalParameters.recursive) commandParts.push('-R');
         
-        // Replace parameters with the properly formatted CLI command
-        finalParameters = {
-          cliCommand: commandParts.join(' ')
-        };
-      }
-      
-      if (selectedAction.value === 'pam-action-rotate') {
-        // For pam action rotate command, format follows CLI pattern:
-        // pam action rotate --record-uid <record_uid> [--dry-run] OR
-        // pam action rotate --folder <folder_uid> [--dry-run]
-        
-        // Build the CLI command format
-        let commandParts = ['pam', 'action', 'rotate'];
-        
-        // Add target based on selection type
-        if (finalParameters.target_type === 'record' && selectedPamResource) {
-          commandParts.push('--record-uid', selectedPamResource.record_uid);
-        } else if (finalParameters.target_type === 'folder' && selectedFolder) {
-          commandParts.push('--folder', selectedFolder.folder_uid || selectedFolder.uid || selectedFolder.path || selectedFolder.name);
-        }
-        
-        // Add optional flags
-        if (finalParameters.dry_run) commandParts.push('--dry-run');
+        // Add force flag (--force) for grant and revoke actions
+        if (finalParameters.action === 'grant' || finalParameters.action === 'revoke') commandParts.push('--force');
         
         // Replace parameters with the properly formatted CLI command
         finalParameters = {
@@ -4670,11 +4209,11 @@ const IssuePanel = () => {
             }
 
             // Create the address record in Keeper using executeKeeperAction
-            const addressResult = await invoke("executeKeeperAction", {
-              issueKey: issueContext.issueKey,
-              command: "record-add",
-              commandDescription: "Create address record",
-              parameters: {
+            const addressResult = await api.executeKeeperAction(
+              issueContext.issueKey,
+              "record-add",
+              "Create address record",
+              {
                 recordType: "address",
                 title: tempAddressData.tempData.title,
                 skipComment: true, // Don't create comment for reference records
@@ -4694,7 +4233,7 @@ const IssuePanel = () => {
                 }, {}),
                 notes: tempAddressData.tempData.notes || ''
               }
-            });
+            );
 
             if (addressResult && addressResult.record_uid) {
               realAddressUid = addressResult.record_uid;
@@ -4720,104 +4259,24 @@ const IssuePanel = () => {
               throw new Error("Failed to create address record from temp data");
             }
           } catch (error) {
+            const errorMessage = handleApiError(error, "Failed to create address record");
             setLastResult({ 
               success: false, 
-              message: `Failed to create address record: ${error.message}` 
+              message: errorMessage
             });
             setIsExecuting(false);
             return;
           }
         }
-      } else if (newAddressFormData && newAddressFormData.title && Object.keys(newAddressFormData).length > 1) {
-        // This is a new address from the modal - create it
-        try {
-          
-          // Prepare address data for API call
-          const addressData = {
-            title: newAddressFormData.title,
-            fields: [
-              {
-                type: 'address',
-                value: [{
-                  street1: newAddressFormData.street1 || '',
-                  street2: newAddressFormData.street2 || '',
-                  city: newAddressFormData.city || '',
-                  state: newAddressFormData.state || '',
-                  zip: newAddressFormData.zip || '',
-                  country: newAddressFormData.country || ''
-                }]
-              }
-            ]
-          };
-
-          // Add notes if provided
-          if (newAddressFormData.notes) {
-            addressData.fields.push({
-              type: 'text',
-              value: newAddressFormData.notes
-            });
-          }
-
-          // Create the address record in Keeper using executeKeeperAction
-          const addressResult = await invoke("executeKeeperAction", {
-            issueKey: issueContext.issueKey,
-            command: "record-add",
-            commandDescription: "Create address record",
-            parameters: {
-              recordType: "address",
-              title: newAddressFormData.title,
-              skipComment: true, // Don't create comment for reference records
-              street1: newAddressFormData.street1 || '',
-              street2: newAddressFormData.street2 || '',
-              city: newAddressFormData.city || '',
-              state: newAddressFormData.state || '',
-              zip: newAddressFormData.zip || '',
-              country: newAddressFormData.country || '',
-              notes: newAddressFormData.notes || ''
-            }
-          });
-
-          if (addressResult && addressResult.record_uid) {
-            realAddressUid = addressResult.record_uid;
-            addressCreated = true;
-            
-            // Update the parameters to use the real address UID
-            finalParameters.addressRef = realAddressUid;
-            
-            // Update the resolved addresses cache
-            setResolvedAddresses(prev => ({
-              ...prev,
-              [realAddressUid]: {
-                record_uid: realAddressUid,
-                type: 'address',
-                title: newAddressFormData.title,
-                fields: addressData.fields
-              }
-            }));
-            
-            
-            // Clear the modal data since address has been created
-            setNewAddressFormData({});
-            setShowNewAddressModal(false);
-          } else {
-            throw new Error("Failed to create address record from modal data");
-          }
-        } catch (error) {
-          setLastResult({ 
-            success: false, 
-            message: `Failed to create address record: ${error.message}` 
-          });
-          setIsExecuting(false);
-          return;
-        }
       }
       
-      const result = await invoke("executeKeeperAction", {
-        issueKey: issueContext.issueKey,
-        command: selectedAction.value,
-        commandDescription: selectedAction.description,
-        parameters: finalParameters
-      });
+      const result = await api.executeKeeperAction(
+        issueContext.issueKey,
+        selectedAction.value,
+        selectedAction.description,
+        finalParameters,
+        formattedTimestamp
+      );
       
       
       // Create success message that includes address creation info if applicable
@@ -4846,22 +4305,8 @@ const IssuePanel = () => {
 
     } catch (error) {
       
-      // Check for specific PAM Configuration error
-      let errorMessage = error.message || "An unknown error occurred";
-      
-      if (selectedAction.value === 'pam-action-rotate' && 
-          (errorMessage.includes('PAM Configuration') && errorMessage.includes('is not available'))) {
-        errorMessage = `PAM Configuration Error: No PAM Configuration is available. Please:\n\n` +
-                      `1. Create a PAM Configuration in Keeper Vault:\n` +
-                      `   • Go to Secrets Manager > PAM Configurations\n` +
-                      `   • Click "New Configuration"\n` +
-                      `   • Configure Gateway and environment settings\n\n` +
-                      `2. Enable Rotation feature in PAM Settings\n\n` +
-                      `3. Create records with PAM types (pamMachine, pamUser, pamDatabase)\n\n` +
-                      `4. Verify proper access permissions to the PAM Configuration\n\n` +
-                      `Note: PAM resources are regular Keeper records with specific types (pamMachine, pamUser, etc.).\n\n` +
-                      `For detailed setup instructions, see: https://docs.keeper.io/en/keeperpam/privileged-access-manager/getting-started/pam-configuration`;
-      }
+      // Handle error
+      let errorMessage = handleApiError(error, "An unknown error occurred");
       
       setLastResult({ 
         success: false, 
@@ -4888,11 +4333,19 @@ const IssuePanel = () => {
     setRejectionResult(null);
 
     try {
-      // Update the JIRA ticket with rejection comment
-      const result = await invoke("rejectKeeperRequest", {
-        issueKey: issueContext.issueKey,
-        rejectionReason: rejectionReason.trim()
+      // Format timestamp with user's local time
+      const formattedTimestamp = new Date().toLocaleString('en-US', {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
       });
+      
+      // Update the JIRA ticket with rejection comment
+      const result = await api.rejectKeeperRequest(issueContext.issueKey, rejectionReason.trim());
 
       setRejectionResult({ 
         success: true, 
@@ -4912,9 +4365,12 @@ const IssuePanel = () => {
       setFormData({});
 
     } catch (error) {
+      // Handle error
+      const errorMessage = handleApiError(error, "An error occurred while rejecting the request.");
+      
       setRejectionResult({ 
         success: false, 
-        message: error.message || "An error occurred while rejecting the request." 
+        message: errorMessage
       });
     } finally {
       setIsRejecting(false);
@@ -4930,27 +4386,16 @@ const IssuePanel = () => {
 
   if (isLoading) {
     return (
-      <div
-        style={{
-          fontFamily: "Inter, Arial, sans-serif",
-          padding: "16px",
-          textAlign: "center",
-        }}
-      >
+      <div className="loading-container-centered">
         <Spinner size="medium" />
-        <p style={{ marginTop: "12px", color: "#6B778C" }}>Loading...</p>
+        <p className="loading-text">Loading...</p>
       </div>
     );
   }
 
   if (!issueContext) {
     return (
-      <div
-        style={{
-          fontFamily: "Inter, Arial, sans-serif",
-          padding: "16px",
-        }}
-      >
+      <div className="error-container">
         <SectionMessage appearance="error" title="Error">
           Failed to load issue context. Please refresh the page.
         </SectionMessage>
@@ -4958,85 +4403,86 @@ const IssuePanel = () => {
     );
   }
 
+  // Restrict access for webhook-created tickets (endpoint_privilege_manager + approval_request_created)
+  // Only admins can access the panel for these tickets
+  if (isRestrictedWebhookTicket && !isAdmin) {
+    return (
+      <div className="issue-panel-container">
+        <div className="panel-header">
+          <div className="header-icon-wrapper">
+            <LockIcon size="medium" />
+          </div>
+          <div className="header-content">
+            <h1 className="panel-title">Keeper Security Integration</h1>
+            <p className="panel-subtitle">Access Restricted</p>
+          </div>
+        </div>
+
+        <div className="panel-body">
+          <SectionMessage appearance="warning" title="Administrator Access Required">
+            <p>
+              This ticket was automatically created from a Keeper Security Endpoint Privilege Manager approval request. 
+              Access to the Keeper integration panel for these tickets is restricted to Jira Administrators and Project Administrators only.
+            </p>
+            <p style={{ marginTop: '12px' }}>
+              If you need to perform actions on this request, please contact your Jira administrator.
+            </p>
+          </SectionMessage>
+        </div>
+      </div>
+    );
+  }
+
+  // Show custom PEDM UI for webhook-created tickets when user is admin
+  if (isRestrictedWebhookTicket && isAdmin) {
+    return <PedmApprovalPanel issueContext={issueContext} />;
+  }
+
+  const rootClassName = `app-root ${
+    (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown) 
+      ? 'app-root-expanded'
+      : selectedAction 
+        ? 'app-root-viewport'
+        : 'app-root-auto'
+  }`;
+
+  const cardClassName = `app-card ${
+    (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown)
+      ? 'app-card-expanded'
+      : ''
+  }`;
+
   return (
-    <div
-      style={{
-        fontFamily: "Inter, Arial, sans-serif",
-        padding: "16px",
-        backgroundColor: "#F7F7FA",
-        minHeight: (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown || showPamResourceDropdown) 
-          ? "max(100vh, 700px)" 
-          : selectedAction 
-            ? "100vh" 
-            : "auto",
-        boxSizing: "border-box",
-        transition: "min-height 0.3s ease-in-out"
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: "#FFFFFF",
-          borderRadius: "8px",
-          padding: "16px",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
-          minHeight: (showDropdown || showRecordDropdown || showFolderDropdown || showRecordForUpdateDropdown || showPamResourceDropdown) 
-            ? "600px" 
-            : selectedAction 
-              ? "400px" 
-              : "auto",
-          position: "relative",
-          transition: "min-height 0.3s ease-in-out"
-        }}
-      >
+    <div className={rootClassName}>
+      <div className={cardClassName}>
         {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            marginBottom: "12px",
-            gap: "8px",
-          }}
-        >
+        <div className="app-header">
           <LockIcon size="medium" primaryColor="#FFD700" />
-          <h3
-            style={{
-              margin: 0,
-              fontWeight: "600",
-              color: "#1A1A1A",
-            }}
-          >
+          <h3 className="app-title">
             Keeper Integration Hub
           </h3>
         </div>
 
 
-        {/* Configuration Status */}
-        {!issueContext.hasConfig && (
+        {/* Configuration Status - Only show warning for admins */}
+        {!issueContext.hasConfig && isAdmin && (
           <SectionMessage appearance="warning" title="Configuration Required">
             Keeper integration hub is not configured. Please go to the Keeper global
             page to set up the integration hub.
           </SectionMessage>
         )}
 
-        {/* Action Selection and Approval */}
-        {issueContext.hasConfig && (
+        {/* Action Selection and Approval - Allow non-admin users even without config since they only submit requests */}
+        {(issueContext.hasConfig || !isAdmin) && (
           <>
             {/* Action Dropdown */}
-            <div style={{ marginBottom: "12px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "600",
-                  fontSize: "14px",
-                  color: "#1A1A1A",
-                }}
-              >
+            <div className="mb-12">
+              <label className="label-block">
                 Select Keeper Action:
               </label>
               
               {/* Dropdown Container */}
-              <div style={{ position: "relative", zIndex: 1001 }}>
+              <div className="relative z-1001">
                 {/* Search Input */}
                 <input
                 id="keeper-action-input"
@@ -5065,19 +4511,7 @@ const IssuePanel = () => {
                     setShowDropdown(true);
                   }
                 }}
-                style={{
-                  width: "100%",
-                  padding: "8px 40px 8px 12px",
-                  borderRadius: "6px",
-                  border: isFormDisabled ? "2px solid #E0E0E0" : (showDropdown ? "2px solid #0066CC" : "2px solid #DFE1E6"),
-                  fontSize: "14px",
-                  backgroundColor: isFormDisabled ? "#F5F5F5" : "white",
-                  color: isFormDisabled ? "#999" : "#000",
-                  outline: "none",
-                  cursor: isFormDisabled ? "not-allowed" : "pointer",
-                  boxSizing: "border-box",
-                  transition: "border-color 0.2s ease, background-color 0.2s ease"
-                }}
+                className={`action-select-input ${isFormDisabled ? 'action-select-input-disabled' : (showDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
               />
               
               {/* Dropdown Arrow */}
@@ -5087,51 +4521,17 @@ const IssuePanel = () => {
                     setShowDropdown(!showDropdown);
                   }
                 }}
-                style={{
-                  position: "absolute",
-                  right: "12px",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  cursor: isFormDisabled ? "not-allowed" : "pointer",
-                  fontSize: "16px",
-                  color: isFormDisabled ? "#CCC" : "#666",
-                  userSelect: "none"
-                }}
+                className={`dropdown-arrow-pos ${isFormDisabled ? 'dropdown-arrow-pos-disabled' : 'dropdown-arrow-pos-enabled'}`}
               >
                 ▼
               </div>
 
               {/* Dropdown Menu */}
               {showDropdown && !isFormDisabled && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    left: "0",
-                    right: "0",
-                    backgroundColor: "white",
-                    border: "2px solid #DFE1E6",
-                    borderTop: "none",
-                    borderRadius: "0 0 6px 6px",
-                    maxHeight: "320px",
-                    overflowY: "auto",
-                    zIndex: 1000,
-                    boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                    boxSizing: "border-box"
-                  }}
-                >
+                <div className="action-dropdown-menu">
                   {/* Search Hint */}
                   {!searchTerm && (
-                    <div
-                      style={{
-                        padding: "8px 12px",
-                        fontSize: "11px",
-                        color: "#666",
-                        fontStyle: "italic",
-                        borderBottom: "1px solid #F0F0F0",
-                        backgroundColor: "#FAFAFA"
-                      }}
-                    >
+                    <div className="search-hint">
                       Tip: Type in the field above to search options
                     </div>
                   )}
@@ -5146,23 +4546,26 @@ const IssuePanel = () => {
                             setSelectedAction(option);
                             setShowDropdown(false);
                             setSearchTerm("");
+                            // Clear all form data and state when switching actions
+                            setFormData({});
+                            setPhoneEntries([]);
+                            setRecordDetails({});
+                            setOriginalComplexFields({});
+                            setTemplateFields([]);
+                            setSelectedRecordForUpdate(null);
+                            setSelectedRecord(null);
+                            setSelectedFolder(null);
+                            setOriginalFormData({});
+                            setStoredRequestData(null);
+                            setHasStoredData(false);
+                            setCustomFields([]);
                           }}
-                          style={{
-                            padding: "6px 12px",
-                            cursor: "pointer",
-                            borderBottom: "1px solid #F0F0F0",
-                            backgroundColor: selectedAction?.value === option.value ? "#FFF8CC" : "transparent",
-                            "&:hover": {
-                              backgroundColor: "#F8F9FA"
-                            }
-                          }}
-                          onMouseEnter={(e) => e.target.style.backgroundColor = "#F8F9FA"}
-                          onMouseLeave={(e) => e.target.style.backgroundColor = selectedAction?.value === option.value ? "#FFF8CC" : "transparent"}
+                          className={`action-option-item ${selectedAction?.value === option.value ? 'selected' : ''}`}
                         >
-                          <div style={{ fontWeight: "600", fontSize: "13px", color: "#1A1A1A" }}>
+                          <div className="dropdown-option-title">
                             {option.label}
                           </div>
-                          <div style={{ fontSize: "11px", color: "#6B778C", marginTop: "2px" }}>
+                          <div className="dropdown-option-description">
                             {option.description}
                           </div>
                         </div>
@@ -5170,49 +4573,23 @@ const IssuePanel = () => {
                       
                       {/* Pagination */}
                       {totalPages > 1 && (
-                        <div
-                          style={{
-                            padding: "8px 12px",
-                            borderTop: "1px solid #DFE1E6",
-                            backgroundColor: "#F8F9FA",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            fontSize: "12px"
-                          }}
-                        >
+                        <div className="dropdown-pagination">
                           <button
                             disabled={currentPage === 1}
                             onClick={() => setCurrentPage(prev => prev - 1)}
-                            style={{
-                              padding: "4px 8px",
-                              border: "1px solid #DFE1E6",
-                              backgroundColor: currentPage === 1 ? "#F0F0F0" : "white",
-                              color: currentPage === 1 ? "#999" : "#333",
-                              borderRadius: "4px",
-                              cursor: currentPage === 1 ? "not-allowed" : "pointer",
-                              fontSize: "11px"
-                            }}
+                            className={`pagination-btn ${currentPage === 1 ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
                           >
                             Previous
                           </button>
                           
-                          <span style={{ color: "#6B778C" }}>
+                          <span className="pagination-text">
                             Page {currentPage} of {totalPages} ({filteredOptions.length} items)
                           </span>
                           
                           <button
                             disabled={currentPage === totalPages}
                             onClick={() => setCurrentPage(prev => prev + 1)}
-                            style={{
-                              padding: "4px 8px",
-                              border: "1px solid #DFE1E6",
-                              backgroundColor: currentPage === totalPages ? "#F0F0F0" : "white",
-                              color: currentPage === totalPages ? "#999" : "#333",
-                              borderRadius: "4px",
-                              cursor: currentPage === totalPages ? "not-allowed" : "pointer",
-                              fontSize: "11px"
-                            }}
+                            className={`pagination-btn ${currentPage === totalPages ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
                           >
                             Next
                           </button>
@@ -5220,14 +4597,7 @@ const IssuePanel = () => {
                       )}
                     </>
                   ) : (
-                    <div
-                      style={{
-                        padding: "12px",
-                        textAlign: "center",
-                        color: "#6B778C",
-                        fontSize: "14px"
-                      }}
-                    >
+                    <div className="no-results-message">
                       No actions found matching "{searchTerm}"
                     </div>
                   )}
@@ -5237,14 +4607,7 @@ const IssuePanel = () => {
               {/* Click outside to close dropdown */}
               {showDropdown && (
                 <div
-                  style={{
-                    position: "fixed",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    zIndex: 999
-                  }}
+                  className="fixed-overlay"
                   onClick={() => setShowDropdown(false)}
                 />
               )}
@@ -5252,25 +4615,10 @@ const IssuePanel = () => {
               
               {/* Show description for selected action */}
               {selectedAction && (
-                <div
-                  style={{
-                    marginTop: "8px",
-                    padding: "8px 12px",
-                    backgroundColor: "#F4F5F7",
-                    borderRadius: "4px",
-                    fontSize: "12px",
-                    color: "#6B778C",
-                    border: "1px solid #DFE1E6"
-                  }}
-                >
+                <div className="action-description-box">
                   <strong>{selectedAction.label}:</strong> {selectedAction.description}
                   {selectedAction.value === 'record-update' && (
-                    <div style={{ 
-                      marginTop: "6px", 
-                      fontSize: "11px", 
-                      color: "#0065FF",
-                      fontStyle: "italic" 
-                    }}>
+                    <div className="action-note">
                       Note: Form fields will be blank. Only fill in the fields you want to update - empty fields will be ignored.
                     </div>
                   )}
@@ -5279,72 +4627,31 @@ const IssuePanel = () => {
 
               {/* Dynamic Form Fields */}
               {selectedAction && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields.length > 0 && (
-                <div
-                  style={{
-                    marginTop: "16px",
-                    padding: "16px",
-                    backgroundColor: "#FFFFFF",
-                    borderRadius: "4px",
-                    border: "1px solid #DFE1E6"
-                  }}
-                >
-                  <div
-                    style={{
-                      marginBottom: "12px",
-                      fontWeight: "600",
-                      fontSize: "14px",
-                      color: "#1A1A1A"
-                    }}
-                  >
+                <div className="form-container">
+                  <div className="form-section-heading">
                     Required Information:
                   </div>
 
                   {/* Records Selector for record-update action only */}
                   {selectedAction.value === 'record-update' && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <label
-                        style={{
-                          display: "block",
-                          marginBottom: "8px",
-                          fontWeight: "600",
-                          fontSize: "14px",
-                          color: "#1A1A1A",
-                        }}
-                      >
-                        Step 1: Select Record to Update <span style={{ color: "#FF5630" }}>*</span>
-                      </label>
-                      
-                      {/* Info about the record update process */}
+                    <div className="mb-16">
+                      {isAdmin && (
+                        <>
+                          <label className="label-block">
+                            Step 1: Select Record to Update <span className="text-error">*</span>
+                          </label>
+                          
+                          {/* Info about the record update process */}
                       {!selectedRecordForUpdate && (
-                        <div
-                          style={{
-                            marginBottom: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "11px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1",
-                            fontStyle: "italic"
-                          }}
-                        >
+                        <div className="info-msg-success italic">
                           Select a record to update.
                         </div>
                       )}
                       
                       {/* Records Dropdown Container for Update */}
-                      <div style={{ position: "relative", zIndex: 1000 }}>
+                      <div className="relative z-1000">
                         {loadingRecords ? (
-                          <div style={{
-                            width: "100%",
-                            padding: "8px 12px",
-                            borderRadius: "6px",
-                            border: "2px solid #DFE1E6",
-                            fontSize: "14px",
-                            backgroundColor: "#F5F5F5",
-                            color: "#666",
-                            boxSizing: "border-box"
-                          }}>
+                          <div className="loading-container">
                             Loading records...
                           </div>
                         ) : (
@@ -5377,19 +4684,7 @@ const IssuePanel = () => {
                                   setShowRecordForUpdateDropdown(true);
                                 }
                               }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 40px 8px 12px",
-                                borderRadius: "6px",
-                                border: isFormDisabled ? "2px solid #E0E0E0" : (showRecordForUpdateDropdown ? "2px solid #0066CC" : "2px solid #DFE1E6"),
-                                fontSize: "14px",
-                                backgroundColor: isFormDisabled ? "#F5F5F5" : "white",
-                                color: isFormDisabled ? "#999" : "#000",
-                                outline: "none",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                boxSizing: "border-box",
-                                transition: "border-color 0.2s ease, background-color 0.2s ease"
-                              }}
+                              className={`action-select-input ${isFormDisabled ? 'action-select-input-disabled' : (showRecordForUpdateDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
                             />
                             
                             {/* Records Dropdown Arrow for Update */}
@@ -5399,51 +4694,17 @@ const IssuePanel = () => {
                                   setShowRecordForUpdateDropdown(!showRecordForUpdateDropdown);
                                 }
                               }}
-                              style={{
-                                position: "absolute",
-                                right: "12px",
-                                top: "50%",
-                                transform: "translateY(-50%)",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                fontSize: "16px",
-                                color: isFormDisabled ? "#CCC" : "#666",
-                                userSelect: "none"
-                              }}
+                              className={`dropdown-arrow-pos ${isFormDisabled ? 'dropdown-arrow-pos-disabled' : 'dropdown-arrow-pos-enabled'}`}
                             >
                               ▼
                             </div>
 
                             {/* Records Dropdown Menu for Update */}
                             {showRecordForUpdateDropdown && !isFormDisabled && (
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: "100%",
-                                  left: "0",
-                                  right: "0",
-                                  backgroundColor: "white",
-                                  border: "2px solid #DFE1E6",
-                                  borderTop: "none",
-                                  borderRadius: "0 0 6px 6px",
-                                  maxHeight: "300px",
-                                  overflowY: "auto",
-                                  zIndex: 999,
-                                  boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                                  boxSizing: "border-box"
-                                }}
-                              >
+                              <div className="record-update-dropdown">
                                 {/* Records Search Hint for Update */}
                                 {!recordForUpdateSearchTerm && (
-                                  <div
-                                    style={{
-                                      padding: "8px 12px",
-                                      fontSize: "11px",
-                                      color: "#666",
-                                      fontStyle: "italic",
-                                      borderBottom: "1px solid #F0F0F0",
-                                      backgroundColor: "#FAFAFA"
-                                    }}
-                                  >
+                                  <div className="search-hint-sm">
                                     Tip: Type in the field above to search records
                                   </div>
                                 )}
@@ -5458,9 +4719,9 @@ const IssuePanel = () => {
                                           setSelectedRecordForUpdate(record);
                                           setShowRecordForUpdateDropdown(false);
                                           setRecordForUpdateSearchTerm("");
-                                          // Clear previous record data immediately to avoid showing old custom fields
+                                          // Clear previous record data immediately
                                           setRecordDetails({});
-                                          setDynamicCustomFields([]); // Clear immediately
+                                          setOriginalComplexFields({});
                                           // For record-update, keep the record identifier but clear other fields
                                           setFormData({
                                             record: record.record_uid || record.title // Keep record identifier
@@ -5469,75 +4730,37 @@ const IssuePanel = () => {
                                           setTemplateFields([]);
                                           setOriginalRecordType(null);
                                           setOriginalFormData({});
-                                          // Ensure custom fields stay cleared during loading
-                                          setTimeout(() => setDynamicCustomFields([]), 100);
                                           // Fetch record details but preserve stored data if it exists
                                           const currentStoredData = hasStoredData && storedRequestData ? storedRequestData : null;
                                           fetchKeeperRecordDetails(record.record_uid, currentStoredData);
                                         }}
-                                        style={{
-                                          padding: "8px 12px",
-                                          cursor: "pointer",
-                                          borderBottom: "1px solid #F0F0F0",
-                                          backgroundColor: selectedRecordForUpdate?.record_uid === record.record_uid ? "#FFF8CC" : "transparent",
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F8F9FA"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = selectedRecordForUpdate?.record_uid === record.record_uid ? "#FFF8CC" : "transparent"}
+                                        className={`record-dropdown-item ${selectedRecordForUpdate?.record_uid === record.record_uid ? 'selected' : ''}`}
                                       >
-                                        <div style={{ fontWeight: "600", fontSize: "13px", color: "#1A1A1A" }}>
+                                        <div className="dropdown-option-title">
                                           {record.title}
-                                        </div>
-                                        <div style={{ fontSize: "11px", color: "#6B778C", marginTop: "2px" }}>
-                                          UID: {record.record_uid}
                                         </div>
                                       </div>
                                     ))}
                                     
                                     {/* Records Pagination for Update */}
                                     {totalRecordForUpdatePages > 1 && (
-                                      <div
-                                        style={{
-                                          padding: "8px 12px",
-                                          borderTop: "1px solid #DFE1E6",
-                                          backgroundColor: "#F8F9FA",
-                                          display: "flex",
-                                          justifyContent: "space-between",
-                                          alignItems: "center",
-                                          fontSize: "12px"
-                                        }}
-                                      >
+                                      <div className="dropdown-pagination">
                                         <button
                                           disabled={recordForUpdateCurrentPage === 1}
                                           onClick={() => setRecordForUpdateCurrentPage(prev => prev - 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: recordForUpdateCurrentPage === 1 ? "#F0F0F0" : "white",
-                                            color: recordForUpdateCurrentPage === 1 ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: recordForUpdateCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className={`pagination-btn ${recordForUpdateCurrentPage === 1 ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
                                         >
                                           Previous
                                         </button>
                                         
-                                        <span style={{ color: "#6B778C" }}>
+                                        <span className="pagination-text">
                                           Page {recordForUpdateCurrentPage} of {totalRecordForUpdatePages} ({filteredRecordsForUpdate.length} records)
                                         </span>
                                         
                                         <button
                                           disabled={recordForUpdateCurrentPage === totalRecordForUpdatePages}
                                           onClick={() => setRecordForUpdateCurrentPage(prev => prev + 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: recordForUpdateCurrentPage === totalRecordForUpdatePages ? "#F0F0F0" : "white",
-                                            color: recordForUpdateCurrentPage === totalRecordForUpdatePages ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: recordForUpdateCurrentPage === totalRecordForUpdatePages ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className={`pagination-btn ${recordForUpdateCurrentPage === totalRecordForUpdatePages ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
                                         >
                                           Next
                                         </button>
@@ -5545,14 +4768,7 @@ const IssuePanel = () => {
                                     )}
                                   </>
                                 ) : (
-                                  <div
-                                    style={{
-                                      padding: "12px",
-                                      textAlign: "center",
-                                      color: "#6B778C",
-                                      fontSize: "14px"
-                                    }}
-                                  >
+                                  <div className="no-results-msg">
                                     No records found matching "{recordForUpdateSearchTerm}"
                                   </div>
                                 )}
@@ -5562,14 +4778,7 @@ const IssuePanel = () => {
                             {/* Click outside to close records dropdown for update */}
                             {showRecordForUpdateDropdown && (
                               <div
-                                style={{
-                                  position: "fixed",
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  zIndex: 998
-                                }}
+                                className="click-overlay z-998"
                                 onClick={() => setShowRecordForUpdateDropdown(false)}
                               />
                             )}
@@ -5579,85 +4788,38 @@ const IssuePanel = () => {
                       
                       {/* Selected record for update info */}
                       {selectedRecordForUpdate && (
-                        <div
-                          style={{
-                            marginTop: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1"
-                          }}
-                        >
-                          <div>Selected: <strong>{selectedRecordForUpdate.title}</strong> (UID: {selectedRecordForUpdate.record_uid})</div>
+                        <div className="selected-item-box mt-8">
+                          <div>Selected: <strong>{selectedRecordForUpdate.title}</strong></div>
                           {loadingRecordDetails && (
-                            <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
+                            <div className="text-italic-sm">
                               Loading...
                             </div>
                           )}
                         </div>
                       )}
 
-                      {keeperRecords.length > 0 && (
-                        <div style={{ 
-                          fontSize: '11px', 
-                          color: '#6B778C', 
-                          marginTop: '4px',
-                          fontStyle: 'italic'
-                        }}>
-                          {keeperRecords.length} total records available for update
-                        </div>
+                          {keeperRecords.length > 0 && (
+                            <div className="item-count">
+                              {keeperRecords.length} total records available for update
+                            </div>
+                          )}
+                        </>
                       )}
+
                     </div>
                   )}
 
                   {/* Records Selector for share-record action only */}
-                  {selectedAction.value === 'share-record' && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <label
-                        style={{
-                          display: "block",
-                          marginBottom: "8px",
-                          fontWeight: "600",
-                          fontSize: "14px",
-                          color: "#1A1A1A",
-                        }}
-                      >
-                        Select Record: <span style={{ color: "#FF5630" }}>*</span>
+                  {selectedAction.value === 'share-record' && isAdmin && (
+                    <div className="share-record-selector">
+                      <label className="share-record-label">
+                        Select Record {formData.action === 'cancel' ? '(Required - Record or Folder):' : ':'}
                       </label>
                       
-                      {/* Info about hidden fields */}
-                      {!selectedRecord && (
-                        <div
-                          style={{
-                            marginBottom: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "11px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1",
-                            fontStyle: "italic"
-                          }}
-                        >
-                          Record ID field is hidden for Share Record action. Select a record, enter an email, and choose permission level to enable the Execute button.
-                        </div>
-                      )}
-                      
                       {/* Records Dropdown Container */}
-                      <div style={{ position: "relative", zIndex: 1000 }}>
+                      <div className="relative z-1000">
                         {loadingRecords ? (
-                          <div style={{
-                            width: "100%",
-                            padding: "8px 12px",
-                            borderRadius: "6px",
-                            border: "2px solid #DFE1E6",
-                            fontSize: "14px",
-                            backgroundColor: "#F5F5F5",
-                            color: "#666",
-                            boxSizing: "border-box"
-                          }}>
+                          <div className="loading-container">
                             Loading records...
                           </div>
                         ) : (
@@ -5666,97 +4828,55 @@ const IssuePanel = () => {
                             <input
                               id="keeper-records-input"
                               type="text"
-                              disabled={isFormDisabled}
+                              disabled={isFormDisabled || selectedFolder}
                               placeholder={
-                                isFormDisabled ? "Form disabled..." :
+                                (isFormDisabled || selectedFolder) ? 
+                                  (selectedFolder ? "Disabled (folder selected)" : "Form disabled...") :
                                 showRecordDropdown ? "Type to search records..." : 
                                 (selectedRecord ? selectedRecord.title : "Click to select record...")
                               }
                               value={showRecordDropdown ? recordSearchTerm : (selectedRecord ? selectedRecord.title : "")}
                               onChange={(e) => {
-                                if (!isFormDisabled) {
+                                if (!isFormDisabled && !selectedFolder) {
                                   setRecordSearchTerm(e.target.value);
                                   setShowRecordDropdown(true);
                                 }
                               }}
                               onClick={() => {
-                                if (!isFormDisabled) {
+                                if (!isFormDisabled && !selectedFolder) {
                                   setShowRecordDropdown(!showRecordDropdown);
                                 }
                               }}
                               onFocus={(e) => {
-                                if (!isFormDisabled) {
+                                if (!isFormDisabled && !selectedFolder) {
                                   setRecordSearchTerm("");
                                   setShowRecordDropdown(true);
                                 }
                               }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 40px 8px 12px",
-                                borderRadius: "6px",
-                                border: isFormDisabled ? "2px solid #E0E0E0" : (showRecordDropdown ? "2px solid #0066CC" : "2px solid #DFE1E6"),
-                                fontSize: "14px",
-                                backgroundColor: isFormDisabled ? "#F5F5F5" : "white",
-                                color: isFormDisabled ? "#999" : "#000",
-                                outline: "none",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                boxSizing: "border-box",
-                                transition: "border-color 0.2s ease, background-color 0.2s ease"
-                              }}
+                              className={`action-select-input ${(isFormDisabled || selectedFolder) ? 'action-select-input-disabled' : (showRecordDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
                             />
                             
                             {/* Records Dropdown Arrow */}
-                            <div
-                              onClick={() => {
-                                if (!isFormDisabled) {
-                                  setShowRecordDropdown(!showRecordDropdown);
-                                }
-                              }}
-                              style={{
-                                position: "absolute",
-                                right: "12px",
-                                top: "50%",
-                                transform: "translateY(-50%)",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                fontSize: "16px",
-                                color: isFormDisabled ? "#CCC" : "#666",
-                                userSelect: "none"
-                              }}
-                            >
-                              ▼
-                            </div>
+                            {!isFormDisabled && !selectedFolder && (
+                              <div
+                                onClick={() => {
+                                  if (!isFormDisabled && !selectedFolder) {
+                                    setShowRecordDropdown(!showRecordDropdown);
+                                  }
+                                }}
+                                className="dropdown-arrow-pos dropdown-arrow-pos-enabled"
+                              >
+                                ▼
+                              </div>
+                            )}
 
                             {/* Records Dropdown Menu */}
-                            {showRecordDropdown && !isFormDisabled && (
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: "100%",
-                                  left: "0",
-                                  right: "0",
-                                  backgroundColor: "white",
-                                  border: "2px solid #DFE1E6",
-                                  borderTop: "none",
-                                  borderRadius: "0 0 6px 6px",
-                                  maxHeight: "300px",
-                                  overflowY: "auto",
-                                  zIndex: 999,
-                                  boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                                  boxSizing: "border-box"
-                                }}
-                              >
+                            {showRecordDropdown && !isFormDisabled && !selectedFolder && (
+                              <div className="record-update-dropdown">
+
                                 {/* Records Search Hint */}
                                 {!recordSearchTerm && (
-                                  <div
-                                    style={{
-                                      padding: "8px 12px",
-                                      fontSize: "11px",
-                                      color: "#666",
-                                      fontStyle: "italic",
-                                      borderBottom: "1px solid #F0F0F0",
-                                      backgroundColor: "#FAFAFA"
-                                    }}
-                                  >
+                                  <div className="search-hint-sm">
                                     Tip: Type in the field above to search records
                                   </div>
                                 )}
@@ -5773,21 +4893,15 @@ const IssuePanel = () => {
                                           setRecordSearchTerm("");
                                           // Auto-populate the Record ID/Title field
                                           handleInputChange('record', record.record_uid);
-                                          // Auto-populate the Email field with issue creator's email
-                                          if (issueContext?.issueCreatorEmail) {
-                                            handleInputChange('user', issueContext.issueCreatorEmail);
+                                          // Auto-populate the Email field with current user's email only if not already set
+                                          // This prevents overwriting the non-admin user's email when admin is viewing saved request
+                                          if (issueContext?.currentUserEmail && !formData.user) {
+                                            handleInputChange('user', issueContext.currentUserEmail);
                                           }
                                         }}
-                                        style={{
-                                          padding: "8px 12px",
-                                          cursor: "pointer",
-                                          borderBottom: "1px solid #F0F0F0",
-                                          backgroundColor: selectedRecord?.record_uid === record.record_uid ? "#FFF8CC" : "transparent",
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F8F9FA"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = selectedRecord?.record_uid === record.record_uid ? "#FFF8CC" : "transparent"}
+                                        className={`dropdown-item ${selectedRecord?.record_uid === record.record_uid ? 'selected' : ''}`}
                                       >
-                                        <div style={{ fontWeight: "600", fontSize: "13px", color: "#1A1A1A" }}>
+                                        <div className="dropdown-option-title">
                                           {record.title}
                                         </div>
                                       </div>
@@ -5795,49 +4909,23 @@ const IssuePanel = () => {
                                     
                                     {/* Records Pagination */}
                                     {totalRecordPages > 1 && (
-                                      <div
-                                        style={{
-                                          padding: "8px 12px",
-                                          borderTop: "1px solid #DFE1E6",
-                                          backgroundColor: "#F8F9FA",
-                                          display: "flex",
-                                          justifyContent: "space-between",
-                                          alignItems: "center",
-                                          fontSize: "12px"
-                                        }}
-                                      >
+                                      <div className="pagination-container">
                                         <button
                                           disabled={recordCurrentPage === 1}
                                           onClick={() => setRecordCurrentPage(prev => prev - 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: recordCurrentPage === 1 ? "#F0F0F0" : "white",
-                                            color: recordCurrentPage === 1 ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: recordCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className="pagination-button"
                                         >
                                           Previous
                                         </button>
                                         
-                                        <span style={{ color: "#6B778C" }}>
+                                        <span className="pagination-info">
                                           Page {recordCurrentPage} of {totalRecordPages} ({filteredRecords.length} records)
                                         </span>
                                         
                                         <button
                                           disabled={recordCurrentPage === totalRecordPages}
                                           onClick={() => setRecordCurrentPage(prev => prev + 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: recordCurrentPage === totalRecordPages ? "#F0F0F0" : "white",
-                                            color: recordCurrentPage === totalRecordPages ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: recordCurrentPage === totalRecordPages ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className="pagination-button"
                                         >
                                           Next
                                         </button>
@@ -5845,14 +4933,7 @@ const IssuePanel = () => {
                                     )}
                                   </>
                                 ) : (
-                                  <div
-                                    style={{
-                                      padding: "12px",
-                                      textAlign: "center",
-                                      color: "#6B778C",
-                                      fontSize: "14px"
-                                    }}
-                                  >
+                                  <div className="dropdown-no-results">
                                     No records found matching "{recordSearchTerm}"
                                   </div>
                                 )}
@@ -5862,14 +4943,7 @@ const IssuePanel = () => {
                             {/* Click outside to close records dropdown */}
                             {showRecordDropdown && (
                               <div
-                                style={{
-                                  position: "fixed",
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  zIndex: 998
-                                }}
+                                className="click-overlay z-998"
                                 onClick={() => setShowRecordDropdown(false)}
                               />
                             )}
@@ -5879,100 +4953,289 @@ const IssuePanel = () => {
                       
                       {/* Selected record info */}
                       {selectedRecord && (
-                        <div
-                          style={{
-                            marginTop: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1"
-                          }}
-                        >
-                          <div>Selected: <strong>{selectedRecord.title}</strong> (UID: {selectedRecord.record_uid})</div>
-                          {selectedAction?.value === 'share-record' && (
-                            <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                              Record ID will be sent automatically: {selectedRecord.record_uid}
-                            </div>
-                          )}
+                        <div className="share-record-selected-box">
+                          <div className="share-record-selected-content">
+                            <span>Selected: <span className="share-record-selected-text">{selectedRecord.title}</span></span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedRecord(null);
+                                setFormData(prev => ({ ...prev, record: '' }));
+                              }}
+                              disabled={isFormDisabled}
+                              className="share-record-clear-btn"
+                              title="Clear selection"
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </div>
                       )}
 
                       {keeperRecords.length > 0 && (
-                        <div style={{ 
-                          fontSize: '11px', 
-                          color: '#6B778C', 
-                          marginTop: '4px',
-                          fontStyle: 'italic'
-                        }}>
+                        <div className="share-record-count">
                           {keeperRecords.length} total records available
                         </div>
                       )}
                     </div>
                   )}
 
-                  {/* Folders Selector for share-folder action only */}
-                  {selectedAction.value === 'share-folder' && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <label
-                        style={{
-                          display: "block",
-                          marginBottom: "8px",
-                          fontWeight: "600",
-                          fontSize: "14px",
-                          color: "#1A1A1A",
-                        }}
-                      >
-                        Select Folder: <span style={{ color: "#FF5630" }}>*</span>
-                      </label>
-                      
-                      {/* Info about hidden fields */}
-                      {!selectedFolder && (
-                        <div
-                          style={{
-                            marginBottom: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "11px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1",
-                            fontStyle: "italic"
-                          }}
-                        >
-                          Folder Path field is hidden for Share Folder action. Select a folder, enter an email, and choose permission level to enable the Execute button.
+                  {/* Folder Selector for share-record action (dropdowns for admin only, text areas for all) */}
+                  {selectedAction.value === 'share-record' && (
+                    <div className="share-record-selector">
+                      {isAdmin && (
+                        <>
+                          <label className="share-record-label">
+                            Select Folder {formData.action === 'cancel' ? '(Required - Record or Folder):' : ':'}
+                          </label>
+                          
+                          {/* Info message when folder is selected */}
+                          {selectedFolder && (
+                            <div className="share-record-selected-box">
+                              <div className="share-record-selected-content">
+                                <span>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.folderPath}</span></span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedFolder(null);
+                                    setFormData(prev => ({ ...prev, sharedFolder: '' }));
+                                  }}
+                                  disabled={isFormDisabled}
+                                  className="share-record-clear-btn"
+                                  title="Clear selection"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Folders Dropdown Container with search and pagination */}
+                          <div className="relative z-997">
+                        {loadingFolders ? (
+                          <div className="loading-container">
+                            Loading folders...
+                          </div>
+                        ) : (
+                          <>
+                            {/* Folder Search Input */}
+                            <input
+                              type="text"
+                              disabled={isFormDisabled || selectedRecord || (formData.action === 'cancel' && !isAdmin)}
+                              placeholder={
+                                (isFormDisabled || selectedRecord || (formData.action === 'cancel' && !isAdmin)) ? 
+                                  ((formData.action === 'cancel' && !isAdmin) ? "Folder selection available for admin users only" : "Disabled (record selected)") :
+                                showFolderDropdown ? "Type to search folders..." : 
+                                (selectedFolder ? selectedFolder.name || selectedFolder.folderPath : "Click to select folder...")
+                              }
+                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? selectedFolder.name || selectedFolder.folderPath : "")}
+                              onChange={(e) => {
+                                if (!isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin)) {
+                                  setFolderSearchTerm(e.target.value);
+                                  setFolderCurrentPage(1);
+                                  setShowFolderDropdown(true);
+                                }
+                              }}
+                              onClick={() => {
+                                if (!isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin)) {
+                                  setShowFolderDropdown(!showFolderDropdown);
+                                  if (!showFolderDropdown) {
+                                    setFolderSearchTerm("");
+                                    setFolderCurrentPage(1);
+                                  }
+                                }
+                              }}
+                              onFocus={(e) => {
+                                if (!isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin)) {
+                                  setFolderSearchTerm("");
+                                  setShowFolderDropdown(true);
+                                }
+                              }}
+                              className={`folder-select-input ${
+                                (isFormDisabled || selectedRecord || (formData.action === 'cancel' && !isAdmin)) ? 'folder-select-input-disabled' : 
+                                showFolderDropdown ? 'folder-select-input-focused' :
+                                selectedFolder ? 'folder-select-input-selected' :
+                                'folder-select-input-default'
+                              }`}
+                            />
+                            
+                            {/* Dropdown arrow icon */}
+                            {!isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin) && (
+                              <div className="dropdown-arrow-positioned">
+                                ▼
+                              </div>
+                            )}
+                            
+                            {/* Folder Dropdown with search results */}
+                            {showFolderDropdown && !isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin) && (() => {
+                              // Filter shared folders
+                              const sharedFolders = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
+                              
+                              // Apply search filter
+                              const searchFiltered = sharedFolders.filter(folder =>
+                                (folder.name || folder.folderPath || '').toLowerCase().includes(folderSearchTerm.toLowerCase())
+                              );
+                              
+                              // Pagination
+                              const totalPages = Math.ceil(searchFiltered.length / foldersPerPage);
+                              const startIdx = (folderCurrentPage - 1) * foldersPerPage;
+                              const paginatedItems = searchFiltered.slice(startIdx, startIdx + foldersPerPage);
+                              
+                              return (
+                                <>
+                                  {/* Fixed overlay to close dropdown */}
+                                  <div
+                                    className="click-overlay z-996"
+                                    onClick={() => {
+                                      setShowFolderDropdown(false);
+                                      setFolderSearchTerm("");
+                                      setFolderCurrentPage(1);
+                                    }}
+                                  />
+                                  
+                                  {/* Dropdown container */}
+                                  <div className="dropdown-container z-997">
+                                    {paginatedItems.length === 0 ? (
+                                      <div className="dropdown-no-results">
+                                        {sharedFolders.length === 0 ? 'No shared folders found' : 'No matching folders'}
+                                      </div>
+                                    ) : (
+                                      paginatedItems.map((folder, index) => (
+                                        <div
+                                          key={index}
+                                          className={`dropdown-item ${selectedFolder?.folder_uid === folder.folder_uid ? 'selected' : ''}`}
+                                          onClick={() => {
+                                            setSelectedFolder(folder);
+                                            handleInputChange('sharedFolder', folder.folderUid || folder.folder_uid);
+                                            setShowFolderDropdown(false);
+                                            setFolderSearchTerm("");
+                                            setFolderCurrentPage(1);
+                                          }}
+                                        >
+                                          <div className="font-semibold text-base text-primary">
+                                            {folder.name || folder.folderPath}
+                                          </div>
+                                        </div>
+                                      ))
+                                    )}
+                                    
+                                    {/* Pagination controls */}
+                                    {totalPages > 1 && (
+                                      <div className="pagination-container">
+                                        <button
+                                          disabled={folderCurrentPage === 1}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setFolderCurrentPage(prev => prev - 1);
+                                          }}
+                                          className="pagination-button"
+                                        >
+                                          Previous
+                                        </button>
+                                        <span className="pagination-info">
+                                          Page {folderCurrentPage} of {totalPages}
+                                        </span>
+                                        <button
+                                          disabled={folderCurrentPage >= totalPages}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setFolderCurrentPage(prev => prev + 1);
+                                          }}
+                                          className="pagination-button"
+                                        >
+                                          Next
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </>
+                        )}
+                      </div>
+
+                          {(() => {
+                            const sharedFolders = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
+                            return sharedFolders.length > 0 && (
+                              <div className="share-record-count">
+                                {sharedFolders.length} shared folders available
+                              </div>
+                            );
+                          })()}
+                        </>
+                      )}
+
+                      {/* Info message and requirement text area */}
+                      {/* Hide Requirements and Justification when admin selects cancel action */}
+                      {!(isAdmin && formData.action === 'cancel') && (
+                        <div className="share-record-textarea-wrapper">
+                          {/* Only show info message if cancel is NOT selected */}
+                          {formData.action !== 'cancel' && (
+                            <div className="share-record-info-message">
+                              {isAdmin 
+                                ? 'Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.'
+                                : 'Provide your requirement and justification for this request. An admin will review and process it.'}
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="share-record-label">
+                              Requirements {!isAdmin && <span className="text-error">*</span>}:
+                            </label>
+                            <textarea
+                              value={formData.requirements || ''}
+                              onChange={(e) => handleInputChange('requirements', e.target.value)}
+                              placeholder="Describe your requirements if you're not sure which record or folder to select..."
+                              disabled={isFormDisabled}
+                              className="share-record-textarea"
+                            />
+                          </div>
+
+                          <div className="share-record-textarea-wrapper">
+                            <label className="share-record-label">
+                              Justification for this Request:
+                            </label>
+                            <textarea
+                              value={formData.justification || ''}
+                              onChange={(e) => handleInputChange('justification', e.target.value)}
+                              placeholder="Explain why you need access to this record or folder..."
+                              disabled={isFormDisabled}
+                              className="share-record-textarea"
+                            />
+                          </div>
                         </div>
                       )}
-                      
-                      {/* Folders Dropdown Container */}
-                      <div style={{ position: "relative", zIndex: 999 }}>
+                    </div>
+                  )}
+
+                  {/* Folders Selector for record-permission and share-folder actions */}
+                  {(selectedAction.value === 'record-permission' || selectedAction.value === 'share-folder') && (
+                    <div className="share-record-selector">
+                      {isAdmin && (
+                        <>
+                          <label className="share-record-label">
+                            Select Folder: <span className="text-error">*</span>
+                          </label>
+
+                          {/* Folders Dropdown Container */}
+                          <div className="relative z-997">
                         {loadingFolders ? (
-                          <div style={{
-                            width: "100%",
-                            padding: "8px 12px",
-                            borderRadius: "6px",
-                            border: "2px solid #DFE1E6",
-                            fontSize: "14px",
-                            backgroundColor: "#F5F5F5",
-                            color: "#666",
-                            boxSizing: "border-box"
-                          }}>
+                          <div className="loading-container">
                             Loading folders...
                           </div>
                         ) : (
                           <>
                             {/* Folders Search Input */}
                             <input
-                              id="keeper-folders-input"
                               type="text"
                               disabled={isFormDisabled}
                               placeholder={
                                 isFormDisabled ? "Form disabled..." :
                                 showFolderDropdown ? "Type to search folders..." : 
-                                (selectedFolder ? (selectedFolder.name || selectedFolder.title) : "Click to select folder...")
+                                (selectedFolder ? selectedFolder.name || selectedFolder.title : "Click to select folder...")
                               }
-                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? (selectedFolder.name || selectedFolder.title) : "")}
+                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? selectedFolder.name || selectedFolder.title : "")}
                               onChange={(e) => {
                                 if (!isFormDisabled) {
                                   setFolderSearchTerm(e.target.value);
@@ -5990,159 +5253,75 @@ const IssuePanel = () => {
                                   setShowFolderDropdown(true);
                                 }
                               }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 40px 8px 12px",
-                                borderRadius: "6px",
-                                border: isFormDisabled ? "2px solid #E0E0E0" : (showFolderDropdown ? "2px solid #0066CC" : "2px solid #DFE1E6"),
-                                fontSize: "14px",
-                                backgroundColor: isFormDisabled ? "#F5F5F5" : "white",
-                                color: isFormDisabled ? "#999" : "#000",
-                                outline: "none",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                boxSizing: "border-box",
-                                transition: "border-color 0.2s ease, background-color 0.2s ease"
-                              }}
+                              className={`action-select-input ${isFormDisabled ? 'action-select-input-disabled' : (showFolderDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
                             />
                             
                             {/* Folders Dropdown Arrow */}
-                            <div
-                              onClick={() => {
-                                if (!isFormDisabled) {
-                                  setShowFolderDropdown(!showFolderDropdown);
-                                }
-                              }}
-                              style={{
-                                position: "absolute",
-                                right: "12px",
-                                top: "50%",
-                                transform: "translateY(-50%)",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                fontSize: "16px",
-                                color: isFormDisabled ? "#CCC" : "#666",
-                                userSelect: "none"
-                              }}
-                            >
-                              ▼
-                            </div>
+                            {!isFormDisabled && (
+                              <div
+                                onClick={() => {
+                                  if (!isFormDisabled) {
+                                    setShowFolderDropdown(!showFolderDropdown);
+                                  }
+                                }}
+                                className="dropdown-arrow-pos dropdown-arrow-pos-enabled"
+                              >
+                                ▼
+                              </div>
+                            )}
 
                             {/* Folders Dropdown Menu */}
                             {showFolderDropdown && !isFormDisabled && (
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: "100%",
-                                  left: "0",
-                                  right: "0",
-                                  backgroundColor: "white",
-                                  border: "2px solid #DFE1E6",
-                                  borderTop: "none",
-                                  borderRadius: "0 0 6px 6px",
-                                  maxHeight: "300px",
-                                  overflowY: "auto",
-                                  zIndex: 998,
-                                  boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
-                                  boxSizing: "border-box"
-                                }}
-                              >
+                              <div className="record-update-dropdown">
+
                                 {/* Folders Search Hint */}
                                 {!folderSearchTerm && (
-                                  <div
-                                    style={{
-                                      padding: "8px 12px",
-                                      fontSize: "11px",
-                                      color: "#666",
-                                      fontStyle: "italic",
-                                      borderBottom: "1px solid #F0F0F0",
-                                      backgroundColor: "#FAFAFA"
-                                    }}
-                                  >
+                                  <div className="search-hint-sm">
                                     Tip: Type in the field above to search folders
                                   </div>
                                 )}
 
                                 {/* Folders Options */}
-                                {paginatedFolders.length > 0 ? (
+                                {filteredFolders.length > 0 ? (
                                   <>
-                                    {paginatedFolders.map((folder, index) => (
+                                    {paginatedFolders.map((folder) => (
                                       <div
-                                        key={folder.uid || folder.path || index}
+                                        key={folder.folder_uid}
                                         onClick={() => {
                                           setSelectedFolder(folder);
                                           setShowFolderDropdown(false);
                                           setFolderSearchTerm("");
-                                          // Auto-populate the Folder Path field with folder UID
-                                          handleInputChange('folder', folder.uid || folder.path || folder.name);
-                                          // Auto-populate the Email field with issue creator's email
-                                          if (issueContext?.issueCreatorEmail) {
-                                            handleInputChange('user', issueContext.issueCreatorEmail);
-                                          }
+                                          // Set different field name based on action type
+                                          const fieldName = selectedAction.value === 'record-permission' ? 'sharedFolder' : 'folder';
+                                          handleInputChange(fieldName, folder.folder_uid);
                                         }}
-                                        style={{
-                                          padding: "8px 12px",
-                                          cursor: "pointer",
-                                          borderBottom: "1px solid #F0F0F0",
-                                          backgroundColor: selectedFolder?.uid === folder.uid ? "#FFF8CC" : "transparent",
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F8F9FA"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = selectedFolder?.uid === folder.uid ? "#FFF8CC" : "transparent"}
+                                        className={`dropdown-item ${selectedFolder?.folder_uid === folder.folder_uid ? 'selected' : ''}`}
                                       >
-                                        <div style={{ fontWeight: "600", fontSize: "13px", color: "#1A1A1A" }}>
+                                        <div className="dropdown-option-title">
                                           {folder.name || folder.title}
                                         </div>
-                                        {folder.uid && (
-                                          <div style={{ fontSize: "11px", color: "#6B778C", marginTop: "2px" }}>
-                                            UID: {folder.uid}
-                                          </div>
-                                        )}
                                       </div>
                                     ))}
                                     
                                     {/* Folders Pagination */}
                                     {totalFolderPages > 1 && (
-                                      <div
-                                        style={{
-                                          padding: "8px 12px",
-                                          borderTop: "1px solid #DFE1E6",
-                                          backgroundColor: "#F8F9FA",
-                                          display: "flex",
-                                          justifyContent: "space-between",
-                                          alignItems: "center",
-                                          fontSize: "12px"
-                                        }}
-                                      >
+                                      <div className="pagination-container">
                                         <button
                                           disabled={folderCurrentPage === 1}
                                           onClick={() => setFolderCurrentPage(prev => prev - 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: folderCurrentPage === 1 ? "#F0F0F0" : "white",
-                                            color: folderCurrentPage === 1 ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: folderCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className="pagination-button"
                                         >
                                           Previous
                                         </button>
                                         
-                                        <span style={{ color: "#6B778C" }}>
+                                        <span className="pagination-info">
                                           Page {folderCurrentPage} of {totalFolderPages} ({filteredFolders.length} folders)
                                         </span>
                                         
                                         <button
                                           disabled={folderCurrentPage === totalFolderPages}
                                           onClick={() => setFolderCurrentPage(prev => prev + 1)}
-                                          style={{
-                                            padding: "4px 8px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: folderCurrentPage === totalFolderPages ? "#F0F0F0" : "white",
-                                            color: folderCurrentPage === totalFolderPages ? "#999" : "#333",
-                                            borderRadius: "4px",
-                                            cursor: folderCurrentPage === totalFolderPages ? "not-allowed" : "pointer",
-                                            fontSize: "11px"
-                                          }}
+                                          className="pagination-button"
                                         >
                                           Next
                                         </button>
@@ -6150,14 +5329,7 @@ const IssuePanel = () => {
                                     )}
                                   </>
                                 ) : (
-                                  <div
-                                    style={{
-                                      padding: "12px",
-                                      textAlign: "center",
-                                      color: "#6B778C",
-                                      fontSize: "14px"
-                                    }}
-                                  >
+                                  <div className="dropdown-no-results">
                                     No folders found matching "{folderSearchTerm}"
                                   </div>
                                 )}
@@ -6167,14 +5339,7 @@ const IssuePanel = () => {
                             {/* Click outside to close folders dropdown */}
                             {showFolderDropdown && (
                               <div
-                                style={{
-                                  position: "fixed",
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  zIndex: 997
-                                }}
+                                className="click-overlay z-998"
                                 onClick={() => setShowFolderDropdown(false)}
                               />
                             )}
@@ -6184,866 +5349,106 @@ const IssuePanel = () => {
                       
                       {/* Selected folder info */}
                       {selectedFolder && (
-                        <div
-                          style={{
-                            marginTop: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1"
-                          }}
-                        >
-                          <div>Selected: <strong>{selectedFolder.name || selectedFolder.title}</strong></div>
-                          {selectedFolder.uid && (
-                            <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                              Folder UID will be sent automatically: {selectedFolder.uid}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {keeperFolders.length > 0 && (
-                        <div style={{ 
-                          fontSize: '11px', 
-                          color: '#6B778C', 
-                          marginTop: '4px',
-                          fontStyle: 'italic'
-                        }}>
-                          {keeperFolders.length} total folders available
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Folders Selector for record-permission action only */}
-                  {selectedAction.value === 'record-permission' && (
-                    <div style={{ marginBottom: "16px" }}>
-                      <label
-                        style={{
-                          display: "block",
-                          marginBottom: "8px",
-                          fontSize: "13px",
-                          fontWeight: "500",
-                          color: "#1A1A1A",
-                        }}
-                      >
-                        Select Shared Folder: <span style={{ color: "#FF5630" }}>*</span>
-                      </label>
-                      
-                      {/* Info about record-permission workflow */}
-                      {!selectedFolder && (
-                        <div
-                          style={{
-                            marginBottom: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "11px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1",
-                            fontStyle: "italic"
-                          }}
-                        >
-                          Shared Folder field is hidden for Record Permission action. Select a shared folder and configure permissions to enable the Execute button. Changes apply to all users in the folder.
-                        </div>
-                      )}
-                      
-                      {/* Folders Dropdown Container */}
-                      <div style={{ position: "relative", zIndex: 998 }}>
-                        {loadingFolders ? (
-                          <div style={{
-                            width: "100%",
-                            padding: "8px 12px",
-                            borderRadius: "6px",
-                            border: "2px solid #DFE1E6",
-                            fontSize: "14px",
-                            backgroundColor: "#F5F5F5",
-                            color: "#666",
-                            boxSizing: "border-box"
-                          }}>
-                            Loading shared folders...
-                          </div>
-                        ) : (
-                          <>
-                            {/* Folders Search Input */}
-                            <input
-                              id="keeper-folders-permissions-input"
-                              type="text"
-                              disabled={isFormDisabled}
-                              placeholder={
-                                isFormDisabled ? "Form disabled..." :
-                                showFolderDropdown ? "Type to search folders..." : 
-                                (selectedFolder ? selectedFolder.name || selectedFolder.title : "Click to select shared folder...")
-                              }
-                              value={folderSearchTerm}
+                        <div className="share-record-selected-box">
+                          <div className="share-record-selected-content">
+                            <span>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.title}</span></span>
+                            <button
+                              type="button"
                               onClick={() => {
-                                if (!isFormDisabled) {
-                                  setShowFolderDropdown(true);
-                                }
+                                setSelectedFolder(null);
+                                setFormData(prev => ({ ...prev, folder: '' }));
                               }}
-                              onChange={(e) => {
-                                setFolderSearchTerm(e.target.value);
-                                setFolderCurrentPage(1);
-                                if (!showFolderDropdown) setShowFolderDropdown(true);
-                              }}
-                              onBlur={(e) => {
-                                setTimeout(() => {
-                                  if (!e.currentTarget.contains(document.activeElement)) {
-                                    setShowFolderDropdown(false);
-                                  }
-                                }, 150);
-                              }}
-                              style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                borderRadius: "6px",
-                                border: selectedFolder ? "2px solid #006644" : "2px solid #DFE1E6",
-                                fontSize: "14px",
-                                backgroundColor: isFormDisabled ? "#F5F5F5" : selectedFolder ? "#F8FFF8" : "white",
-                                color: isFormDisabled ? "#999" : "#000",
-                                cursor: isFormDisabled ? "not-allowed" : "pointer",
-                                outline: "none",
-                                boxSizing: "border-box"
-                              }}
-                            />
-                            
-                            {/* Folders Dropdown */}
-                            {showFolderDropdown && !isFormDisabled && (
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: "100%",
-                                  left: 0,
-                                  right: 0,
-                                  backgroundColor: "white",
-                                  border: "1px solid #DFE1E6",
-                                  borderRadius: "6px",
-                                  boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-                                  zIndex: 1001,
-                                  maxHeight: "200px",
-                                  overflowY: "auto"
-                                }}
-                              >
-                                {paginatedFolders.map((folder) => (
-                                  <div
-                                    key={folder.folder_uid}
-                                    onClick={() => {
-                                      setSelectedFolder(folder);
-                                      setFormData(prev => ({ ...prev, sharedFolder: folder.folder_uid }));
-                                      setFolderSearchTerm(folder.name || folder.title || `Folder ${folder.folder_uid}`);
-                                      setShowFolderDropdown(false);
-                                    }}
-                                    style={{
-                                      padding: "8px 12px",
-                                      cursor: "pointer",
-                                      borderBottom: "1px solid #F4F5F7"
-                                    }}
-                                    onMouseEnter={(e) => {
-                                      e.target.style.backgroundColor = "#F4F5F7";
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.target.style.backgroundColor = "white";
-                                    }}
-                                  >
-                                    <div style={{ fontSize: "14px", fontWeight: "500" }}>
-                                      {folder.name || folder.title || `Folder ${folder.folder_uid}`}
-                                    </div>
-                                    <div style={{ fontSize: "11px", color: "#6B778C", marginTop: "2px" }}>
-                                      UID: {folder.folder_uid} • Shared Folder (flags: {folder.flags})
-                                    </div>
-                                  </div>
-                                ))}
-                                
-                                {/* Pagination Controls */}
-                                {totalFolderPages > 1 && (
-                                  <div style={{
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                    padding: "8px 12px",
-                                    backgroundColor: "#F8F9FA",
-                                    borderTop: "1px solid #E1E5E9"
-                                  }}>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (folderCurrentPage > 1) {
-                                          setFolderCurrentPage(folderCurrentPage - 1);
-                                        }
-                                      }}
-                                      disabled={folderCurrentPage <= 1}
-                                      style={{
-                                        padding: "4px 8px",
-                                        fontSize: "11px",
-                                        border: "1px solid #DFE1E6",
-                                        borderRadius: "4px",
-                                        backgroundColor: folderCurrentPage <= 1 ? "#F5F5F5" : "white",
-                                        cursor: folderCurrentPage <= 1 ? "not-allowed" : "pointer"
-                                      }}
-                                    >
-                                      Previous
-                                    </button>
-                                    <span style={{ fontSize: "11px", color: "#6B778C" }}>
-                                      Page {folderCurrentPage} of {totalFolderPages}
-                                    </span>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (folderCurrentPage < totalFolderPages) {
-                                          setFolderCurrentPage(folderCurrentPage + 1);
-                                        }
-                                      }}
-                                      disabled={folderCurrentPage >= totalFolderPages}
-                                      style={{
-                                        padding: "4px 8px",
-                                        fontSize: "11px",
-                                        border: "1px solid #DFE1E6",
-                                        borderRadius: "4px",
-                                        backgroundColor: folderCurrentPage >= totalFolderPages ? "#F5F5F5" : "white",
-                                        cursor: folderCurrentPage >= totalFolderPages ? "not-allowed" : "pointer"
-                                      }}
-                                    >
-                                      Next
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-
-                      {/* Selected Folder Display */}
-                      {selectedFolder && (
-                        <div
-                          style={{
-                            marginTop: "8px",
-                            padding: "8px 12px",
-                            backgroundColor: "#E3FCEF",
-                            borderRadius: "4px",
-                            fontSize: "12px",
-                            color: "#006644",
-                            border: "1px solid #ABF5D1"
-                          }}
-                        >
-                          <div>Selected: <strong>{selectedFolder.name || selectedFolder.title}</strong></div>
-                          <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                            Folder UID will be used for record-permission command: {selectedFolder.folder_uid}
-                          </div>
-                        </div>
-                      )}
-
-                      {getFilteredFolders().length > 0 && (
-                        <div style={{ 
-                          fontSize: '11px', 
-                          color: '#6B778C', 
-                          marginTop: '4px',
-                          fontStyle: 'italic'
-                        }}>
-                          {getFilteredFolders().length} shared folders available (filtered for "S" flag only)
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Folders and Records Selector for pam-action-rotate action */}
-                  {selectedAction.value === 'pam-action-rotate' && (  
-                    <div>
-                      {/* Info about pam-action-rotate workflow */}
-                      {!selectedPamResource && !selectedFolder && (
-                        <div style={{ marginBottom: "16px" }}>
-                          <div
-                            style={{
-                              padding: "8px 12px",
-                              backgroundColor: "#E3FCEF",
-                              borderRadius: "4px",
-                              fontSize: "11px",
-                              color: "#006644",
-                              border: "1px solid #ABF5D1",
-                              fontStyle: "italic",
-                              marginBottom: "8px"
-                            }}
-                          >
-                            PAM Action Rotate shows available PAM resources - Keeper records with types like 'pamMachine', 'pamUser', 'pamDatabase'. Choose target type and select the appropriate PAM resource or folder for password rotation.
-                          </div>
-                          
-                          {/* PAM Configuration Warning */}
-                          <div
-                            style={{
-                              padding: "8px 12px",
-                              backgroundColor: "#FFF3CD",
-                              borderRadius: "4px",
-                              fontSize: "11px",
-                              color: "#856404",
-                              border: "1px solid #FFEAA7",
-                              fontStyle: "italic"
-                            }}
-                          >
-                            <strong>Prerequisites:</strong> Ensure you have a PAM Configuration set up in Keeper Vault with:
-                            <br />• Associated Gateway configured and running
-                            <br />• "Rotation" feature enabled in PAM Settings
-                            <br />• Proper access permissions to the PAM Configuration
-                            <br />• Records with PAM types (pamMachine, pamUser, pamDatabase) created
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Show record or folder selector based on target_type */}
-                      {formData.target_type === 'record' && (
-                        <div style={{ marginBottom: "16px" }}>
-                          <label
-                            style={{
-                              display: "block",
-                              marginBottom: "8px", 
-                              fontSize: "13px",
-                              fontWeight: "500",
-                              color: "#1A1A1A",
-                            }}
-                          >
-                            Select PAM Resource: <span style={{ color: "#FF5630" }}>*</span>
-                          </label>
-
-                          {/* PAM Resources Dropdown Container */}
-                          <div style={{ position: "relative", zIndex: 997 }}>
-                            {loadingPamResources ? (
-                              <div style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                borderRadius: "6px",
-                                border: "2px solid #DFE1E6",
-                                fontSize: "14px",
-                                backgroundColor: "#F5F5F5",
-                                color: "#666",
-                                boxSizing: "border-box"
-                              }}>
-                                Loading PAM resources...
-                              </div>
-                            ) : (
-                              <>
-                                {/* PAM Resources Search Input */}
-                                <input
-                                  type="text"
-                                  placeholder="Search PAM resources..."
-                                  value={pamResourceSearchTerm}
-                                  onChange={(e) => {
-                                    setPamResourceSearchTerm(e.target.value);
-                                    setPamResourceCurrentPage(1);
-                                  }}
-                                  onClick={() => setShowPamResourceDropdown(true)}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 12px",
-                                    borderRadius: "6px",
-                                    border: "2px solid #DFE1E6",
-                                    fontSize: "14px",
-                                    backgroundColor: "#FAFBFC",
-                                    cursor: "pointer",
-                                    boxSizing: "border-box"
-                                  }}
-                                />
-
-                                {/* PAM Resources Dropdown */}
-                                {showPamResourceDropdown && paginatedPamResources.length > 0 && (
-                                  <div
-                                    style={{
-                                      position: "absolute",
-                                      top: "100%",
-                                      left: "0",
-                                      right: "0",
-                                      backgroundColor: "#fff",
-                                      border: "2px solid #DFE1E6",
-                                      borderRadius: "6px",
-                                      boxShadow: "0 4px 8px rgba(9,30,66,0.25)",
-                                      zIndex: 997,
-                                      maxHeight: "200px",
-                                      overflowY: "auto"
-                                    }}
-                                  >
-                                    {paginatedPamResources.map((resource, index) => (
-                                      <div
-                                        key={resource.record_uid || resource.uid || index}
-                                        onClick={() => {
-                                          setSelectedPamResource(resource);
-                                          setShowPamResourceDropdown(false);
-                                          setPamResourceSearchTerm(resource.title || 'Untitled PAM Resource');
-                                        }}
-                                        style={{
-                                          padding: "12px 16px",
-                                          cursor: "pointer",
-                                          borderBottom: index < paginatedPamResources.length - 1 ? "1px solid #F4F5F7" : "none",
-                                          backgroundColor: "#fff",
-                                          fontSize: "14px",
-                                          transition: "background-color 0.2s"
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F4F5F7"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = "#fff"}
-                                      >
-                                        <div style={{ fontWeight: "500", marginBottom: "2px" }}>
-                                          {resource.title || 'Untitled PAM Resource'}
-                                        </div>
-                                        <div style={{ fontSize: "11px", color: "#6B778C", fontFamily: "monospace" }}>
-                                          UID: {resource.record_uid}
-                                        </div>
-                                        {(resource.record_type || resource.type) && (
-                                          <div style={{ fontSize: "11px", color: "#0066CC", marginTop: "2px" }}>
-                                            Type: {resource.record_type || resource.type}
-                                          </div>
-                                        )}
-                                      </div>
-                                    ))}
-
-                                    {/* PAM Resources Pagination */}
-                                    {totalPamResourcePages > 1 && (
-                                      <div style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                        padding: "8px 16px",
-                                        borderTop: "1px solid #F4F5F7",
-                                        backgroundColor: "#FAFBFC",
-                                        fontSize: "12px",
-                                        color: "#6B778C"
-                                      }}>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (pamResourceCurrentPage > 1) {
-                                              setPamResourceCurrentPage(pamResourceCurrentPage - 1);
-                                            }
-                                          }}
-                                          disabled={pamResourceCurrentPage === 1}
-                                          style={{
-                                            padding: "4px 8px",
-                                            fontSize: "11px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: pamResourceCurrentPage === 1 ? "#F4F5F7" : "#fff",
-                                            cursor: pamResourceCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            borderRadius: "3px"
-                                          }}
-                                        >
-                                          Previous
-                                        </button>
-                                        <span>Page {pamResourceCurrentPage} of {totalPamResourcePages}</span>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (pamResourceCurrentPage < totalPamResourcePages) {
-                                              setPamResourceCurrentPage(pamResourceCurrentPage + 1);
-                                            }
-                                          }}
-                                          disabled={pamResourceCurrentPage === totalPamResourcePages}
-                                          style={{
-                                            padding: "4px 8px",
-                                            fontSize: "11px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: pamResourceCurrentPage === totalPamResourcePages ? "#F4F5F7" : "#fff",
-                                            cursor: pamResourceCurrentPage === totalPamResourcePages ? "not-allowed" : "pointer",
-                                            borderRadius: "3px"
-                                          }}
-                                        >
-                                          Next
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </>
-                            )}
-
-                              {pamResources.length === 0 && !loadingPamResources && (
-                              <div style={{
-                                fontSize: '12px',
-                                color: '#FF5630',
-                                marginTop: '4px'
-                              }}>
-                                No PAM resources found. Create records with types 'pamMachine', 'pamUser', or 'pamDatabase' to enable rotation.
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Selected PAM Resource Indicator */}
-                          {selectedPamResource && (
-                            <div
-                              style={{
-                                marginTop: "8px",
-                                padding: "8px 12px",
-                                backgroundColor: "#E3FCEF",
-                                borderRadius: "4px",
-                                fontSize: "12px",
-                                color: "#006644",
-                                border: "1px solid #ABF5D1"
-                              }}
+                              disabled={isFormDisabled}
+                              className="share-record-clear-btn"
+                              title="Clear selection"
                             >
-                              <div>Selected: <strong>{selectedPamResource.title || 'Untitled PAM Resource'}</strong></div>
-                              <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                                Record UID: {selectedPamResource.record_uid}
-                              </div>
-                              {(selectedPamResource.record_type || selectedPamResource.type) && (
-                                <div style={{ marginTop: "2px", fontSize: "11px", fontStyle: "italic" }}>
-                                  Type: {selectedPamResource.record_type || selectedPamResource.type}
-                                </div>
-                              )}
-                            </div>
-                          )}
+                              ✕
+                            </button>
+                          </div>
                         </div>
                       )}
-
-                      {formData.target_type === 'folder' && (
-                        <div style={{ marginBottom: "16px" }}>
-                          <label
-                            style={{
-                              display: "block",
-                              marginBottom: "8px",
-                              fontSize: "13px",
-                              fontWeight: "500",
-                              color: "#1A1A1A",
-                            }}
-                          >
-                            Select Folder: <span style={{ color: "#FF5630" }}>*</span>
-                          </label>
-
-                          {/* Folders Dropdown Container */}
-                          <div style={{ position: "relative", zIndex: 998 }}>
-                            {loadingFolders ? (
-                              <div style={{
-                                width: "100%",
-                                padding: "8px 12px",
-                                borderRadius: "6px",
-                                border: "2px solid #DFE1E6",
-                                fontSize: "14px",
-                                backgroundColor: "#F5F5F5",
-                                color: "#666",
-                                boxSizing: "border-box"
-                              }}>
-                                Loading folders...
-                              </div>
-                            ) : (
-                              <>
-                                {/* Folders Search Input */}
-                                <input
-                                  type="text"
-                                  placeholder="Search folders..."
-                                  value={folderSearchTerm}
-                                  onChange={(e) => {
-                                    setFolderSearchTerm(e.target.value);
-                                    setFolderCurrentPage(1);
-                                  }}
-                                  onClick={() => setShowFolderDropdown(true)}
-                                  style={{
-                                    width: "100%",
-                                    padding: "8px 12px",
-                                    borderRadius: "6px",
-                                    border: "2px solid #DFE1E6",
-                                    fontSize: "14px",
-                                    backgroundColor: "#FAFBFC",
-                                    cursor: "pointer",
-                                    boxSizing: "border-box"
-                                  }}
-                                />
-
-                                {/* Folders Dropdown */}
-                                {showFolderDropdown && paginatedFolders.length > 0 && (
-                                  <div
-                                    style={{
-                                      position: "absolute",
-                                      top: "100%",
-                                      left: "0",
-                                      right: "0",
-                                      backgroundColor: "#fff",
-                                      border: "2px solid #DFE1E6",
-                                      borderRadius: "6px",
-                                      boxShadow: "0 4px 8px rgba(9,30,66,0.25)",
-                                      zIndex: 998,
-                                      maxHeight: "200px",
-                                      overflowY: "auto"
-                                    }}
-                                  >
-                                    {paginatedFolders.map((folder, index) => (
-                                      <div
-                                        key={folder.folder_uid || folder.uid || index}
-                                        onClick={() => {
-                                          setSelectedFolder(folder);
-                                          setShowFolderDropdown(false);
-                                          setFolderSearchTerm(folder.name || folder.title || 'Untitled Folder');
-                                        }}
-                                        style={{
-                                          padding: "12px 16px",
-                                          cursor: "pointer",
-                                          borderBottom: index < paginatedFolders.length - 1 ? "1px solid #F4F5F7" : "none",
-                                          backgroundColor: "#fff",
-                                          fontSize: "14px",
-                                          transition: "background-color 0.2s"
-                                        }}
-                                        onMouseEnter={(e) => e.target.style.backgroundColor = "#F4F5F7"}
-                                        onMouseLeave={(e) => e.target.style.backgroundColor = "#fff"}
-                                      >
-                                        <div style={{ fontWeight: "500", marginBottom: "2px" }}>
-                                          {folder.name || folder.title || 'Untitled Folder'}
-                                        </div>
-                                        <div style={{ fontSize: "11px", color: "#6B778C", fontFamily: "monospace" }}>
-                                          UID: {folder.folder_uid || folder.uid}
-                                        </div>
-                                      </div>
-                                    ))}
-
-                                    {/* Folders Pagination */}
-                                    {totalFolderPages > 1 && (
-                                      <div style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                        padding: "8px 16px",
-                                        borderTop: "1px solid #F4F5F7",
-                                        backgroundColor: "#FAFBFC",
-                                        fontSize: "12px",
-                                        color: "#6B778C"
-                                      }}>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (folderCurrentPage > 1) {
-                                              setFolderCurrentPage(folderCurrentPage - 1);
-                                            }
-                                          }}
-                                          disabled={folderCurrentPage === 1}
-                                          style={{
-                                            padding: "4px 8px",
-                                            fontSize: "11px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: folderCurrentPage === 1 ? "#F4F5F7" : "#fff",
-                                            cursor: folderCurrentPage === 1 ? "not-allowed" : "pointer",
-                                            borderRadius: "3px"
-                                          }}
-                                        >
-                                          Previous
-                                        </button>
-                                        <span>Page {folderCurrentPage} of {totalFolderPages}</span>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (folderCurrentPage < totalFolderPages) {
-                                              setFolderCurrentPage(folderCurrentPage + 1);
-                                            }
-                                          }}
-                                          disabled={folderCurrentPage === totalFolderPages}
-                                          style={{
-                                            padding: "4px 8px",
-                                            fontSize: "11px",
-                                            border: "1px solid #DFE1E6",
-                                            backgroundColor: folderCurrentPage === totalFolderPages ? "#F4F5F7" : "#fff",
-                                            cursor: folderCurrentPage === totalFolderPages ? "not-allowed" : "pointer",
-                                            borderRadius: "3px"
-                                          }}
-                                        >
-                                          Next
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </>
-                            )}
-
-                            {getFilteredFolders().length === 0 && !loadingFolders && (
-                              <div style={{
-                                fontSize: '12px',
-                                color: '#FF5630',
-                                marginTop: '4px'
-                              }}>
-                                No folders found.
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Selected Folder Indicator */}
-                          {selectedFolder && (
-                            <div
-                              style={{
-                                marginTop: "8px",
-                                padding: "8px 12px",
-                                backgroundColor: "#E3FCEF",
-                                borderRadius: "4px",
-                                fontSize: "12px",
-                                color: "#006644",
-                                border: "1px solid #ABF5D1"
-                              }}
-                            >
-                              <div>Selected: <strong>{selectedFolder.name || selectedFolder.title}</strong></div>
-                              <div style={{ marginTop: "4px", fontSize: "11px", fontStyle: "italic" }}>
-                                Folder UID will be used for pam action rotate: {selectedFolder.folder_uid || selectedFolder.uid}
-                              </div>
-                            </div>
-                          )}
 
                           {getFilteredFolders().length > 0 && (
-                            <div style={{ 
-                              fontSize: '11px', 
-                              color: '#6B778C', 
-                              marginTop: '4px',
-                              fontStyle: 'italic'
-                            }}>
-                              {getFilteredFolders().length} folders available for folder-based PAM rotation
+                            <div className="share-record-count">
+                              {getFilteredFolders().length} shared folders available
                             </div>
                           )}
-                        </div>
+                        </>
                       )}
+
+                      {/* Info message and requirement text area for share-folder and record-permission actions */}
+                      <div className="share-record-textarea-wrapper">
+                        <div className="share-record-info-message">
+                          {isAdmin 
+                            ? (selectedAction.value === 'record-permission' 
+                                ? 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'
+                                : 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.')
+                            : (selectedAction.value === 'record-permission' 
+                                ? 'Provide your requirement and justification for changing folder permissions. An admin will review and process it.'
+                                : 'Provide your requirement and justification for accessing a folder. An admin will review and process it.')}
+                        </div>
+
+                        <div>
+                          <label className="share-record-label">
+                            Requirements {!isAdmin && <span className="text-error">*</span>}:
+                          </label>
+                          <textarea
+                            value={formData.requirements || ''}
+                            onChange={(e) => handleInputChange('requirements', e.target.value)}
+                            placeholder="Describe your requirements if you're not sure which folder to select..."
+                            disabled={isFormDisabled}
+                            className="share-record-textarea"
+                          />
+                        </div>
+
+                        <div className="share-record-textarea-wrapper">
+                          <label className="share-record-label">
+                            Justification for this Request:
+                          </label>
+                          <textarea
+                            value={formData.justification || ''}
+                            onChange={(e) => handleInputChange('justification', e.target.value)}
+                            placeholder={selectedAction.value === 'record-permission' 
+                              ? "Explain why you need to change permissions for this folder..."
+                              : "Explain why you need access to this folder..."}
+                            disabled={isFormDisabled}
+                            className="share-record-textarea"
+                          />
+                        </div>
+                      </div>
                     </div>
                   )}
-                  
-                  {/* Loading state for record types */}
-                  {selectedAction.value === 'record-update' && selectedRecordForUpdate && Object.keys(recordDetails).length > 0 && !loadingRecordDetails && loadingRecordTypes && (
-                    <div style={{
-                      padding: '24px',
-                      textAlign: 'center',
-                      backgroundColor: '#F8F9FA',
-                      borderRadius: '8px',
-                      border: '2px dashed #DFE1E6',
-                      marginBottom: '16px',
-                      marginTop: '24px'
-                    }}>
-                      <div style={{
-                        fontSize: '14px',
-                        color: '#0066CC',
-                        fontWeight: '500',
-                        marginBottom: '8px'
-                      }}>
-                        Loading record types...
-                      </div>
-                      <div style={{
-                        fontSize: '12px',
-                        color: '#6B778C',
-                        fontStyle: 'italic'
-                      }}>
-                        Please wait while we load the available record types
-                      </div>
-                    </div>
-                  )}
+
                   
                   {/* Step 2: Dynamic Form Fields for record-update (only show after record selection) */}
-                  {selectedAction.value === 'record-update' && selectedRecordForUpdate && Object.keys(recordDetails).length > 0 && !loadingRecordDetails && !loadingRecordTypes && recordTypes.length > 0 && (
-                    <div style={{ marginBottom: "16px", marginTop: "24px" }}>
-                      <div
-                        style={{
-                          fontSize: "16px",
-                          fontWeight: "600",
-                          color: "#1A1A1A",
-                          marginBottom: "12px",
-                          paddingBottom: "8px",
-                          borderBottom: "2px solid #0066CC"
-                        }}
-                      >
+                  {selectedAction.value === 'record-update' && selectedRecordForUpdate && Object.keys(recordDetails).length > 0 && !loadingRecordDetails && (
+                    <div className="mb-16 mt-24">
+                      <div className="section-header">
                         Step 2: Update Record Fields
                       </div>
                       
-                      
-                      {/* Record Type Field */}
-                      <div style={{ marginBottom: "16px" }}>
-                        <label
-                          style={{
-                            display: "block",
-                            marginBottom: "4px",
-                            fontSize: "13px",
-                            fontWeight: "500",
-                            color: "#1A1A1A"
-                          }}
-                        >
-                          Record Type
-                        </label>
-                        <select
-                          value={formData.recordType || ''}
-                          disabled={isFormDisabled}
-                          onChange={(e) => {
-                            const newRecordType = e.target.value;
-                            
-                            // Capture current form data with new record type for enhanced mapping
-                            const currentFormDataWithNewType = {
-                              ...formData,
-                              recordType: newRecordType
-                            };
-                            
-                            // Update the form data immediately
-                            setFormData(currentFormDataWithNewType);
-                            
-                            // Fetch template using the enhanced function that preserves all form data
-                            if (newRecordType && newRecordType !== '') {
-                              fetchRecordTypeTemplateWithFormMapping(newRecordType, currentFormDataWithNewType);
-                            } else {
-                              setRecordTypeTemplate({});
-                              setTemplateFields([]);
-                              setDynamicCustomFields([]);
-                            }
-                          }}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            borderRadius: '4px',
-                            border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.recordType ? '#006644' : '#DFE1E6')}`,
-                            fontSize: '14px',
-                            backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.recordType ? '#F8FFF8' : 'white'),
-                            color: isFormDisabled ? '#999' : '#000',
-                            cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                            outline: 'none',
-                            boxSizing: 'border-box'
-                          }}
-                        >
-                          <option value="">
-                            {recordTypes.length === 0 ? "Loading record types..." : "Select Type"}
-                          </option>
-                          {recordTypes.map((recordType) => (
-                            <option key={recordType.value} value={recordType.value}>
-                              {recordType.label}
-                            </option>
-                          ))}
-                        </select>
-                        {(loadingRecordTypes || loadingTemplate) && (
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "#0066CC",
-                              marginTop: "2px",
-                              fontStyle: "italic"
-                            }}
-                          >
-                            {loadingRecordTypes ? "Loading record types..." : "Loading template..."}
+                      {/* Show original record type as read-only info */}
+                      {originalRecordType && (
+                        <div className="mb-16">
+                          <label className="label-sm">
+                            Record Type
+                          </label>
+                          <div className="readonly-field-display">
+                            {recordTypes.find(rt => rt.value === originalRecordType)?.label || originalRecordType}
                           </div>
-                        )}
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "#6B778C",
-                            marginTop: "2px",
-                            fontStyle: "italic"
-                          }}
-                        >
-                          Change the record type if needed (optional)
+                          <div className="helper-text-sm">
+                            Original record type (cannot be changed during update)
+                          </div>
                         </div>
-                      </div>
+                      )}
                       
                       {/* Loading indicator when template is being fetched */}
                       {selectedAction.value === 'record-update' && loadingTemplate && (
-                        <div style={{
-                          padding: '24px',
-                          textAlign: 'center',
-                          backgroundColor: '#F8F9FA',
-                          borderRadius: '8px',
-                          border: '2px dashed #DFE1E6',
-                          marginBottom: '16px'
-                        }}>
-                          <div style={{
-                            fontSize: '14px',
-                            color: '#0066CC',
-                            fontWeight: '500',
-                            marginBottom: '8px'
-                          }}>
-                            Loading template fields for {formData.recordType}...
+                        <div className="loading-state-box-no-mt">
+                          <div className="loading-state-title">
+                            Loading template fields for {recordTypes.find(rt => rt.value === originalRecordType)?.label || originalRecordType}...
                           </div>
-                          <div style={{
-                            fontSize: '12px',
-                            color: '#6B778C',
-                            fontStyle: 'italic'
-                          }}>
+                          <div className="loading-state-subtitle">
                             Please wait while we fetch the appropriate form fields
                           </div>
                         </div>
@@ -7052,17 +5457,8 @@ const IssuePanel = () => {
                       {/* Dynamic Template Fields for record-update only */}
                       {selectedAction.value === 'record-update' && templateFields.length > 0 && !loadingTemplate && (
                         <div>
-                          <div
-                            style={{
-                              fontSize: "14px",
-                              fontWeight: "600",
-                              color: "#1A1A1A",
-                              marginBottom: "8px",
-                              paddingBottom: "4px",
-                              borderBottom: "1px solid #E1E5E9"
-                            }}
-                          >
-                            {recordTypeTemplate.$id ? `${recordTypeTemplate.$id} Fields:` : recordTypeTemplate.type ? `${recordTypeTemplate.type} Fields:` : 'Template Fields:'} ({templateFields.length} fields)
+                          <div className="template-fields-header">
+                            {recordTypes.find(rt => rt.value === originalRecordType)?.label || originalRecordType || 'Template'} Fields: ({templateFields.length} fields)
                           </div>
                           
                           {/* Render Template Fields Dynamically with Grouping */}
@@ -7074,22 +5470,13 @@ const IssuePanel = () => {
                       {/* Fallback Standard Fields for record-update when no template */}
                       {selectedAction.value === 'record-update' && templateFields.length === 0 && !loadingTemplate && (
                         <div>
-                          <div
-                            style={{
-                              fontSize: "14px",
-                              fontWeight: "600",
-                              color: "#1A1A1A",
-                              marginBottom: "8px",
-                              paddingBottom: "4px",
-                              borderBottom: "1px solid #E1E5E9"
-                            }}
-                          >
+                          <div className="template-fields-header">
                             Standard Fields:
                           </div>
                           
                           {/* Title Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Title
                             </label>
                             <input
@@ -7098,19 +5485,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('title', e.target.value)}
                               placeholder="Title"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.title ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.title ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.title ? 'has-value' : ''}`}
                             />
                           </div>
                           
                           {/* Name Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Name (Full Name)
                             </label>
                             <input
@@ -7119,19 +5500,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('name', e.target.value)}
                               placeholder="Full Name"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.name ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.name ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.name ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* Login Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Login/Username
                             </label>
                             <input
@@ -7140,19 +5515,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('login', e.target.value)}
                               placeholder="Username"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.login ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.login ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.login ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* Password Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Password
                             </label>
                             <input
@@ -7161,19 +5530,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('password', e.target.value)}
                               placeholder="Password or $GEN"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.password && formData.password !== '••••••••' ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.password && formData.password !== '••••••••' ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.password && formData.password !== '••••••••' ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* URL Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               URL
                             </label>
                             <input
@@ -7182,19 +5545,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('url', e.target.value)}
                               placeholder="URL"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.url ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.url ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.url ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* Email Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Email
                             </label>
                             <input
@@ -7203,19 +5560,13 @@ const IssuePanel = () => {
                               disabled={isFormDisabled}
                               onChange={(e) => handleInputChange('email', e.target.value)}
                               placeholder="Email"
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.email ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.email ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.email ? 'has-value' : ''}`}
                             />
                           </div>
 
                           {/* Notes Field */}
-                          <div style={{ marginBottom: "12px" }}>
-                            <label style={{ display: "block", marginBottom: "4px", fontSize: "13px", fontWeight: "500", color: "#1A1A1A" }}>
+                          <div className="mb-12">
+                            <label className="label-sm">
                               Notes
                             </label>
                             <textarea
@@ -7224,38 +5575,18 @@ const IssuePanel = () => {
                               onChange={(e) => handleInputChange('notes', e.target.value)}
                               placeholder="Notes"
                               rows={3}
-                              style={{
-                                width: '100%', padding: '8px 12px', borderRadius: '4px',
-                                border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.notes && formData.notes !== recordDetails.notes ? '#006644' : '#DFE1E6')}`,
-                                fontSize: '14px', backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.notes && formData.notes !== recordDetails.notes ? '#F8FFF8' : 'white'),
-                                color: isFormDisabled ? '#999' : '#000', cursor: isFormDisabled ? 'not-allowed' : 'text',
-                                outline: 'none', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit'
-                              }}
+                              className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.notes && formData.notes !== recordDetails.notes ? 'has-value' : ''}`}
                             />
-                            <div style={{ 
-                              display: 'flex', 
-                              alignItems: 'center', 
-                              gap: '10px',
-                              marginTop: '8px',
-                              padding: '8px 12px',
-                              backgroundColor: '#FAFBFC',
-                              borderRadius: '4px',
-                              border: '1px solid #DFE1E6'
-                            }}>
+                            <div className="checkbox-option-container">
                               <input
                                 type="checkbox"
                                 id="appendNotes"
                                 checked={formData.appendNotes === true || formData.appendNotes === 'true'}
                                 disabled={isFormDisabled}
                                 onChange={(e) => handleInputChange('appendNotes', e.target.checked)}
-                                style={{
-                                  cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                                  minWidth: '16px',
-                                  width: '16px',
-                                  height: '16px'
-                                }}
+                                className={`checkbox-option-input ${isFormDisabled ? 'disabled' : ''}`}
                               />
-                              <label htmlFor="appendNotes" style={{ fontSize: '12px', color: '#1A1A1A', cursor: 'pointer', flex: 1 }}>
+                              <label htmlFor="appendNotes" className="checkbox-option-label">
                                 <strong>Append to existing notes</strong> (if checked, adds to current notes instead of replacing)
                               </label>
                             </div>
@@ -7268,30 +5599,13 @@ const IssuePanel = () => {
                   {/* Record Add Section - Step by Step Flow */}
                   {selectedAction.value === 'record-add' && (
                     <div>
-                      <div
-                        style={{
-                          fontSize: "16px",
-                          fontWeight: "600",
-                          color: "#1A1A1A",
-                          marginBottom: "12px",
-                          paddingBottom: "8px",
-                          borderBottom: "2px solid #0066CC"
-                        }}
-                      >
+                      <div className="section-header">
                         Step 1: Select Record Type
                       </div>
                       
-                      <div style={{ marginBottom: "16px" }}>
-                        <label
-                          style={{
-                            display: "block",
-                            marginBottom: "8px",
-                            fontSize: "14px",
-                            fontWeight: "500",
-                            color: "#1A1A1A"
-                          }}
-                        >
-                          Record Type <span style={{ color: "#FF5630" }}>*</span>
+                      <div className="mb-16">
+                        <label className="label-md-8">
+                          Record Type <span className="text-error">*</span>
                         </label>
                         <select
                           value={formData.recordType || ''}
@@ -7302,8 +5616,6 @@ const IssuePanel = () => {
                             
                             // Clear existing template fields first
                             setTemplateFields([]);
-                            setDynamicCustomFields([]);
-                            
                             // Prepare current form data with new record type
                             const currentFormDataWithNewType = { ...formData, recordType: newRecordType };
                             
@@ -7316,21 +5628,9 @@ const IssuePanel = () => {
                             } else {
                               setRecordTypeTemplate({});
                               setTemplateFields([]);
-                              setDynamicCustomFields([]);
                             }
                           }}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            borderRadius: '4px',
-                            border: `1px solid ${isFormDisabled ? '#E0E0E0' : (formData.recordType ? '#006644' : '#DFE1E6')}`,
-                            fontSize: '14px',
-                            backgroundColor: isFormDisabled ? '#F5F5F5' : (formData.recordType ? '#F8FFF8' : 'white'),
-                            color: isFormDisabled ? '#999' : '#000',
-                            cursor: isFormDisabled ? 'not-allowed' : 'pointer',
-                            outline: 'none',
-                            boxSizing: 'border-box'
-                          }}
+                          className={isFormDisabled ? 'select-disabled-state' : (formData.recordType ? 'select-with-value' : 'select-no-value')}
                         >
                           <option value="">
                             {recordTypes.length === 0 ? "Loading record types..." : "Select Type"}
@@ -7342,25 +5642,11 @@ const IssuePanel = () => {
                           ))}
                         </select>
                         {(loadingRecordTypes || loadingTemplate) && (
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "#0066CC",
-                              marginTop: "2px",
-                              fontStyle: "italic"
-                            }}
-                          >
+                          <div className="helper-text-link">
                             {loadingRecordTypes ? "Loading record types..." : "Loading template..."}
                           </div>
                         )}
-                        <div
-                          style={{
-                            fontSize: "11px",
-                            color: "#6B778C",
-                            marginTop: "4px",
-                            lineHeight: "1.4"
-                          }}
-                        >
+                        <div className="helper-text-muted">
                           Choose the type of record you want to create
                         </div>
                       </div>
@@ -7368,42 +5654,17 @@ const IssuePanel = () => {
                       {/* Step 2: Show template fields after record type is selected */}
                       {formData.recordType && (
                         <div>
-                          <div
-                            style={{
-                              fontSize: "16px",
-                              fontWeight: "600",
-                              color: "#1A1A1A",
-                              marginBottom: "12px",
-                              paddingBottom: "8px",
-                              borderBottom: "2px solid #0066CC"
-                            }}
-                          >
-                            Step 2: Configure {formData.recordType} Fields
+                          <div className="section-header-bordered">
+                            Step 2: Configure {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType} Fields
                           </div>
                           
                           {/* Loading indicator when template is being fetched */}
                           {loadingTemplate && (
-                            <div style={{
-                              padding: '24px',
-                              textAlign: 'center',
-                              backgroundColor: '#F8F9FA',
-                              borderRadius: '8px',
-                              border: '2px dashed #DFE1E6',
-                              marginBottom: '16px'
-                            }}>
-                              <div style={{
-                                fontSize: '14px',
-                                color: '#0066CC',
-                                fontWeight: '500',
-                                marginBottom: '8px'
-                              }}>
-                                Loading template fields for {formData.recordType}...
+                            <div className="loading-state-box-no-mt">
+                              <div className="loading-state-title">
+                                Loading template fields for {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType}...
                               </div>
-                              <div style={{
-                                fontSize: '12px',
-                                color: '#6B778C',
-                                fontStyle: 'italic'
-                              }}>
+                              <div className="loading-state-subtitle">
                                 Please wait while we fetch the appropriate form fields
                               </div>
                             </div>
@@ -7412,16 +5673,7 @@ const IssuePanel = () => {
                           {/* Dynamic Template Fields */}
                           {templateFields.length > 0 && !loadingTemplate && (
                             <div>
-                              <div
-                                style={{
-                                  fontSize: "14px",
-                                  fontWeight: "600",
-                                  color: "#1A1A1A",
-                                  marginBottom: "8px",
-                                  paddingBottom: "4px",
-                                  borderBottom: "1px solid #E1E5E9"
-                                }}
-                              >
+                              <div className="subsection-header">
                                 {recordTypeTemplate.$id ? `${recordTypeTemplate.$id} Fields:` : recordTypeTemplate.type ? `${recordTypeTemplate.type} Fields:` : 'Template Fields:'} ({templateFields.length} fields)
                               </div>
                               
@@ -7430,27 +5682,53 @@ const IssuePanel = () => {
                             </div>
                           )}
                           
-                          {/* Fallback message when no template fields */}
-                          {templateFields.length === 0 && !loadingTemplate && (
+                          {/* Error message when template loading fails */}
+                          {templateError && !loadingTemplate && (
                             <div style={{
+                              backgroundColor: '#FEF2F2',
+                              border: '1px solid #FCA5A5',
+                              borderRadius: '8px',
                               padding: '16px',
-                              backgroundColor: '#FFF8E1',
-                              border: '1px solid #FFC107',
-                              borderRadius: '4px',
                               marginBottom: '16px'
                             }}>
                               <div style={{
+                                color: '#DC2626',
+                                fontWeight: '600',
                                 fontSize: '14px',
-                                color: '#F57C00',
-                                fontWeight: '500'
+                                marginBottom: '8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px'
                               }}>
-                                No template fields available for {formData.recordType}
+                                ⚠️ Keeper API Connection Error
                               </div>
                               <div style={{
-                                fontSize: '12px',
-                                color: '#E65100',
-                                marginTop: '4px'
+                                color: '#7F1D1D',
+                                fontSize: '13px',
+                                whiteSpace: 'pre-wrap',
+                                lineHeight: '1.5'
                               }}>
+                                {templateError}
+                              </div>
+                              <div style={{
+                                marginTop: '12px',
+                                paddingTop: '12px',
+                                borderTop: '1px solid #FCA5A5',
+                                color: '#991B1B',
+                                fontSize: '12px'
+                              }}>
+                                💡 Go to the <strong>App Configuration</strong> page to verify and update the Keeper API settings.
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Fallback message when no template fields (but no error) */}
+                          {templateFields.length === 0 && !loadingTemplate && !templateError && (
+                            <div className="warning-message-box">
+                              <div className="warning-message-title">
+                                No template fields available for {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType}
+                              </div>
+                              <div className="warning-message-subtitle">
                                 You can still create the record. Standard fields will be available.
                               </div>
                             </div>
@@ -7465,112 +5743,139 @@ const IssuePanel = () => {
                     .filter((field) => {
                       // Remove record field from UI when share-record is selected
                       // Remove folder field from UI when share-folder is selected  
-                      // Remove sharedFolder field from UI when record-permission is selected
-                      // Remove recordUid and folder fields from UI when pam-action-rotate is selected
+                      // Remove sharedFolder field from UI when record-permission or share-record is selected
                       // Keep user/email fields visible for manual input
                       const shouldRemoveRecordField = selectedAction.value === 'share-record' && field.name === 'record';
                       const shouldRemoveFolderField = selectedAction.value === 'share-folder' && field.name === 'folder';
-                      const shouldRemoveSharedFolderField = selectedAction.value === 'record-permission' && field.name === 'sharedFolder';
-                      const shouldRemovePamRotateFields = selectedAction.value === 'pam-action-rotate' && (field.name === 'recordUid' || field.name === 'folder');
-                      return !shouldRemoveRecordField && !shouldRemoveFolderField && !shouldRemoveSharedFolderField && !shouldRemovePamRotateFields && field.type !== 'checkbox';
+                      const shouldRemoveSharedFolderField = (selectedAction.value === 'record-permission' || selectedAction.value === 'share-record') && field.name === 'sharedFolder';
+                      
+                      // Handle conditional field visibility
+                      if (field.conditionalOn && field.conditionalValue) {
+                        const conditionalFieldValue = formData[field.conditionalOn];
+                        if (conditionalFieldValue !== field.conditionalValue) {
+                          return false; // Hide field if condition not met
+                        }
+                      }
+                      
+                      return !shouldRemoveRecordField && !shouldRemoveFolderField && !shouldRemoveSharedFolderField && field.type !== 'checkbox';
                     })
                     .map((field) => (
                       <div
                         key={field.name}
-                        style={{ marginBottom: "12px" }}
+                        className="mb-12"
                       >
-                        <label
-                          style={{
-                            display: "block",
-                            marginBottom: "4px",
-                            fontSize: "13px",
-                            fontWeight: "500",
-                            color: "#1A1A1A"
-                          }}
-                        >
-                          {field.label}
-                          {field.required && (
-                            <span style={{ color: "#FF5630", marginLeft: "4px" }}>*</span>
-                          )}
-                        </label>
+                        {/* Don't show label for phoneEntries type - it has its own header */}
+                        {field.type !== 'phoneEntries' && (
+                          <label className="label-record-add">
+                            {field.label}
+                            {/* Don't show required asterisk for non-admin users in share-record, share-folder, record-permission */}
+                            {/* EXCEPT for the action field which is now required */}
+                            {field.required && selectedAction.value !== 'record-update' && 
+                             (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
+                              (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
+                              <span className="text-error ml-4">*</span>
+                            )}
+                          </label>
+                        )}
                         {renderFormInput(field)}
                         {selectedAction.value === 'record-update' && (
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "#6B778C",
-                              marginTop: "2px",
-                              fontStyle: "italic"
-                            }}
-                          >
+                          <div className="field-hint-text">
                           </div>
                         )}
-                        {field.required && !formData[field.name] && selectedAction.value !== 'record-update' && (
-                          <div
-                            style={{
-                              fontSize: "11px",
-                              color: "#FF5630",
-                              marginTop: "2px"
-                            }}
-                          >
+                        {/* Show hint for email field for admin users */}
+                        {field.name === 'user' && isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') && (
+                          <div className="field-hint-text">
+                            Tip: You can enter multiple email addresses separated by commas (e.g., user1@example.com, user2@example.com)
+                          </div>
+                        )}
+                        {/* Show email validation error for admin users */}
+                        {field.name === 'user' && isAdmin && emailValidationError && (
+                          <div className="field-error-text">
+                            {emailValidationError}
+                          </div>
+                        )}
+                        {/* Don't show error message for non-admin users in share-record, share-folder, record-permission */}
+                        {/* EXCEPT for the action field which is now required */}
+                        {field.required && !formData[field.name] && selectedAction.value !== 'record-update' && 
+                         (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
+                          (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
+                          <div className="field-error-text">
                             This field is required
                           </div>
                         )}
                       </div>
                     ))}
 
+                  {/* Checkbox fields for share-folder, share-record, and record-permission actions */}
+                  {(selectedAction.value === 'share-folder' || selectedAction.value === 'share-record' || selectedAction.value === 'record-permission') && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields
+                    .filter((field) => {
+                      // Only render checkbox fields
+                      return field.type === 'checkbox';
+                    })
+                    .map((field) => (
+                      <div
+                        key={field.name}
+                        className="mb-12"
+                      >
+                        {renderFormInput(field)}
+                      </div>
+                    ))}
+
                   {/* Custom fields for record-update action handled on backend */}
                   
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "#6B778C",
-                      fontStyle: "italic",
-                      marginTop: "8px"
-                    }}
-                  >
-                    * Required fields must be completed before approval
-                  </div>
+                  {selectedAction.value !== 'record-update' && selectedAction.value !== 'record-add' && (
+                    <div className="field-hint-text-mt-8">
+                      * Required fields must be completed before approval
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
             {/* Action Buttons - Different for Admin vs Regular Users */}
-            <div style={{ marginBottom: "16px" }}>
+            <div className="mb-16">
               
               {/* Show stored data status */}
-              {hasStoredData && storedRequestData && (
-                <div style={{
-                  marginBottom: "12px",
-                  padding: "12px",
-                  backgroundColor: isAdmin ? "#E3FCEF" : "#F0F8FF",
-                  borderRadius: "4px",
-                  border: isAdmin ? "1px solid #ABF5D1" : "1px solid #B3D8FF"
-                }}>
-                  <div style={{
-                    fontWeight: "600",
-                    fontSize: "12px",
-                    color: isAdmin ? "#006644" : "#0066CC",
-                    marginBottom: "4px"
-                  }}>
-                    {isAdmin ? "User Request Pending Review" : "Request Saved"}
+              {hasStoredData && storedRequestData && showStoredRequestMessage && (
+                <div className={`message-box-dynamic ${isAdmin ? 'message-box-admin' : 'message-box-user'}`}>
+                  {/* Close button */}
+                  <button
+                    onClick={() => setShowStoredRequestMessage(false)}
+                    className="close-button-absolute"
+                    title="Dismiss"
+                  >
+                    <CrossIcon size="small" label="Close" primaryColor={isAdmin ? "#1E40AF" : "#166534"} />
+                  </button>
+                  
+                  <div className={isAdmin ? 'message-box-title-admin' : 'message-box-title-user'}>
+                    {isAdmin ? "Info Message" : "Success Message"}
                   </div>
-                  <div style={{ fontSize: "11px", color: "#6B778C" }}>
+                  <div className={storedRequestData.timestamp ? 'message-box-text-with-margin' : 'message-box-text'}>
                     {isAdmin 
-                      ? `A user has submitted a ${storedRequestData.selectedAction?.label} request for review.`
+                      ? `A user has submitted a '${storedRequestData.selectedAction?.label}' request for review.`
                       : `Your ${storedRequestData.selectedAction?.label} request has been saved and is awaiting admin approval.`
                     }
                   </div>
-                  <div style={{ fontSize: "10px", color: "#999", marginTop: "4px" }}>
-                    Saved: {storedRequestData.timestamp ? new Date(storedRequestData.timestamp).toLocaleString() : 'Unknown'}
-                  </div>
+                  {storedRequestData.timestamp && (
+                    <div className="message-box-timestamp">
+                      Saved: {new Date(storedRequestData.timestamp).toLocaleString('en-US', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: false
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
               {isAdmin && !isLoading && !isLoadingStoredData && !loadingTemplate && !loadingRecordTypes && !loadingRecordDetails ? (
                 // Admin View - Show buttons based on their individual conditions
                 <>
-                <div style={{ display: "flex", gap: "12px" }}>
+                <div className="flex-gap-12">
                   {/* Approve & Execute Button - show when there's stored data and form is valid */}
                   {hasStoredData && (
                     <Button
@@ -7581,14 +5886,18 @@ const IssuePanel = () => {
                       style={{
                         backgroundColor: isFormDisabled ? "#D0D0D0" : 
                           (loadingTemplate || loadingRecordTypes) ? "#F0F0F0" :
-                          (selectedAction && validateForm() && !isExecuting ? "#28a745" : isExecuting ? "#218838" : "#E0E0E0"),
+                          (selectedAction && validateForm() && !isExecuting ? "#5FAD56" : isExecuting ? "#4A8F45" : "#E0E0E0"),
                         color: isFormDisabled ? "#777" : 
                           (loadingTemplate || loadingRecordTypes) ? "#999" :
                           ((selectedAction && validateForm()) || isExecuting ? "#FFFFFF" : "#999"),
                         fontWeight: "600",
-                        borderRadius: "6px",
+                        fontSize: "14px",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
                         border: "none",
-                        cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isExecuting) ? "not-allowed" : "pointer"
+                        cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isExecuting) ? "not-allowed" : "pointer",
+                        boxShadow: (selectedAction && validateForm() && !isExecuting) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
+                        transition: "all 0.2s ease"
                       }}
                     >
                       {isFormDisabled ? "Form Disabled (Re-enabling...)" :
@@ -7601,19 +5910,57 @@ const IssuePanel = () => {
                     </Button>
                   )}
                   
-                  {/* Reject Button - show when there's stored data to reject */}
-                  {hasStoredData && (
+                  {/* Execute Button - show when there's NO stored data (admin executing directly) */}
+                  {!hasStoredData && (
+                    <Button
+                      appearance="primary"
+                      onClick={executeKeeperAction}
+                      isLoading={isExecuting}
+                      isDisabled={isExecuting || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
+                      style={{
+                        backgroundColor: isFormDisabled ? "#D0D0D0" : 
+                          (loadingTemplate || loadingRecordTypes) ? "#F0F0F0" :
+                          (selectedAction && validateForm() && !isExecuting ? "#5FAD56" : isExecuting ? "#4A8F45" : "#E0E0E0"),
+                        color: isFormDisabled ? "#777" : 
+                          (loadingTemplate || loadingRecordTypes) ? "#999" :
+                          ((selectedAction && validateForm()) || isExecuting ? "#FFFFFF" : "#999"),
+                        fontWeight: "600",
+                        fontSize: "14px",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        border: "none",
+                        cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isExecuting) ? "not-allowed" : "pointer",
+                        boxShadow: (selectedAction && validateForm() && !isExecuting) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
+                        transition: "all 0.2s ease"
+                      }}
+                    >
+                      {isFormDisabled ? "Form Disabled (Re-enabling...)" :
+                       isExecuting ? "Executing..." :
+                       loadingTemplate ? "Loading Template Fields..." :
+                       loadingRecordTypes ? "Loading Record Types..." :
+                       !selectedAction ? "Select Action to Enable" :
+                       !validateForm() ? "Complete Required Fields" :
+                       "Execute"}
+                    </Button>
+                  )}
+                  
+                  {/* Reject Button - show when there's stored data to reject (not for admin-only actions) */}
+                  {hasStoredData && selectedAction?.value !== 'record-add' && selectedAction?.value !== 'record-update' && (
                     <Button
                       appearance="default"
                       onClick={() => setShowRejectionForm(true)}
                       isDisabled={isRejecting}
                       style={{
-                        backgroundColor: "#FF5630",
+                        backgroundColor: "#E85D54",
                         color: "#FFFFFF",
                         fontWeight: "600",
-                        borderRadius: "6px",
+                        fontSize: "14px",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
                         border: "none",
-                        cursor: isRejecting ? "not-allowed" : "pointer"
+                        cursor: isRejecting ? "not-allowed" : "pointer",
+                        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                        transition: "all 0.2s ease"
                       }}
                     >
                       Reject Request
@@ -7623,42 +5970,19 @@ const IssuePanel = () => {
                 
                 {/* Rejection Form for Admin */}
                 {showRejectionForm && (
-                  <div style={{
-                    marginTop: "16px",
-                    backgroundColor: "#FFF5F5",
-                    border: "1px solid #FFD1D1",
-                    borderRadius: "6px",
-                    padding: "16px"
-                  }}>
-                    <div style={{
-                      marginBottom: "12px"
-                    }}>
-                      <h4 style={{
-                        margin: "0 0 8px 0",
-                        fontWeight: "600",
-                        color: "#FF5630",
-                        fontSize: "16px"
-                      }}>
+                  <div className="rejection-form-container">
+                    <div className="mb-12">
+                      <h4 className="rejection-form-title">
                         Reject Keeper Request
                       </h4>
-                      <p style={{
-                        margin: "0",
-                        fontSize: "13px",
-                        color: "#6B778C"
-                      }}>
+                      <p className="rejection-form-description">
                         This will reject the request and add a comment to the JIRA ticket with your reason.
                       </p>
                     </div>
                     
-                    <div style={{ marginBottom: "12px" }}>
-                      <label style={{
-                        display: "block",
-                        marginBottom: "6px",
-                        fontSize: "13px",
-                        fontWeight: "500",
-                        color: "#1A1A1A"
-                      }}>
-                        Rejection Reason <span style={{ color: "#FF5630" }}>*</span>
+                    <div className="mb-12">
+                      <label className="label-sm-6">
+                        Rejection Reason <span className="text-error">*</span>
                       </label>
                       <textarea
                         value={rejectionReason}
@@ -7666,37 +5990,27 @@ const IssuePanel = () => {
                         placeholder="Please provide a clear reason for rejecting this request..."
                         rows={3}
                         disabled={isRejecting}
-                        style={{
-                          width: "100%",
-                          padding: "8px 12px",
-                          borderRadius: "4px",
-                          border: "2px solid #DFE1E6",
-                          fontSize: "14px",
-                          fontFamily: "inherit",
-                          resize: "vertical",
-                          backgroundColor: isRejecting ? "#F5F5F5" : "#FFFFFF",
-                          boxSizing: "border-box"
-                        }}
+                        className={`input-field textarea-border-override ${isRejecting ? 'disabled' : ''}`}
                       />
                     </div>
                     
-                    <div style={{
-                      display: "flex",
-                      gap: "12px",
-                      alignItems: "center"
-                    }}>
+                    <div className="button-group">
                       <Button
                         appearance="primary"
                         onClick={handleRejectRequest}
                         isLoading={isRejecting}
                         isDisabled={!rejectionReason.trim() || isRejecting}
                         style={{
-                          backgroundColor: !rejectionReason.trim() || isRejecting ? "#E0E0E0" : "#FF5630",
+                          backgroundColor: !rejectionReason.trim() || isRejecting ? "#E0E0E0" : "#E85D54",
                           color: !rejectionReason.trim() || isRejecting ? "#999" : "#FFFFFF",
                           fontWeight: "600",
-                          borderRadius: "6px",
+                          fontSize: "14px",
+                          padding: "8px 16px",
+                          borderRadius: "8px",
                           border: "none",
-                          cursor: !rejectionReason.trim() || isRejecting ? "not-allowed" : "pointer"
+                          cursor: !rejectionReason.trim() || isRejecting ? "not-allowed" : "pointer",
+                          boxShadow: (rejectionReason.trim() && !isRejecting) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
+                          transition: "all 0.2s ease"
                         }}
                       >
                         {isRejecting ? "Rejecting..." : "Confirm Rejection"}
@@ -7706,12 +6020,16 @@ const IssuePanel = () => {
                         onClick={handleCancelRejection}
                         isDisabled={isRejecting}
                         style={{
-                          backgroundColor: "#F4F5F7",
-                          color: "#505F79",
-                          fontWeight: "500",
-                          borderRadius: "6px",
-                          border: "1px solid #DFE1E6",
-                          cursor: isRejecting ? "not-allowed" : "pointer"
+                          backgroundColor: "#FFFFFF",
+                          color: "#6B778C",
+                          fontWeight: "600",
+                          fontSize: "14px",
+                          padding: "8px 16px",
+                          borderRadius: "8px",
+                          border: "2px solid #DFE1E6",
+                          cursor: isRejecting ? "not-allowed" : "pointer",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                          transition: "all 0.2s ease"
                         }}
                       >
                         Cancel
@@ -7722,130 +6040,298 @@ const IssuePanel = () => {
                 
                 {/* Rejection Result Message for Admin */}
                 {rejectionResult && (
-                  <div style={{ marginTop: "16px" }}>
-                    <SectionMessage 
-                      appearance={rejectionResult.success ? "confirmation" : "error"}
-                      title={rejectionResult.success ? "Request Rejected" : "Rejection Failed"}
+                  <div className={rejectionResult.success ? 'rejection-result-success' : 'rejection-result-error'}>
+                    {/* Close button */}
+                    <button
+                      onClick={() => setRejectionResult(null)}
+                      className="close-button-absolute"
+                      title="Dismiss"
                     >
+                      <CrossIcon size="small" label="Close" primaryColor={rejectionResult.success ? "#006644" : "#BF2600"} />
+                    </button>
+                    
+                    <div className={rejectionResult.success ? 'rejection-result-title-success' : 'rejection-result-title-error'}>
+                      {rejectionResult.success ? "Request Rejected" : "Rejection Failed"}
+                    </div>
+                    <div className="rejection-result-message">
                       {rejectionResult.message}
-                    </SectionMessage>
+                    </div>
                   </div>
                 )}
                 </>
               ) : !isLoading && !isLoadingStoredData && !loadingTemplate && !loadingRecordTypes && !loadingRecordDetails ? (
-                // Regular User View - Show Update button only after form loads
-                <Button
-                  appearance="primary"
-                  onClick={updateFormData}
-                  isLoading={isUpdating}
-                  isDisabled={isUpdating || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
-                  style={{
-                    backgroundColor: isFormDisabled ? "#D0D0D0" : 
-                      (loadingTemplate || loadingRecordTypes) ? "#F0F0F0" :
-                      (selectedAction && validateForm() && !isUpdating ? "#0066CC" : isUpdating ? "#0052A3" : "#E0E0E0"),
-                    color: isFormDisabled ? "#777" : 
-                      (loadingTemplate || loadingRecordTypes) ? "#999" :
-                      ((selectedAction && validateForm()) || isUpdating ? "#FFFFFF" : "#999"),
-                    fontWeight: "600",
-                    borderRadius: "6px",
-                    border: "none",
-                    cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isUpdating) ? "not-allowed" : "pointer"
-                  }}
-                >
-                  {isFormDisabled ? "Form Disabled (Re-enabling...)" :
-                   isUpdating ? "Saving..." :
-                   loadingTemplate ? "Loading Template Fields..." :
-                   loadingRecordTypes ? "Loading Record Types..." :
-                   !selectedAction ? "Select Action to Enable" :
-                   !validateForm() ? "Complete Required Fields" :
-                   hasStoredData ? "Update Request" : "Save Request"}
-                </Button>
+                // Regular User View - Show buttons with flex layout
+                <div className="flex-gap-12">
+                  <Button
+                    appearance="primary"
+                    onClick={updateFormData}
+                    isLoading={isUpdating}
+                    isDisabled={isUpdating || !selectedAction || !validateForm() || isFormDisabled || loadingTemplate || loadingRecordTypes}
+                    style={{
+                      backgroundColor: isFormDisabled ? "#D0D0D0" : 
+                        (loadingTemplate || loadingRecordTypes) ? "#F0F0F0" :
+                        (selectedAction && validateForm() && !isUpdating ? "#4285F4" : isUpdating ? "#357AE8" : "#E0E0E0"),
+                      color: isFormDisabled ? "#777" : 
+                        (loadingTemplate || loadingRecordTypes) ? "#999" :
+                        ((selectedAction && validateForm()) || isUpdating ? "#FFFFFF" : "#999"),
+                      fontWeight: "600",
+                      fontSize: "14px",
+                      padding: "8px 16px",
+                      borderRadius: "8px",
+                      border: "none",
+                      cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isUpdating) ? "not-allowed" : "pointer",
+                      boxShadow: (selectedAction && validateForm() && !isUpdating) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
+                      transition: "all 0.2s ease"
+                    }}
+                  >
+                    {isFormDisabled ? "Form Disabled (Re-enabling...)" :
+                     isUpdating ? "Saving..." :
+                     loadingTemplate ? "Loading Template Fields..." :
+                     loadingRecordTypes ? "Loading Record Types..." :
+                     !selectedAction ? "Select Action to Enable" :
+                     !validateForm() ? "Complete Required Fields" :
+                     hasStoredData ? "Update Request" : "Save Request"}
+                  </Button>
+                  
+                  {/* Clear Stored Data Button for Non-Admin Users */}
+                  {hasStoredData && (
+                    <Button
+                      appearance="subtle"
+                      onClick={clearStoredData}
+                      style={{
+                        backgroundColor: "#FFFFFF",
+                        color: "#4285F4",
+                        fontWeight: "600",
+                        fontSize: "14px",
+                        padding: "8px 16px",
+                        borderRadius: "8px",
+                        border: "2px solid #4285F4",
+                        cursor: "pointer",
+                        boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                        transition: "all 0.2s ease"
+                      }}
+                    >
+                      Clear Data
+                    </Button>
+                  )}
+                </div>
               ) : null}
               
-              {/* Clear Stored Data Button for Non-Admin Users */}
-              {!isAdmin && hasStoredData && !isLoading && !isLoadingStoredData && !loadingTemplate && !loadingRecordTypes && !loadingRecordDetails && (
-                <Button
-                  appearance="subtle"
-                  onClick={clearStoredData}
-                  style={{
-                    backgroundColor: "#F4F5F7",
-                    color: "#6B778C",
-                    fontWeight: "500",
-                    borderRadius: "6px",
-                    border: "1px solid #DFE1E6",
-                    cursor: "pointer",
-                    marginTop: "16px"
-                  }}
-                >
-                  Clear Stored Data & Start Fresh
-                </Button>
-              )}
+              {/* Save Request Message for Non-Admin Users */}
+              {!isAdmin && saveRequestMessage && (() => {
+                const messageStyles = {
+                  success: {
+                    background: "#F0FDF4",
+                    border: "2px solid #86EFAC",
+                    titleColor: "#166534",
+                    iconColor: "#166534",
+                    title: "Success Message"
+                  },
+                  error: {
+                    background: "#FEF2F2",
+                    border: "2px solid #FCA5A5",
+                    titleColor: "#991B1B",
+                    iconColor: "#991B1B",
+                    title: "Error Message"
+                  },
+                  warning: {
+                    background: "#FFFBEB",
+                    border: "2px solid #FCD34D",
+                    titleColor: "#92400E",
+                    iconColor: "#92400E",
+                    title: "Warning Message"
+                  },
+                  info: {
+                    background: "#EFF6FF",
+                    border: "2px solid #93C5FD",
+                    titleColor: "#1E40AF",
+                    iconColor: "#1E40AF",
+                    title: "Info Message"
+                  }
+                };
+                
+                const style = messageStyles[saveRequestMessage.type] || messageStyles.info;
+                const messageType = saveRequestMessage.type || 'info';
+                
+                return (
+                  <div className={`message-box-base message-box-${messageType}`}>
+                    {/* Close button */}
+                    <button
+                      onClick={() => setSaveRequestMessage(null)}
+                      className="close-button-absolute"
+                      title="Dismiss"
+                    >
+                      <CrossIcon size="small" label="Close" primaryColor={style.iconColor} />
+                    </button>
+                    
+                    <div className={`result-message-title message-title-${messageType}`}>
+                      {style.title}
+                    </div>
+                    <div style={{ 
+                      fontSize: "14px", 
+                      color: "#6B7280",
+                      marginBottom: saveRequestMessage.showTimestamp ? "6px" : "0",
+                      lineHeight: "1.4"
+                    }}>
+                      {saveRequestMessage.message}
+                    </div>
+                    {saveRequestMessage.showTimestamp && saveRequestMessage.timestamp && (
+                      <div style={{ 
+                        fontSize: "13px", 
+                        color: "#9CA3AF",
+                        marginTop: "6px",
+                        borderTop: "1px solid #E5E7EB",
+                        paddingTop: "6px"
+                      }}>
+                        Saved: {new Date(saveRequestMessage.timestamp).toLocaleString('en-US', {
+                          month: '2-digit',
+                          day: '2-digit',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                          hour12: false
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               
-            </div>
-
-            <div
-              style={{
-                fontSize: "12px",
-                color: "#6B778C",
-                marginBottom: "16px",
-              }}
-            >
-              {!selectedAction 
-                ? "Select an action above to get started."
-                : loadingRecordTypes
-                  ? "Loading available record types..."
-                : loadingTemplate
-                  ? "Loading template fields for the selected record type..."
-                : isAdmin
-                  ? hasStoredData
-                    ? !validateForm()
-                      ? "Review the request details above, then click 'Approve & Execute' to approve or 'Reject Request' to decline."
-                      : `Ready to approve "${selectedAction.label}" request. The action will be executed via ngrok API.`
-                    : "No pending requests to review at this time."
-                  : getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields.length > 0
-                    ? !validateForm() 
-                      ? hasStoredData 
-                        ? "Update your request details above, then click 'Update Request' to save changes."
-                        : "Fill in the required fields above, then click 'Save Request' to submit for admin approval."
-                      : hasStoredData
-                        ? `Your "${selectedAction.label}" request is saved and awaiting admin approval. You can update it anytime.`
-                        : `Ready to save your "${selectedAction.label}" request for admin approval.`
-                    : hasStoredData
-                      ? `Your "${selectedAction.label}" request is saved and awaiting admin approval.`
-                      : `Click "Save Request" to submit your "${selectedAction.label}" request for admin approval.`
-              }
             </div>
           </>
         )}
 
         {/* Result Display */}
-        {lastResult && (
-          <SectionMessage
-            appearance={lastResult.success ? "confirmation" : "error"}
-            title={lastResult.success ? "Success" : "Error"}
-          >
-            {lastResult.message}
-          </SectionMessage>
-        )}
+        {lastResult && (() => {
+          const messageStyles = {
+            success: {
+              background: "#F0FDF4",
+              border: "2px solid #86EFAC",
+              titleColor: "#166534",
+              iconColor: "#166534",
+              title: "Success Message"
+            },
+            error: {
+              background: "#FFF0F0",
+              border: "2px solid #FCA5A5",
+              titleColor: "#B91C1C",
+              iconColor: "#B91C1C",
+              title: "Error Message"
+            }
+          };
+          const currentStyle = lastResult.success ? messageStyles.success : messageStyles.error;
+          
+          return (
+            <div style={{
+              marginTop: "20px",
+              padding: "16px",
+              borderRadius: "8px",
+              backgroundColor: currentStyle.background,
+              border: currentStyle.border,
+              position: "relative"
+            }}>
+              {/* Close button */}
+              <button
+                onClick={() => setLastResult(null)}
+                style={{
+                  position: "absolute",
+                  top: "8px",
+                  right: "8px",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "4px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: "3px",
+                  transition: "background-color 0.2s"
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                title="Dismiss"
+              >
+                <CrossIcon size="small" label="Close" primaryColor={currentStyle.iconColor} />
+              </button>
+              
+              <div style={{
+                fontWeight: "600",
+                fontSize: "16px",
+                color: currentStyle.titleColor,
+                marginBottom: "6px",
+                paddingRight: "28px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px"
+              }}>
+                {lastResult.success ? (
+                  <SuccessIcon primaryColor={currentStyle.iconColor} size="medium" label="Success" />
+                ) : (
+                  <ErrorIcon primaryColor={currentStyle.iconColor} size="medium" label="Error" />
+                )}
+                <span>{lastResult.success ? "Success Message" : "Error Message"}</span>
+              </div>
+              <div style={{ 
+                fontSize: "14px", 
+                color: "#6B7280",
+                lineHeight: "1.4",
+                whiteSpace: "pre-wrap"
+              }}>
+                {lastResult.message}
+              </div>
+            </div>
+          );
+        })()}
 
-        {/* Workflow info */}
-        {issueContext.hasConfig && !isLoading && !isLoadingStoredData && (
+        {/* Workflow info - Show for non-admin users even without config */}
+        {(issueContext.hasConfig || !isAdmin) && !isLoading && !isLoadingStoredData && showWorkflowInfo && (
           <div style={{
             marginTop: "16px",
-            padding: "12px",
-            backgroundColor: isAdmin ? "#E3FCEF" : "#F0F8FF",
-            borderRadius: "4px",
-            border: isAdmin ? "1px solid #ABF5D1" : "1px solid #B3D8FF"
+            padding: "10px 14px",
+            backgroundColor: "#EFF6FF",
+            borderRadius: "8px",
+            border: "2px solid #93C5FD",
+            position: "relative"
           }}>
+            {/* Close button */}
+            <button
+              onClick={() => setShowWorkflowInfo(false)}
+              style={{
+                position: "absolute",
+                top: "8px",
+                right: "8px",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "3px",
+                transition: "background-color 0.2s"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.1)"}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+              title="Dismiss"
+            >
+              <CrossIcon size="small" label="Close" primaryColor="#1E40AF" />
+            </button>
+            
             <div style={{
               fontWeight: "600",
-              fontSize: "12px",
-              color: isAdmin ? "#006644" : "#0066CC",
-              marginBottom: "4px"
+              fontSize: "16px",
+              color: "#1E40AF",
+              marginBottom: "6px",
+              paddingRight: "28px"
             }}>
-              <strong>{isAdmin ? "Admin Review Mode" : "Request Submission Mode"}</strong>
+              {isAdmin ? "Admin Review Mode" : "Request Submission Mode"}
             </div>
-            <div style={{ marginTop: "4px", fontSize: "11px", color: "#6B778C" }}>
+            <div style={{ 
+              fontSize: "14px", 
+              color: "#6B7280",
+              lineHeight: "1.4"
+            }}>
               {isAdmin 
                 ? "Review user requests and use 'Approve & Execute' to run approved actions via ngrok API, or 'Reject Request' to decline with feedback."
                 : "Fill out the form and use 'Save Request' to submit your Keeper action for admin review and approval."
@@ -7854,306 +6340,39 @@ const IssuePanel = () => {
           </div>
         )}
 
-        {/* Simple Address Modal */}
-        {showNewAddressModal && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10000
-          }}>
-            <div style={{
-              backgroundColor: 'white',
-              borderRadius: '8px',
-              padding: '24px',
-              maxWidth: '500px',
-              width: '90%',
-              maxHeight: '80vh',
-              overflow: 'auto',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '20px'
-              }}>
-                <h3 style={{
-                  margin: 0,
-                  fontSize: '18px',
-                  fontWeight: '600',
-                  color: '#1A1A1A'
-                }}>
-                  Create New Address
-                </h3>
-                <button
-                  onClick={() => setShowNewAddressModal(false)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    fontSize: '20px',
-                    cursor: 'pointer',
-                    color: '#6B778C',
-                    padding: '4px'
-                  }}
-                >
-                  ×
-                </button>
+        {/* Expiration Warning Modal for share-record */}
+        {showExpirationWarningModal && (
+          <div className="warning-modal-overlay">
+            <div className="warning-modal-content">
+              <div className="warning-modal-body">
+                <div className="warning-icon-container">
+                  <span className="warning-icon">⚠️</span>
+                </div>
+                <div className="warning-content">
+                  <h3 className="warning-title">
+                    {selectedAction?.value === 'share-folder' ? 'User Management Restriction' : 'Sharing Restriction'}
+                  </h3>
+                  <p className="warning-description">
+                    {selectedAction?.value === 'share-folder' 
+                      ? 'The ability to manage users is restricted for users with time-limited access and will be removed when setting access expiration.'
+                      : 'Sharing is restricted for users with time-limited access. Setting access expiration will remove sharing permissions.'}
+                  </p>
+                </div>
               </div>
 
-              <div>
-                {/* Simple address form fields */}
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
-                    Title *
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.title || ''}
-                    onChange={(e) => handleAddressFieldChange('title', e.target.value)}
-                    placeholder="Enter address title"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
-                    Street Address
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.street1 || ''}
-                    onChange={(e) => handleAddressFieldChange('street1', e.target.value)}
-                    placeholder="Enter street address"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
-                    Street Address 2
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.street2 || ''}
-                    onChange={(e) => handleAddressFieldChange('street2', e.target.value)}
-                    placeholder="Enter street address 2 (optional)"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
-                    City
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.city || ''}
-                    onChange={(e) => handleAddressFieldChange('city', e.target.value)}
-                    placeholder="Enter city"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
-                    State
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.state || ''}
-                    onChange={(e) => handleAddressFieldChange('state', e.target.value)}
-                    placeholder="Enter state"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
-                    ZIP Code
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.zip || ''}
-                    onChange={(e) => handleAddressFieldChange('zip', e.target.value)}
-                    placeholder="Enter ZIP code"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '16px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
-                    Country
-                  </label>
-                  <input
-                    type="text"
-                    value={newAddressFormData.country || ''}
-                    onChange={(e) => handleAddressFieldChange('country', e.target.value)}
-                    placeholder="Enter country"
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '6px',
-                    fontSize: '14px',
-                    fontWeight: '500',
-                    color: '#1A1A1A'
-                  }}>
-                    Notes
-                  </label>
-                  <textarea
-                    value={newAddressFormData.notes || ''}
-                    onChange={(e) => handleAddressFieldChange('notes', e.target.value)}
-                    placeholder="Enter notes (optional)"
-                    rows={3}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      fontSize: '14px',
-                      boxSizing: 'border-box',
-                      resize: 'vertical'
-                    }}
-                  />
-                </div>
-                
-                <div style={{
-                  display: 'flex',
-                  gap: '12px',
-                  justifyContent: 'flex-end',
-                  marginTop: '20px'
-                }}>
-                  <button
-                    onClick={() => setShowNewAddressModal(false)}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '4px',
-                      border: '1px solid #DFE1E6',
-                      backgroundColor: 'white',
-                      color: '#6B778C',
-                      cursor: 'pointer',
-                      fontSize: '14px'
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={saveNewAddress}
-                    disabled={!newAddressFormData.title}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '4px',
-                      border: 'none',
-                      backgroundColor: newAddressFormData.title ? '#0066CC' : '#E0E0E0',
-                      color: newAddressFormData.title ? 'white' : '#999',
-                      cursor: newAddressFormData.title ? 'pointer' : 'not-allowed',
-                      fontSize: '14px'
-                    }}
-                  >
-                    Create Address
-                  </button>
-                </div>
+              <div className="modal-footer">
+                <button
+                  onClick={handleExpirationWarningCancel}
+                  className="btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleExpirationWarningConfirm}
+                  className="btn-primary-solid"
+                >
+                  Continue
+                </button>
               </div>
             </div>
           </div>

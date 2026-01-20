@@ -1,0 +1,304 @@
+/* Setup/Prerequisites Tab Styles */
+
+/* Page Headers */
+.setup-page-title {
+  font-weight: 600;
+  font-size: 20px;
+  margin-bottom: 16px;
+  color: #172B4D;
+}
+
+.setup-intro-text {
+  color: #42526E;
+  font-size: 14px;
+  line-height: 22px;
+  margin-bottom: 20px;
+}
+
+/* Section Container */
+.setup-section {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #DFE1E6;
+}
+
+.setup-section-title {
+  font-weight: 600;
+  font-size: 16px;
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: #172B4D;
+}
+
+.setup-subsection-title {
+  color: #42526E;
+  font-size: 14px;
+  line-height: 22px;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.setup-text {
+  color: #42526E;
+  font-size: 14px;
+  line-height: 22px;
+  margin-bottom: 12px;
+}
+
+.setup-text-last {
+  color: #42526E;
+  font-size: 14px;
+  line-height: 22px;
+  margin-bottom: 0;
+}
+
+.setup-text-bottom {
+  color: #42526E;
+  font-size: 14px;
+  line-height: 22px;
+  margin-top: 16px;
+  margin-bottom: 0;
+}
+
+.setup-text-spacing {
+  color: #42526E;
+  font-size: 14px;
+  line-height: 22px;
+  margin-bottom: 16px;
+}
+
+.setup-reference {
+  color: #5E6C84;
+  font-size: 13px;
+  line-height: 20px;
+  font-style: italic;
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+.setup-reference-simple {
+  color: #5E6C84;
+  font-size: 13px;
+  line-height: 20px;
+  font-style: italic;
+  margin: 0;
+}
+
+/* Links */
+.setup-link {
+  color: #0052CC;
+  text-decoration: underline;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.setup-link-subtle {
+  color: #5E6C84;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Strong Text */
+.setup-strong {
+  font-weight: 600;
+  color: #172B4D;
+}
+
+/* Configuration Box */
+.setup-config-box {
+  margin-top: 16px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background-color: #F4F5F7;
+  border-left: 4px solid #0052CC;
+  border-radius: 3px;
+}
+
+.setup-config-title {
+  margin: 0;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #172B4D;
+  font-weight: 600;
+}
+
+.setup-config-table {
+  width: 100%;
+  font-size: 13px;
+  line-height: 20px;
+  border-collapse: collapse;
+}
+
+.setup-config-table td {
+  padding: 6px 0;
+  color: #5E6C84;
+  vertical-align: top;
+}
+
+.setup-config-table td:first-child {
+  width: 140px;
+}
+
+.setup-config-table td:last-child {
+  color: #172B4D;
+}
+
+/* Docker Commands Box */
+.setup-docker-box {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background-color: #FFF7E6;
+  border-left: 4px solid #FF991F;
+  border-radius: 3px;
+}
+
+.setup-docker-title {
+  margin: 0;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #974F0C;
+  font-weight: 600;
+}
+
+.setup-docker-subtitle {
+  margin: 10px 0 6px 0;
+  font-size: 12px;
+  color: #974F0C;
+  font-weight: 600;
+}
+
+.setup-docker-subtitle-spacing {
+  margin: 16px 0 6px 0;
+  font-size: 12px;
+  color: #974F0C;
+  font-weight: 600;
+}
+
+.setup-docker-code {
+  display: block;
+  padding: 10px 12px;
+  background-color: #FFFFFF;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #172B4D;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 18px;
+}
+
+.setup-docker-note {
+  margin: 16px 0 0 0;
+  font-size: 11px;
+  color: #6B778C;
+  font-style: italic;
+  line-height: 16px;
+}
+
+/* CLI Commands Box */
+.setup-cli-box {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background-color: #E3FCEF;
+  border-left: 4px solid #00875A;
+  border-radius: 3px;
+}
+
+.setup-cli-title {
+  margin: 0;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #006644;
+  font-weight: 600;
+}
+
+.setup-cli-subtitle {
+  margin: 10px 0 6px 0;
+  font-size: 12px;
+  color: #006644;
+}
+
+.setup-cli-subtitle-bold {
+  margin: 16px 0 6px 0;
+  font-size: 12px;
+  color: #006644;
+  font-weight: 600;
+}
+
+.setup-cli-code {
+  display: block;
+  padding: 10px 12px;
+  background-color: #FFFFFF;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #172B4D;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 18px;
+}
+
+.setup-cli-note {
+  margin: 16px 0 0 0;
+  font-size: 11px;
+  color: #00875A;
+  font-style: italic;
+  line-height: 16px;
+}
+
+/* Help Box */
+.setup-help-box {
+  margin-top: 32px;
+  padding: 14px 16px;
+  background-color: #E3FCEF;
+  border-left: 4px solid #00875A;
+  border-radius: 3px;
+}
+
+.setup-help-text {
+  margin: 0;
+  font-size: 14px;
+  color: #006644;
+  line-height: 22px;
+}
+
+.setup-help-link {
+  color: #006644;
+  text-decoration: underline;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* Inline Code */
+.setup-code {
+  background-color: #F4F5F7;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 13px;
+}
+
+.setup-code-white {
+  background-color: #FFFFFF;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.setup-code-small {
+  background-color: #FFFFFF;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.setup-code-tiny {
+  background-color: #FFFFFF;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 11px;
+}
+
+/* Color Variations */
+.setup-color-grey {
+  color: #5E6C84;
+}
+

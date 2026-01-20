@@ -1,0 +1,93 @@
+/* StatusMessage Component Styles - Simple version matching original */
+
+/* Wrapper for margin */
+.status-message-wrapper {
+  margin-bottom: 20px;
+}
+
+/* Main message box */
+.status-message {
+  padding: 10px 14px;
+  border-radius: 8px;
+  position: relative;
+  padding-right: 40px;
+}
+
+/* Close button */
+.status-message-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.5;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.2s ease;
+}
+
+.status-message-close:hover {
+  opacity: 1;
+}
+
+/* Title styling */
+.status-message-title {
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+/* Message text styling */
+.status-message-text {
+  font-size: 14px;
+  color: #6B7280;
+  line-height: 1.4;
+}
+
+/* Success variant */
+.status-message.success {
+  background-color: #F0FDF4;
+  border: 2px solid #86EFAC;
+}
+
+.status-message.success .status-message-title {
+  color: #166534;
+}
+
+/* Error variant */
+.status-message.error {
+  background-color: #FEF2F2;
+  border: 2px solid #FCA5A5;
+}
+
+.status-message.error .status-message-title {
+  color: #991B1B;
+}
+
+/* Warning variant */
+.status-message.warning {
+  background-color: #FFFBEB;
+  border: 2px solid #FCD34D;
+}
+
+.status-message.warning .status-message-title {
+  color: #92400E;
+}
+
+/* Info variant */
+.status-message.info {
+  background-color: #EFF6FF;
+  border: 2px solid #93C5FD;
+}
+
+.status-message.info .status-message-title {
+  color: #1E40AF;
+}

@@ -1,0 +1,26 @@
+/* ConfigTab Component Styles */
+.config-tab-title {
+  font-weight: 600;
+  font-size: 20px;
+  margin-bottom: 8px;
+  color: #172B4D;
+}
+
+.config-tab-subtitle {
+  color: #5E6C84;
+  font-size: 14px;
+  margin-bottom: 20px;
+  line-height: 20px;
+}
+
+.config-tab-admin-check {
+  padding: 16px 0;
+}
+
+.config-tab-section-message {
+  margin: 8px 0;
+  color: #42526E;
+  font-size: 14px;
+  line-height: 20px;
+}
+

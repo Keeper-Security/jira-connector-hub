@@ -20,6 +20,12 @@ modules:
       handler: index.handler
     - key: keeperIssueResolver
       handler: index.issuePanelHandler
+    - key: keeperWebTriggerHandler
+      handler: index.webTriggerHandler
+      
+  webtrigger:
+    - key: keeper-alert-trigger
+      function: keeperWebTriggerHandler
       
 resources:
   - key: keeper-ui
@@ -36,9 +42,14 @@ permissions:
   external:
     fetch:
       backend:
+        # Ngrok tunnels
         - address: https://*.ngrok-free.app
         - address: https://*.ngrok.io
         - address: https://*.ngrok.app
+        # Cloudflare tunnels
+        - address: https://*.trycloudflare.com
+        - address: https://*.cloudflareaccess.com
+        - address: https://*.cfargotunnel.com
 app:
   runtime:
     name: nodejs22.x
