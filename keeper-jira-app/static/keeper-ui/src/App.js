@@ -376,7 +376,7 @@ this-device timeout 30d`}
                     Endpoint Privilege Management (Administrator Only)
                   </p>
                   <p className="about-feature-text">
-                    The Endpoint Privilege Manager tab provides administrators with the ability to configure automated ticket creation for Keeper Security PEDM (Privileged Endpoint Data Management) alerts through webhooks. This feature enables real-time monitoring and approval workflows for privileged access requests across your organization.
+                    The Endpoint Privilege Manager tab provides administrators with the ability to configure automated ticket creation for Keeper Security KEPM (Keeper Endpoint Privilege Manager) alerts through webhooks. This feature enables real-time monitoring and approval workflows for privileged access requests across your organization.
                   </p>
                 </div>
 

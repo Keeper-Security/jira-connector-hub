@@ -11,7 +11,7 @@ export function buildEnrichedTicketDescription(approvalDetails, payload) {
   const appInfo = approvalDetails.application_info || {};
   
   const content = [
-    { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: 'PEDM Approval Request' }] },
+    { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: 'KEPM Approval Request' }] },
     { type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'Request Details' }] },
     {
       type: 'bulletList',

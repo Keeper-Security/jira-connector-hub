@@ -90,7 +90,7 @@ function parseKeeperErrorMessage(errorMessage) {
 
 /**
  * Normalize the API URL
- * Expects complete API v2 URL like: http://localhost:8080/api/v2 or https://my-tunnel.ngrok.io/api/v2
+ * Expects complete API v2 URL like: https://my-tunnel.ngrok.io/api/v2 or https://keeper.your-domain.com/api/v2
  * Removes any trailing slashes for consistent endpoint construction
  * 
  * @param {string} apiUrl - The configured API URL (including /api/v2)
@@ -108,7 +108,7 @@ function normalizeApiUrl(apiUrl) {
  * 
  * User provides complete URL including /api/v2, e.g.:
  * - https://my-tunnel.ngrok.io/api/v2
- * - http://localhost:8080/api/v2
+ * - https://keeper.your-domain.com/api/v2
  * 
  * This function appends the specific endpoint:
  * - POST {apiUrl}/executecommand-async - Submit command to queue
@@ -116,7 +116,7 @@ function normalizeApiUrl(apiUrl) {
  * - GET  {apiUrl}/result/{request_id}  - Get request result
  * - GET  {apiUrl}/queue/status         - Get queue status
  * 
- * @param {string} apiUrl - Complete API URL (e.g., http://localhost:8080/api/v2)
+ * @param {string} apiUrl - Complete API URL (e.g., https://keeper.your-domain.com/api/v2)
  * @param {string} endpoint - Endpoint path (e.g., executecommand-async)
  * @returns {string} - Full endpoint URL
  */

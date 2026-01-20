@@ -77,6 +77,7 @@ const IssuePanel = () => {
   const [templateError, setTemplateError] = useState(null); // Track template loading errors
   const [originalRecordType, setOriginalRecordType] = useState(null); // Track original record type
   const [originalFormData, setOriginalFormData] = useState({}); // Store original form data
+  const [originalComplexFields, setOriginalComplexFields] = useState({}); // Store original complex field values for merging (name, address, host, etc.)
   
   // New workflow states
   const [isAdmin, setIsAdmin] = useState(false); // Track if current user is admin
@@ -375,6 +376,74 @@ const IssuePanel = () => {
           });
         }
         
+        // Extract and store original complex field values for merging during updates
+        // This ensures we can merge partial updates with existing values
+        const complexFields = {};
+        
+        // Check TOP LEVEL properties first (Keeper stores name, address, etc. at top level for some record types)
+        if (details.name && typeof details.name === 'object') {
+          complexFields.name = { ...details.name };
+        }
+        if (details.address && typeof details.address === 'object') {
+          complexFields.address = { ...details.address };
+        }
+        if (details.host && typeof details.host === 'object') {
+          complexFields.host = { ...details.host };
+        }
+        if (details.pamHostname && typeof details.pamHostname === 'object') {
+          complexFields.pamHostname = { ...details.pamHostname };
+        }
+        if (details.keyPair && typeof details.keyPair === 'object') {
+          complexFields.keyPair = { ...details.keyPair };
+        }
+        
+        // Check CUSTOM array (pamUser and other record types store complex fields here)
+        if (details.custom && Array.isArray(details.custom)) {
+          details.custom.forEach(field => {
+            if (field.value && field.value.length > 0) {
+              const fieldValue = field.value[0];
+              if (typeof fieldValue === 'object' && fieldValue !== null) {
+                // Only set if not already found at top level
+                if (field.type === 'name' && !complexFields.name) {
+                  complexFields.name = { ...fieldValue };
+                } else if (field.type === 'address' && !complexFields.address) {
+                  complexFields.address = { ...fieldValue };
+                } else if (field.type === 'host' && !complexFields.host) {
+                  complexFields.host = { ...fieldValue };
+                } else if (field.type === 'pamHostname' && !complexFields.pamHostname) {
+                  complexFields.pamHostname = { ...fieldValue };
+                } else if (field.type === 'keyPair' && !complexFields.keyPair) {
+                  complexFields.keyPair = { ...fieldValue };
+                }
+              }
+            }
+          });
+        }
+        
+        // Also check fields array as fallback (some record types store data there)
+        if (details.fields && Array.isArray(details.fields)) {
+          details.fields.forEach(field => {
+            if (field.value && field.value.length > 0) {
+              const fieldValue = field.value[0];
+              if (typeof fieldValue === 'object' && fieldValue !== null) {
+                // Only set if not already found
+                if (field.type === 'name' && !complexFields.name) {
+                  complexFields.name = { ...fieldValue };
+                } else if (field.type === 'address' && !complexFields.address) {
+                  complexFields.address = { ...fieldValue };
+                } else if (field.type === 'host' && !complexFields.host) {
+                  complexFields.host = { ...fieldValue };
+                } else if (field.type === 'pamHostname' && !complexFields.pamHostname) {
+                  complexFields.pamHostname = { ...fieldValue };
+                } else if (field.type === 'keyPair' && !complexFields.keyPair) {
+                  complexFields.keyPair = { ...fieldValue };
+                }
+              }
+            }
+          });
+        }
+        setOriginalComplexFields(complexFields);
+        
         // Ensure all standard fields have at least empty string values
         if (!existingValues.login) existingValues.login = '';
         if (!existingValues.password) existingValues.password = '';
@@ -453,10 +522,13 @@ const IssuePanel = () => {
           // Show blank fields for different/new record
           
           // Set blank form data for new record with the original record type
+          // Complex JSON fields (name, address, host, etc.) are merged at submission time
+          // to prevent data loss while keeping the form fields blank for partial updates
           const blankFormData = {
             record: recordUid,
             recordType: details.type || details.record_type || existingValues.recordType || ''
           };
+          
           setFormData(blankFormData);
           
           // Reset flags after processing
@@ -625,6 +697,212 @@ const IssuePanel = () => {
           { name: 'host_port', label: 'Port', type: 'text', required: false, placeholder: 'Port (default: 22)', parentType: 'host', subField: 'port' },
           { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
         ]
+      },
+      'bankAccount': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Account name (e.g., Chase Checking)' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'Account holder first name', parentType: 'name', subField: 'first' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Account holder last name', parentType: 'name', subField: 'last' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Online banking username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Online banking password' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://bank.com' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'bankCard': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Card name (e.g., Chase Sapphire)' },
+          { name: 'text.cardholderName', label: 'Cardholder Name', type: 'text', required: false, placeholder: 'Name on card' },
+          { name: 'pinCode', label: 'PIN', type: 'password', required: false, placeholder: 'Card PIN' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Online account username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Online account password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'address': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Address name (e.g., Home Address)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'wifiCredentials': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Network name (e.g., Home WiFi)' },
+          { name: 'text.ssid', label: 'SSID', type: 'text', required: false, placeholder: 'Network SSID' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'WiFi password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'driverLicense': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'License description' },
+          { name: 'accountNumber', label: 'License Number', type: 'text', required: false, placeholder: 'Driver license number' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'birthDate', label: 'Birth Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'expirationDate', label: 'Expiration Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'passport': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Passport description (e.g., US Passport)' },
+          { name: 'accountNumber', label: 'Passport Number', type: 'text', required: false, placeholder: 'Passport number' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'birthDate', label: 'Birth Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'expirationDate', label: 'Expiration Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'date', label: 'Issue Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'healthInsurance': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Insurance name (e.g., Blue Cross)' },
+          { name: 'accountNumber', label: 'Member ID', type: 'text', required: false, placeholder: 'Member/Policy number' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Portal username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Portal password' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://insurance.com' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'birthCertificate': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Birth certificate description' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'birthDate', label: 'Birth Date', type: 'date', required: false, placeholder: 'YYYY-MM-DD' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'ssnCard': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'SSN Card description' },
+          { name: 'accountNumber', label: 'SSN', type: 'secureText', required: false, placeholder: 'Social Security Number' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'photo': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Photo description' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'file': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'File description' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamDatabase': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Database name (e.g., Production Oracle DB)' },
+          { name: 'pamHostname_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'pamHostname', subField: 'hostName' },
+          { name: 'pamHostname_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 1521)', parentType: 'pamHostname', subField: 'port' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Database username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Database password' },
+          { name: 'text.database', label: 'Database', type: 'text', required: false, placeholder: 'Database name/SID' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamDirectory': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Directory name (e.g., Corporate AD)' },
+          { name: 'pamHostname_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'pamHostname', subField: 'hostName' },
+          { name: 'pamHostname_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 389)', parentType: 'pamHostname', subField: 'port' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Admin username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Admin password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamMachine': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Machine name (e.g., Production Web Server)' },
+          { name: 'pamHostname_hostName', label: 'Host', type: 'text', required: false, placeholder: 'hostname or IP', parentType: 'pamHostname', subField: 'hostName' },
+          { name: 'pamHostname_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 22)', parentType: 'pamHostname', subField: 'port' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamUser': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'User description (e.g., Database Admin User)' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
+          { name: 'name_first', label: 'First Name', type: 'text', required: false, placeholder: 'First name', parentType: 'name', subField: 'first' },
+          { name: 'name_middle', label: 'Middle Name', type: 'text', required: false, placeholder: 'Middle name', parentType: 'name', subField: 'middle' },
+          { name: 'name_last', label: 'Last Name', type: 'text', required: false, placeholder: 'Last name', parentType: 'name', subField: 'last' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamRemoteBrowser': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Session name (e.g., Salesforce Admin)' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://app.example.com' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'general': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Record title' },
+          { name: 'login', label: 'Login', type: 'text', required: false, placeholder: 'Username or identifier' },
+          { name: 'password', label: 'Password', type: 'password', required: false, placeholder: 'Password' },
+          { name: 'url', label: 'URL', type: 'url', required: false, placeholder: 'https://example.com' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamAwsConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'AWS Configuration name' },
+          { name: 'text.awsId', label: 'AWS ID', type: 'text', required: true, placeholder: 'AWS Account ID' },
+          { name: 'secret.accessKeyId', label: 'Access Key ID', type: 'secureText', required: false, placeholder: 'AWS Access Key ID' },
+          { name: 'multiline.regionNames', label: 'Region Names', type: 'textarea', required: false, placeholder: 'AWS Regions (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamAzureConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Azure Configuration name' },
+          { name: 'text.azureId', label: 'Azure ID', type: 'text', required: true, placeholder: 'Azure Account ID' },
+          { name: 'secret.clientId', label: 'Client ID', type: 'secureText', required: true, placeholder: 'Azure Client/Application ID' },
+          { name: 'multiline.resourceGroups', label: 'Resource Groups', type: 'textarea', required: false, placeholder: 'Resource groups (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamLocalConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Local Configuration name' },
+          { name: 'text.localId', label: 'Local ID', type: 'text', required: true, placeholder: 'Local identifier' },
+          { name: 'multiline.portMapping', label: 'Port Mapping', type: 'textarea', required: false, placeholder: 'Port mappings (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamNetworkConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Network Configuration name' },
+          { name: 'text.networkId', label: 'Network ID', type: 'text', required: false, placeholder: 'Network identifier' },
+          { name: 'multiline.portMapping', label: 'Port Mapping', type: 'textarea', required: false, placeholder: 'Port mappings (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
+      },
+      'pamDomainConfiguration': {
+        fields: [
+          { name: 'title', label: 'Title', type: 'text', required: true, placeholder: 'Domain Configuration name' },
+          { name: 'pamHostname_hostName', label: 'Host', type: 'text', required: false, placeholder: 'Domain controller hostname', parentType: 'pamHostname', subField: 'hostName' },
+          { name: 'pamHostname_port', label: 'Port', type: 'text', required: false, placeholder: 'Port number (e.g., 389)', parentType: 'pamHostname', subField: 'port' },
+          { name: 'text.pamDomainId', label: 'Domain ID', type: 'text', required: false, placeholder: 'Domain identifier' },
+          { name: 'multiline.portMapping', label: 'Port Mapping', type: 'textarea', required: false, placeholder: 'Port mappings (one per line)' },
+          { name: 'notes', label: 'Notes', type: 'textarea', required: false, placeholder: 'Additional notes...' }
+        ]
       }
     };
     
@@ -788,9 +1066,9 @@ const IssuePanel = () => {
       };
       
       // Format the same timestamp for the JIRA comment (same format used in UI)
-      const formattedTimestamp = now.toLocaleString('en-GB', {
-        day: '2-digit',
+      const formattedTimestamp = now.toLocaleString('en-US', {
         month: '2-digit',
+        day: '2-digit',
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
@@ -3694,9 +3972,9 @@ const IssuePanel = () => {
 
     try {
       // Format timestamp with user's local time (same as save/reject requests)
-      const formattedTimestamp = new Date().toLocaleString('en-GB', {
-        day: '2-digit',
+      const formattedTimestamp = new Date().toLocaleString('en-US', {
         month: '2-digit',
+        day: '2-digit',
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
@@ -3719,6 +3997,8 @@ const IssuePanel = () => {
       if (selectedAction.value === 'share-record' && selectedRecord) {
         // Ensure record field is populated with selected record UID
         finalParameters.record = selectedRecord.record_uid;
+        // Include record title for comment message
+        finalParameters.recordTitle = selectedRecord.title;
         // User/email and action fields are already in formData from manual input
         
       }
@@ -3731,6 +4011,103 @@ const IssuePanel = () => {
         // Special handling for password field - don't send masked password
         if (finalParameters.password === '••••••••') {
           delete finalParameters.password; // Don't send masked password back
+        }
+        
+        // IMPORTANT: Merge existing values for complex JSON fields to prevent data loss
+        // When sending partial updates for fields like name, address, host, etc.,
+        // we need to include existing values to prevent overwriting
+        // Using originalComplexFields which is reliably stored when record is loaded
+        
+        if (originalComplexFields && Object.keys(originalComplexFields).length > 0) {
+          
+          // Merge name fields - preserve existing values if not provided in form
+          if (originalComplexFields.name) {
+            const existingName = originalComplexFields.name;
+            // Check if any name field is being updated
+            const hasNameUpdate = finalParameters.name_first || finalParameters.name_middle || finalParameters.name_last;
+            if (hasNameUpdate) {
+              // Merge: use form value if provided, otherwise use existing value
+              if (!finalParameters.name_first && existingName.first) {
+                finalParameters.name_first = existingName.first;
+              }
+              if (!finalParameters.name_middle && existingName.middle) {
+                finalParameters.name_middle = existingName.middle;
+              }
+              if (!finalParameters.name_last && existingName.last) {
+                finalParameters.name_last = existingName.last;
+              }
+            }
+          }
+          
+          // Merge address fields - preserve existing values if not provided in form
+          if (originalComplexFields.address) {
+            const existingAddr = originalComplexFields.address;
+            const hasAddressUpdate = finalParameters.address_street1 || finalParameters.address_street2 || 
+              finalParameters.address_city || finalParameters.address_state || 
+              finalParameters.address_zip || finalParameters.address_country;
+            if (hasAddressUpdate) {
+              if (!finalParameters.address_street1 && existingAddr.street1) {
+                finalParameters.address_street1 = existingAddr.street1;
+              }
+              if (!finalParameters.address_street2 && existingAddr.street2) {
+                finalParameters.address_street2 = existingAddr.street2;
+              }
+              if (!finalParameters.address_city && existingAddr.city) {
+                finalParameters.address_city = existingAddr.city;
+              }
+              if (!finalParameters.address_state && existingAddr.state) {
+                finalParameters.address_state = existingAddr.state;
+              }
+              if (!finalParameters.address_zip && existingAddr.zip) {
+                finalParameters.address_zip = existingAddr.zip;
+              }
+              if (!finalParameters.address_country && existingAddr.country) {
+                finalParameters.address_country = existingAddr.country;
+              }
+            }
+          }
+          
+          // Merge host fields - preserve existing values if not provided in form
+          if (originalComplexFields.host) {
+            const existingHost = originalComplexFields.host;
+            const hasHostUpdate = finalParameters.host_hostName || finalParameters.host_port;
+            if (hasHostUpdate) {
+              if (!finalParameters.host_hostName && existingHost.hostName) {
+                finalParameters.host_hostName = existingHost.hostName;
+              }
+              if (!finalParameters.host_port && existingHost.port) {
+                finalParameters.host_port = existingHost.port;
+              }
+            }
+          }
+          
+          // Merge pamHostname fields - preserve existing values if not provided in form
+          if (originalComplexFields.pamHostname) {
+            const existingPamHost = originalComplexFields.pamHostname;
+            const hasPamHostUpdate = finalParameters.pamHostname_hostName || finalParameters.pamHostname_port;
+            if (hasPamHostUpdate) {
+              if (!finalParameters.pamHostname_hostName && existingPamHost.hostName) {
+                finalParameters.pamHostname_hostName = existingPamHost.hostName;
+              }
+              if (!finalParameters.pamHostname_port && existingPamHost.port) {
+                finalParameters.pamHostname_port = existingPamHost.port;
+              }
+            }
+          }
+          
+          // Merge keyPair fields - preserve existing values if not provided in form
+          if (originalComplexFields.keyPair) {
+            const existingKeyPair = originalComplexFields.keyPair;
+            const hasKeyPairUpdate = finalParameters.keyPair_privateKey || finalParameters.keyPair_publicKey;
+            if (hasKeyPairUpdate) {
+              if (!finalParameters.keyPair_privateKey && existingKeyPair.privateKey) {
+                finalParameters.keyPair_privateKey = existingKeyPair.privateKey;
+              }
+              if (!finalParameters.keyPair_publicKey && existingKeyPair.publicKey) {
+                finalParameters.keyPair_publicKey = existingKeyPair.publicKey;
+              }
+            }
+          }
         }
         
         // Add phone entries only if modified (new or edited)
@@ -3747,6 +4124,8 @@ const IssuePanel = () => {
       if (selectedAction.value === 'share-folder' && selectedFolder) {
         // Ensure folder field is populated with selected folder UID
         finalParameters.folder = selectedFolder.uid || selectedFolder.path || selectedFolder.name;
+        // Include folder title for comment message (only use name, not UID/path)
+        finalParameters.folderTitle = selectedFolder.name;
         // User/email field is already in formData from manual input
         
       }
@@ -3955,9 +4334,9 @@ const IssuePanel = () => {
 
     try {
       // Format timestamp with user's local time
-      const formattedTimestamp = new Date().toLocaleString('en-GB', {
-        day: '2-digit',
+      const formattedTimestamp = new Date().toLocaleString('en-US', {
         month: '2-digit',
+        day: '2-digit',
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
@@ -4171,6 +4550,7 @@ const IssuePanel = () => {
                             setFormData({});
                             setPhoneEntries([]);
                             setRecordDetails({});
+                            setOriginalComplexFields({});
                             setTemplateFields([]);
                             setSelectedRecordForUpdate(null);
                             setSelectedRecord(null);
@@ -4341,6 +4721,7 @@ const IssuePanel = () => {
                                           setRecordForUpdateSearchTerm("");
                                           // Clear previous record data immediately
                                           setRecordDetails({});
+                                          setOriginalComplexFields({});
                                           // For record-update, keep the record identifier but clear other fields
                                           setFormData({
                                             record: record.record_uid || record.title // Keep record identifier
@@ -5477,9 +5858,9 @@ const IssuePanel = () => {
                   </div>
                   {storedRequestData.timestamp && (
                     <div className="message-box-timestamp">
-                      Saved: {new Date(storedRequestData.timestamp).toLocaleString('en-GB', {
-                        day: '2-digit',
+                      Saved: {new Date(storedRequestData.timestamp).toLocaleString('en-US', {
                         month: '2-digit',
+                        day: '2-digit',
                         year: 'numeric',
                         hour: '2-digit',
                         minute: '2-digit',
@@ -5802,9 +6183,9 @@ const IssuePanel = () => {
                         borderTop: "1px solid #E5E7EB",
                         paddingTop: "6px"
                       }}>
-                        Saved: {new Date(saveRequestMessage.timestamp).toLocaleString('en-GB', {
-                          day: '2-digit',
+                        Saved: {new Date(saveRequestMessage.timestamp).toLocaleString('en-US', {
                           month: '2-digit',
+                          day: '2-digit',
                           year: 'numeric',
                           hour: '2-digit',
                           minute: '2-digit',

@@ -26,7 +26,7 @@ export const KEEPER_ACTION_OPTIONS = [
   },
   { 
     value: 'record-permission', 
-    label: 'Request Record Permission Change', 
+    label: 'Update Record Permissions in Folder', 
     requiresSharedFolderSelection: true,
     fields: [
       { name: 'sharedFolder', label: 'Shared Folder', type: 'folder-select', required: true, placeholder: 'Select shared folder' },

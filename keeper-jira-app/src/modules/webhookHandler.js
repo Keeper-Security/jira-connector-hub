@@ -114,7 +114,7 @@ export async function webTriggerHandler(request) {
     
     if (approvalDetails) {
       const approvalType = approvalDetails.approval_type || 'Unknown';
-      summary = `PEDM ${approvalType} Request - ${requestUid}`;
+      summary = `KEPM ${approvalType} Request - ${requestUid}`;
       adfDescription = buildEnrichedTicketDescription(approvalDetails, payload);
     } else {
       summary = `KeeperSecurity Alert - ${requestUid}`;

@@ -221,6 +221,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
         'name': ['first', 'middle', 'last'],
         'phone': ['region', 'number', 'ext', 'type'],
         'host': ['hostName', 'port'],
+        'pamHostname': ['hostName', 'port'],
         'keyPair': ['privateKey', 'publicKey']
       };
       
@@ -460,6 +461,17 @@ function buildKeeperCommand(action, parameters, issueKey) {
               
               if (Object.keys(hostObj).length > 0) {
                 command += ` host='$JSON:${JSON.stringify(hostObj)}'`;
+              }
+              break;
+              
+            case 'pamHostname':
+              // PAM Hostname format: pamHostname='$JSON:{"hostName": "...", "port": "..."}'
+              const pamHostObj = {};
+              if (fieldData.hostName) pamHostObj.hostName = fieldData.hostName;
+              if (fieldData.port) pamHostObj.port = fieldData.port;
+              
+              if (Object.keys(pamHostObj).length > 0) {
+                command += ` pamHostname='$JSON:${JSON.stringify(pamHostObj)}'`;
               }
               break;
               
@@ -944,6 +956,52 @@ resolver.define('executeKeeperAction', async (req) => {
     }
   }
   
+  // Validate share-record: prevent sharing with record owner
+  // Sharing with owner causes issues: revokes owner from record (moves to deleted items) and then share fails
+  if (command === 'share-record' && parameters.record && parameters.user && parameters.action !== 'cancel') {
+    try {
+      // Fetch record details to get owner email
+      const recordResult = await executeKeeperApiCommand(`get "${parameters.record}" --format=json`);
+      const recordApiData = recordResult.data;
+      
+      let recordOwnerEmail = null;
+      if (recordApiData.data) {
+        let recordDetails = {};
+        if (typeof recordApiData.data === 'string') {
+          recordDetails = JSON.parse(recordApiData.data);
+        } else if (typeof recordApiData.data === 'object') {
+          recordDetails = recordApiData.data;
+        }
+        
+        // Owner email is in user_permissions array where owner: true
+        // Example: { "username": "user@example.com", "owner": true, ... }
+        if (recordDetails.user_permissions && Array.isArray(recordDetails.user_permissions)) {
+          const ownerPermission = recordDetails.user_permissions.find(p => p.owner === true);
+          if (ownerPermission) {
+            recordOwnerEmail = ownerPermission.username;
+          }
+        }
+      }
+      
+      if (recordOwnerEmail) {
+        // Split user emails by comma and check if any matches the owner
+        const targetEmails = parameters.user.split(',').map(email => email.trim().toLowerCase()).filter(email => email);
+        const ownerEmailLower = recordOwnerEmail.toLowerCase();
+        
+        if (targetEmails.includes(ownerEmailLower)) {
+          throw new Error(`Cannot share record with its owner (${recordOwnerEmail}). Sharing with the record owner would revoke their ownership and cause the operation to fail.`);
+        }
+      }
+    } catch (ownerCheckError) {
+      // If it's our validation error, throw it
+      if (ownerCheckError.message.includes('Cannot share record with its owner')) {
+        throw ownerCheckError;
+      }
+      // Otherwise, log and continue (don't block if we can't fetch record details)
+      console.error('Failed to check record owner for share-record validation:', ownerCheckError.message);
+    }
+  }
+
   // Build dynamic command based on action and parameters
   const dynamicCommand = buildKeeperCommand(command, parameters || {}, issueKey);
 
@@ -998,6 +1056,9 @@ resolver.define('executeKeeperAction', async (req) => {
                  (data.data && data.data.record_uid) || 
                  (data.data && data.data.data && data.data.data.record_uid);
       
+      // Track if share invitation is pending (not yet accepted)
+      let isShareInvitationPending = false;
+      
       // Set command-specific messages
       // Handle PEDM commands first
       if (isPedmCommand) {
@@ -1023,27 +1084,44 @@ resolver.define('executeKeeperAction', async (req) => {
           // Build detailed action description
           actionDescription = `Share Record - ${parameters.action ? parameters.action.charAt(0).toUpperCase() + parameters.action.slice(1) : 'Grant'} access to ${parameters.user}`;
           
-          // Build detailed message for share-record
-          actionMessage = `Shared record with ${parameters.user}`;
-          if (parameters.action) {
-            actionMessage += ` (Action: ${parameters.action})`;
-          }
+          // Check if this is a share invitation pending case
+          // Response message can be a string or array
+          const shareRecordMessages = Array.isArray(data.message) ? data.message : [data.message];
+          const shareInvitationMessage = shareRecordMessages.find(msg => 
+            msg && typeof msg === 'string' && msg.includes('Share invitation has been sent to')
+          );
           
-          // Add permissions details
-          const recordPerms = [];
-          if (parameters.can_share === true) recordPerms.push('Can Share');
-          if (parameters.can_write === true) recordPerms.push('Can Write');
-          if (parameters.recursive === true) recordPerms.push('Recursive');
-          
-          if (recordPerms.length > 0) {
-            actionMessage += ` - Permissions: ${recordPerms.join(', ')}`;
-          }
-          
-          // Add expiration info
-          if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
-            actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
-          } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-            actionMessage += ` - Expires in: ${parameters.expire_in}`;
+          if (shareInvitationMessage) {
+            // Extract email from message like "Share invitation has been sent to 'email@example.com'"
+            const emailMatch = shareInvitationMessage.match(/Share invitation has been sent to '([^']+)'/);
+            const invitedEmail = emailMatch ? emailMatch[1] : parameters.user;
+            
+            actionMessage = `Share invitation sent to ${invitedEmail}. The invitation is pending acceptance.`;
+            isShareInvitationPending = true;
+          } else {
+            // Build detailed message for share-record
+            const recordName = parameters.recordTitle ? `"${parameters.recordTitle}"` : 'record';
+            actionMessage = `Shared ${recordName} with ${parameters.user}`;
+            if (parameters.action) {
+              actionMessage += ` (Action: ${parameters.action})`;
+            }
+            
+            // Add permissions details
+            const recordPerms = [];
+            if (parameters.can_share === true) recordPerms.push('Can Share');
+            if (parameters.can_write === true) recordPerms.push('Can Write');
+            if (parameters.recursive === true) recordPerms.push('Recursive');
+            
+            if (recordPerms.length > 0) {
+              actionMessage += ` - Permissions: ${recordPerms.join(', ')}`;
+            }
+            
+            // Add expiration info
+            if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
+              actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
+            } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
+              actionMessage += ` - Expires in: ${parameters.expire_in}`;
+            }
           }
           break;
           
@@ -1051,28 +1129,45 @@ resolver.define('executeKeeperAction', async (req) => {
           // Build detailed action description
           actionDescription = `Share Folder - ${parameters.action ? parameters.action.charAt(0).toUpperCase() + parameters.action.slice(1) : 'Grant'} access to ${parameters.user}`;
           
-          // Build detailed message for share-folder
-          actionMessage = `Shared folder with ${parameters.user}`;
-          if (parameters.action) {
-            actionMessage += ` (Action: ${parameters.action})`;
-          }
+          // Check if this is a share invitation pending case
+          // Response message can be a string or array
+          const shareFolderMessages = Array.isArray(data.message) ? data.message : [data.message];
+          const folderInvitationMessage = shareFolderMessages.find(msg => 
+            msg && typeof msg === 'string' && msg.includes('Share invitation has been sent to')
+          );
           
-          // Add permissions details
-          const folderPerms = [];
-          if (parameters.manage_records === true) folderPerms.push('Manage Records');
-          if (parameters.manage_users === true) folderPerms.push('Manage Users');
-          if (parameters.can_share === true) folderPerms.push('Can Share');
-          if (parameters.can_edit === true) folderPerms.push('Can Edit');
-          
-          if (folderPerms.length > 0) {
-            actionMessage += ` - Permissions: ${folderPerms.join(', ')}`;
-          }
-          
-          // Add expiration info
-          if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
-            actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
-          } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-            actionMessage += ` - Expires in: ${parameters.expire_in}`;
+          if (folderInvitationMessage) {
+            // Extract email from message like "Share invitation has been sent to 'email@example.com'"
+            const emailMatch = folderInvitationMessage.match(/Share invitation has been sent to '([^']+)'/);
+            const invitedEmail = emailMatch ? emailMatch[1] : parameters.user;
+            
+            actionMessage = `Share invitation sent to ${invitedEmail}. The invitation is pending acceptance.`;
+            isShareInvitationPending = true;
+          } else {
+            // Build detailed message for share-folder
+            const folderName = parameters.folderTitle ? `"${parameters.folderTitle}"` : 'folder';
+            actionMessage = `Shared ${folderName} folder with ${parameters.user}`;
+            if (parameters.action) {
+              actionMessage += ` (Action: ${parameters.action})`;
+            }
+            
+            // Add permissions details
+            const folderPerms = [];
+            if (parameters.manage_records === true) folderPerms.push('Manage Records');
+            if (parameters.manage_users === true) folderPerms.push('Manage Users');
+            if (parameters.can_share === true) folderPerms.push('Can Share');
+            if (parameters.can_edit === true) folderPerms.push('Can Edit');
+            
+            if (folderPerms.length > 0) {
+              actionMessage += ` - Permissions: ${folderPerms.join(', ')}`;
+            }
+            
+            // Add expiration info
+            if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
+              actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
+            } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
+              actionMessage += ` - Expires in: ${parameters.expire_in}`;
+            }
           }
           break;
           
@@ -1089,6 +1184,8 @@ resolver.define('executeKeeperAction', async (req) => {
         } else if (command.includes('--deny')) {
           panelTitle = 'Endpoint Privilege Approval Request - Denied';
         }
+      } else if (isShareInvitationPending) {
+        panelTitle = 'Keeper Request - Share Invitation Sent';
       }
       
       const contentArray = [
@@ -1142,10 +1239,12 @@ resolver.define('executeKeeperAction', async (req) => {
         marks: [{ type: 'em' }]
       });
       
-      // Use different panel types for PEDM commands
+      // Use different panel types for different scenarios
       let panelType = 'success';
       if (isPedmCommand && command.includes('--deny')) {
         panelType = 'warning';
+      } else if (isShareInvitationPending) {
+        panelType = 'info';
       }
       
       const adfBody = {
@@ -1239,11 +1338,63 @@ resolver.define('executeKeeperAction', async (req) => {
       record_uid: record_uid
     };
   } catch (err) {
+    // Check for specific error types and provide user-friendly messages
+    const errorMessage = err.message || String(err);
+    
+    // Check if this is a record owner error (user already owns the record)
+    if (isRecordOwnerError(errorMessage)) {
+      throw new Error(`Cannot share record with its owner. The selected user is the current owner of this record and already has full permissions.`);
+    }
+    
+    // Check if this is a permission conflict error
+    if (isPermissionConflictError(errorMessage)) {
+      throw new Error(`Cannot grant access - permission conflict. The user may already have different access to this record. Please revoke their existing access first, then try again.`);
+    }
     
     // No JIRA comment for errors - only successful responses get comments
     throw err;
   }
 });
+
+/**
+ * Helper function to detect record owner/share errors from Keeper API response
+ * This is a fallback - the pre-check should catch owner issues before command execution
+ */
+function isRecordOwnerError(errorMessage) {
+  if (!errorMessage) return false;
+  const lowerError = errorMessage.toLowerCase();
+  
+  // Pattern: "Failed to change record... access permissions for user" 
+  // This happens when trying to share with the owner (owner gets revoked, then share fails)
+  if (lowerError.includes('failed to change record') && 
+      lowerError.includes('access permissions')) {
+    return true;
+  }
+  
+  // Pattern: "Failed to change" + "permissions"
+  if (lowerError.includes('failed to change') && 
+      lowerError.includes('permissions')) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Helper function to detect permission conflict errors from Keeper API response
+ * Similar to Slack app's is_permission_conflict_error utility
+ */
+function isPermissionConflictError(errorMessage) {
+  if (!errorMessage) return false;
+  const lowerError = errorMessage.toLowerCase();
+  
+  // Check for patterns that indicate permission conflict
+  return lowerError.includes('permission') && (
+    lowerError.includes('conflict') ||
+    lowerError.includes('already exists') ||
+    lowerError.includes('already has')
+  ) || lowerError.includes('share already exists');
+}
 
 /**
  * Reject Keeper request (called from issue panel)
@@ -2008,7 +2159,7 @@ resolver.define('getWebhookTickets', async (req) => {
           ticketDescription = jsonPayload.description;
         } else if (isPedmEnriched && jsonPayload.approval_type) {
           // For PEDM tickets, create a meaningful description
-          ticketDescription = `${jsonPayload.approval_type || 'PEDM'} Request - ${requestUid || 'Unknown'}`;
+          ticketDescription = `${jsonPayload.approval_type || 'KEPM'} Request - ${requestUid || 'Unknown'}`;
           if (username) {
             ticketDescription = `${username} - ${ticketDescription}`;
           }
@@ -2029,7 +2180,7 @@ resolver.define('getWebhookTickets', async (req) => {
         username: username,
         category: jsonPayload?.category || (isPedmEnriched ? 'endpoint_privilege_manager' : null),
         auditEvent: jsonPayload?.audit_event || (isPedmEnriched ? 'approval_request_created' : null),
-        alertName: jsonPayload?.alert_name || (isPedmEnriched ? 'PEDM Approval Request' : null)
+        alertName: jsonPayload?.alert_name || (isPedmEnriched ? 'KEPM Approval Request' : null)
       };
     });
     
@@ -2874,9 +3025,9 @@ resolver.define('clearStoredRequestData', async (req) => {
     
     // Format timestamp with user's local time (consistent with save/reject requests)
     const now = new Date();
-    const timestamp = now.toLocaleString('en-GB', {
-      day: '2-digit',
+    const timestamp = now.toLocaleString('en-US', {
       month: '2-digit',
+      day: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
