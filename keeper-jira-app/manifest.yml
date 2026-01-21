@@ -43,6 +43,12 @@ permissions:
   external:
     fetch:
       backend:
+        # TODO: PR #3 Issue #8 - Overly Broad Fetch Permissions
+        # Wildcards allow connection to ANY ngrok/Cloudflare tunnel, not just customer's.
+        # If admin enters attacker's tunnel URL, API key gets leaked.
+        # Need to add URL validation in setConfig resolver (src/index.js) to verify
+        # tunnel URL matches expected patterns before saving config.
+        # Also should test connection before saving to prevent bad URLs.
         # Ngrok tunnels
         - address: https://*.ngrok-free.app
         - address: https://*.ngrok.io

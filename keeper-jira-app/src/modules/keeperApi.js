@@ -42,6 +42,10 @@ const API_CONFIG = {
  * Helper function to parse and clean Keeper CLI error messages
  * Extracts the meaningful user-friendly error message from verbose CLI output
  */
+// TODO: PR #3 Issue #5 - API Key Exposure in Error Messages
+// Error messages from Keeper API might contain partial API keys or sensitive info.
+// Need to sanitize/redact API keys from error text before displaying to users.
+// Pattern: replace /api[_-]?key[:\s=]*[^\s,]+/gi with 'api-key=***REDACTED***'
 function parseKeeperErrorMessage(errorMessage) {
   if (!errorMessage || typeof errorMessage !== 'string') return errorMessage;
   
@@ -157,6 +161,10 @@ function calculateNextInterval(currentInterval) {
  * @param {Object} options - Additional options (e.g., filedata)
  * @returns {Promise<Object>} - Queue submission response with request_id
  */
+// TODO: PR #3 Issue #4 - No Rate Limiting
+// No limits on command submissions. User can spam unlimited commands, exhausting Keeper's queue.
+// Keeper Commander queue capacity is 100 requests (https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api/advanced-settings).
+// Need per-user rate limiting: 5 commands/minute, 50/hour (allows ~10 concurrent users before queue stress).
 async function submitAsyncCommand(baseUrl, apiKey, command, options = {}) {
   const endpoint = getApiEndpoint(baseUrl, 'executecommand-async');
   

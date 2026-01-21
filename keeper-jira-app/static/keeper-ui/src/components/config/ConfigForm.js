@@ -1,8 +1,14 @@
 /**
  * Configuration form component
  *
- * Pre-publication review: See PR #3 for security findings (Issue #5)
+ * Pre-publication review: See PR #3 for security findings (Issues #5, #12)
  */
+// TODO: PR #3 Issue #12 - Error Handling Pattern (Suggested Improvement)
+// When invoke() calls fail in parent components (useConfig.js, api.js), errors are currently
+// thrown by resolvers, resulting in "There was an error invoking the function -" prefix.
+// Consider having backend return structured error objects { success: false, error: 'CODE', message: '...' }
+// and updating frontend to check result.success instead of using try-catch.
+// This provides better UX control over error messages.
 import React from 'react';
 import { router } from "@forge/bridge";
 import TextField from "@atlaskit/textfield";
@@ -91,6 +97,10 @@ const ConfigForm = ({
             {({ fieldProps, error }) => (
               <>
                 <div className="api-key-field-wrapper">
+                  {/* TODO: PR #3 Issue #5 - API Key Exposure
+                      Masking is implemented, but verify isApiKeyMasked defaults to true.
+                      Also need warning message when key is visible (e.g., "WARNING: API Key visible - do not screenshot").
+                      Additionally, sanitize API keys from error messages in keeperApi.js parseKeeperErrorMessage(). */}
                   <TextField
                     {...fieldProps}
                     value={formValues.apiKey}

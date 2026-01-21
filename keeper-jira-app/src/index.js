@@ -153,6 +153,12 @@ resolver.define('getIssueContext', async (req) => {
  * Build Keeper CLI command from action and parameters
  */
 // Helper function to capitalize first letter of a field name
+// TODO: PR #3 Issue #3 - No Input Validation
+// This function only validates type, not length or format. Need comprehensive validation:
+// - Length limits (title ≤ reasonable max, email ≤ 254 chars per SMTP spec, etc.)
+// - Format validation (email regex, phone regex, URL patterns)
+// - Sanitization of special characters before command building
+// Currently, a 1MB string or malformed email would be accepted without validation.
 function capitalizeFieldName(fieldName) {
   if (!fieldName || typeof fieldName !== 'string') return fieldName;
   return fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
@@ -177,9 +183,15 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (!parameters.title) {
         throw new Error(`Title is required for record-add command. Record type: ${recordType}`);
       }
+      // TODO: PR #3 Issue #1 - Command Injection Risk
+      // User input concatenated without shell escaping. If parameters.title contains
+      // quotes ("), apostrophes ('), or backticks (`), the command string breaks.
+      // Need to implement escapeShellArg() function before concatenating any user input.
+      // Example vulnerable input: title="Test's Record" or title='Test" && rm -rf /'
       command += ` --title="${parameters.title}"`;
       // Handle common fields for all record types
       if (parameters.notes) {
+        // TODO: PR #3 Issue #1 - Notes field also vulnerable to command injection
         command += ` Notes="${parameters.notes}"`;
       }
       
@@ -2048,12 +2060,17 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
                     })
                   }
                 );
+                // TODO: PR #3 Issue #11 - Structured Logging (Suggested Improvement)
+                // Plain console.log makes debugging difficult in Forge Developer Console.
+                // Consider structured JSON logging: logger.info('Assigned ticket', { issueKey, adminEmail, action: 'assign' })
+                // Enables better filtering with `forge logs --verbose --grouped` and correlation across invocations.
                 console.log(`Assigned PEDM ticket ${issue.key} to project admin`);
               }
             }
           }
         }
       } catch (assignError) {
+        // TODO: PR #3 Issue #11 - Also applies to error logging
         console.error('Failed to assign ticket to project admin:', assignError);
         // Don't fail the entire test if assignment fails
       }

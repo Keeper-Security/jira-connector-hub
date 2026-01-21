@@ -16,6 +16,16 @@ import { buildTicketLabels } from './utils/labelBuilder.js';
  * @returns {Promise<Object>} - HTTP response
  */
 export async function webTriggerHandler(request) {
+  // TODO: PR #3 Issue #2 - No Webhook Authentication
+  // Web trigger accepts any POST request without authentication. Atlassian Forge web triggers
+  // have no built-in auth (https://developer.atlassian.com/platform/forge/manifest-reference/modules/web-trigger/).
+  // Need to implement token validation (query param: ?token=<secret> or Authorization header).
+  // See PR #3 Issue #2 for layered implementation approach.
+
+  // TODO: PR #3 Issue #4 - No Rate Limiting
+  // No limits on webhook submissions. Attacker could spam 1000s of requests.
+  // Need per-source rate limiting (50/hour) to prevent ticket spam and Jira API exhaustion.
+
   try {
     // Get the web trigger configuration
     const config = await storage.get('webTriggerConfig');
@@ -56,6 +66,10 @@ export async function webTriggerHandler(request) {
     const storageKey = `webhook-processed-${sanitizedUid}`;
     
     // First check storage (faster and atomic)
+    // TODO: PR #3 Issue #7 - Storage API Retry Logic
+    // Storage calls can fail with HTTP 429 rate limit errors under load.
+    // Need retry wrapper with exponential backoff (1s, 2s, 4s) + jitter per Forge best practices.
+    // Reference: https://developer.atlassian.com/platform/forge/storage-api-limit-handling/
     const existingTicket = await storage.get(storageKey);
     if (existingTicket) {
       return {
@@ -71,6 +85,10 @@ export async function webTriggerHandler(request) {
     }
     
     // Also check Jira in case storage was cleared but ticket exists
+    // TODO: PR #3 Issue #9 - 2026 Rate Limit Compliance
+    // No retry logic for 429 responses. Starting March 2, 2026, Jira API enforces point-based
+    // rate limits. Need retry wrapper with exponential backoff + respect Retry-After header.
+    // Reference: https://community.developer.atlassian.com/t/2026-point-based-rate-limits/97828
     const searchResponse = await asApp().requestJira(
       route`/rest/api/3/search?jql=${encodeURIComponent(`labels = "${uidLabel}"`)}`
     );
@@ -117,6 +135,11 @@ export async function webTriggerHandler(request) {
     if (approvalDetails) {
       const approvalType = approvalDetails.approval_type || 'Unknown';
       summary = `KEPM ${approvalType} Request - ${requestUid}`;
+      // TODO: PR #3 Issue #10 - Sensitive Data in Jira Comments (Suggested Improvement)
+      // buildEnrichedTicketDescription includes full approval details (usernames, commands,
+      // internal hostnames, justifications) visible to all users with "Browse Projects" permission.
+      // Consider redacting sensitive fields: email domains (user@***), FQDNs (host.***),
+      // commands ([REDACTED]), and truncating justifications if information disclosure is a concern.
       adfDescription = buildEnrichedTicketDescription(approvalDetails, payload);
     } else {
       summary = `KeeperSecurity Alert - ${requestUid}`;
