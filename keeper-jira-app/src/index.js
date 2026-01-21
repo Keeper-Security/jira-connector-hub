@@ -1,3 +1,4 @@
+// Pre-publication review: See PR #3 for security and compliance findings
 import Resolver from '@forge/resolver';
 import { storage, fetch, route, asApp, asUser, requestJira, webTrigger } from '@forge/api';
 import { webTriggerHandler } from './modules/webhookHandler.js';

@@ -1,3 +1,4 @@
+# Pre-publication review: See PR #3 for security findings (Issue #8)
 modules:
   jira:globalPage:
     - key: keeper-global-page

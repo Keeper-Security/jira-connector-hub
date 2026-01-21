@@ -1,5 +1,7 @@
 /**
  * Configuration form component
+ *
+ * Pre-publication review: See PR #3 for security findings (Issue #5)
  */
 import React from 'react';
 import { router } from "@forge/bridge";

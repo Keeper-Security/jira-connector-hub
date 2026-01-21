@@ -1,6 +1,8 @@
 /**
  * Webhook Handler Module
  * Handles incoming webhooks from Keeper Security and creates Jira tickets
+ *
+ * Pre-publication review: See PR #3 for security findings (Issues #2, #4, #7, #9, #10)
  */
 
 import { storage, asApp, route } from '@forge/api';

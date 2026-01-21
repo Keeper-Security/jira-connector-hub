@@ -2,7 +2,9 @@
  * Keeper Commander API Module
  * Handles all interactions with Keeper Security Commander API
  * Uses API v2 (async queue mode) - introduced in Commander 17.1.7
- * 
+ *
+ * Pre-publication review: See PR #3 for security findings (Issues #4, #5, #9)
+ *
  * API v2 Reference: https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api/api-usage
  */
 
