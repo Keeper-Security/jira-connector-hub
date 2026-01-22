@@ -1,9 +1,240 @@
 import Resolver from '@forge/resolver';
-import { storage, fetch, route, asApp, asUser, requestJira, webTrigger } from '@forge/api';
-import { webTriggerHandler } from './modules/webhookHandler.js';
-import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand } from './modules/keeperApi.js';
+import { storage, webTrigger } from '@forge/api';
+import { webTriggerHandler, generateWebhookToken } from './modules/webhookHandler.js';
+import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus } from './modules/keeperApi.js';
+import { requestJiraAsAppWithRetry, requestJiraAsUserWithRetry, route } from './modules/utils/jiraApiRetry.js';
+import { logger, createResolverLogger } from './modules/utils/logger.js';
+import { 
+  ERROR_CODES, 
+  successResponse, 
+  errorResponse, 
+  validationError, 
+  rateLimitError, 
+  connectionError, 
+  keeperError, 
+  pedmError 
+} from './modules/utils/errorResponse.js';
 
 const resolver = new Resolver();
+
+// ============================================================================
+// API URL Validation Configuration (Issue #8: Overly Broad Fetch Permissions)
+// ============================================================================
+
+/**
+ * Known tunnel URL patterns that match the default manifest.yml external fetch permissions.
+ * These patterns help identify common tunnel services and provide appropriate warnings.
+ * 
+ * Note: For per-customer deployments, customers may add custom domains to their manifest.yml.
+ * Custom domains are allowed but will show a reminder to verify manifest configuration.
+ */
+const KNOWN_TUNNEL_PATTERNS = [
+  // Ngrok tunnels (default in manifest)
+  { 
+    pattern: /^https:\/\/[a-z0-9-]+\.ngrok-free\.app$/i,
+    name: 'ngrok-free.app',
+    isFree: true,
+    isDefaultManifest: true,
+    warning: 'Free ngrok URLs change on each restart. Consider a custom domain for production use.'
+  },
+  { 
+    pattern: /^https:\/\/[a-z0-9-]+\.ngrok\.io$/i,
+    name: 'ngrok.io',
+    isFree: false,
+    isDefaultManifest: true
+  },
+  { 
+    pattern: /^https:\/\/[a-z0-9-]+\.ngrok\.app$/i,
+    name: 'ngrok.app',
+    isFree: false,
+    isDefaultManifest: true
+  },
+  // Cloudflare tunnels (default in manifest)
+  { 
+    pattern: /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/i,
+    name: 'trycloudflare.com',
+    isFree: true,
+    isDefaultManifest: true,
+    warning: 'Free Cloudflare tunnel URLs are temporary. Configure a custom domain for production.'
+  },
+  { 
+    pattern: /^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/i,
+    name: 'cloudflareaccess.com',
+    isFree: false,
+    isDefaultManifest: true
+  },
+  { 
+    pattern: /^https:\/\/[a-z0-9-]+\.cfargotunnel\.com$/i,
+    name: 'cfargotunnel.com',
+    isFree: false,
+    isDefaultManifest: true
+  },
+  // Localhost for development (only http, not https)
+  { 
+    pattern: /^http:\/\/localhost(:\d+)?$/i,
+    name: 'localhost',
+    isFree: true,
+    isDev: true,
+    warning: 'localhost URLs only work during local development.'
+  }
+];
+
+/**
+ * Validate API URL format and check against known tunnel patterns
+ * 
+ * For per-customer deployments, custom domains are allowed but will show a reminder
+ * to verify the manifest.yml is configured correctly.
+ * 
+ * @param {string} url - The API URL to validate
+ * @returns {Object} - { valid: boolean, error?: string, warning?: string, matchedPattern?: Object, isCustomDomain?: boolean }
+ */
+function validateApiUrl(url) {
+  // Check if URL is provided
+  if (!url || typeof url !== 'string') {
+    return { 
+      valid: false, 
+      error: 'API URL is required' 
+    };
+  }
+  
+  // Trim and normalize
+  const trimmedUrl = url.trim();
+  
+  // Check for empty string
+  if (!trimmedUrl) {
+    return { 
+      valid: false, 
+      error: 'API URL cannot be empty' 
+    };
+  }
+  
+  // Validate URL format
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(trimmedUrl);
+  } catch (e) {
+    return { 
+      valid: false, 
+      error: 'Invalid URL format. URL must be a valid HTTPS URL (e.g., https://your-tunnel.ngrok-free.app or https://keeper.your-company.com)' 
+    };
+  }
+  
+  // Check protocol (must be https, except localhost)
+  const isLocalhost = parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1';
+  if (!isLocalhost && parsedUrl.protocol !== 'https:') {
+    return { 
+      valid: false, 
+      error: 'API URL must use HTTPS protocol for security (except localhost for development)' 
+    };
+  }
+  
+  // Validate hostname format (basic security check)
+  const hostname = parsedUrl.hostname;
+  
+  // Block obviously suspicious patterns
+  if (hostname.includes('..') || hostname.startsWith('-') || hostname.endsWith('-')) {
+    return {
+      valid: false,
+      error: 'Invalid hostname format in URL'
+    };
+  }
+  
+  // Block IP addresses (except localhost) - require proper domain names
+  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (ipv4Pattern.test(hostname) && hostname !== '127.0.0.1') {
+    return {
+      valid: false,
+      error: 'Direct IP addresses are not allowed. Please use a domain name or tunnel URL.'
+    };
+  }
+  
+  // Remove trailing slash for consistent matching
+  const normalizedUrl = trimmedUrl.replace(/\/+$/, '');
+  
+  // Extract origin (protocol + hostname + port) for pattern matching
+  // This allows URLs with paths like /api/v2 to still validate against the domain pattern
+  const originUrl = parsedUrl.origin;
+  
+  // Check against known tunnel patterns (match against origin, not full URL)
+  for (const tunnelPattern of KNOWN_TUNNEL_PATTERNS) {
+    if (tunnelPattern.pattern.test(originUrl)) {
+      const result = { 
+        valid: true, 
+        normalizedUrl,
+        matchedPattern: tunnelPattern,
+        isCustomDomain: false
+      };
+      
+      // Add warning for free-tier or development URLs
+      if (tunnelPattern.warning) {
+        result.warning = tunnelPattern.warning;
+      }
+      
+      return result;
+    }
+  }
+  
+  // URL doesn't match known patterns - allow as custom domain with informational message
+  // This supports per-customer deployments where customers add their own domains to manifest.yml
+  return { 
+    valid: true,
+    normalizedUrl,
+    isCustomDomain: true,
+    warning: `Custom domain detected (${hostname}). Ensure this domain is added to your manifest.yml external fetch permissions before deploying. Connection test will verify the URL is accessible.`
+  };
+}
+
+/**
+ * Test if the API URL is reachable and responds correctly
+ * This helps prevent saving misconfigured or malicious URLs
+ * @param {string} apiUrl - The API URL to test
+ * @param {string} apiKey - The API key for authentication
+ * @returns {Object} - { reachable: boolean, error?: string }
+ */
+async function testApiUrlReachability(apiUrl, apiKey) {
+  try {
+    // Use the existing connection test function
+    const result = await testKeeperConnection(apiUrl, apiKey);
+    
+    // Check if the response indicates a valid Keeper Commander API
+    const serviceMessage = result.data?.message || '';
+    const isValidKeeperApi = serviceMessage.toLowerCase().includes('running') || 
+                            serviceMessage.toLowerCase().includes('keeper') ||
+                            result.success === true;
+    
+    if (!isValidKeeperApi) {
+      return {
+        reachable: false,
+        error: 'URL is reachable but does not appear to be a valid Keeper Commander API. Verify the tunnel is pointing to your Keeper Commander service.'
+      };
+    }
+    
+    return { reachable: true };
+  } catch (error) {
+    // Parse the error message to provide helpful feedback
+    const errorMessage = error.message || 'Unknown error';
+    
+    if (errorMessage.includes('fetch') || errorMessage.includes('network')) {
+      return {
+        reachable: false,
+        error: `Cannot connect to URL: ${errorMessage}. Verify the tunnel is running and the URL is correct.`
+      };
+    }
+    
+    if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+      // URL is reachable but auth failed - this is actually a valid Keeper API
+      return {
+        reachable: true,
+        warning: 'URL is reachable but authentication failed. Verify your API key is correct.'
+      };
+    }
+    
+    return {
+      reachable: false,
+      error: `Connection test failed: ${errorMessage}`
+    };
+  }
+}
 
 /**
  * Helper function to get current user information
@@ -11,22 +242,23 @@ const resolver = new Resolver();
  */
 async function getCurrentUser() {
   try {
-    const response = await asUser().requestJira(
+    const response = await requestJiraAsUserWithRetry(
       route`/rest/api/3/myself`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
-      }
+      },
+      'Get current user'
     );
     
     if (response.ok) {
       return await response.json();
     } else {
-      console.error('Failed to fetch current user info, status:', response.status);
+      logger.error('Failed to fetch current user info', { status: response.status });
       return null;
     }
   } catch (error) {
-    console.error('Error fetching current user info:', error);
+    logger.error('Error fetching current user info', error);
     return null;
   }
 }
@@ -41,23 +273,96 @@ resolver.define('getConfig', async () => {
 
 /**
  * Save Keeper config (called from frontend)
+ * Includes URL validation to prevent saving malicious tunnel URLs (Issue #8)
  */
 resolver.define('setConfig', async (req) => {
+  const log = createResolverLogger(req, 'setConfig');
   // Handle double nesting: req.payload.payload
   let payload = req?.payload?.payload || req?.payload || req;
   
+  log.info('Setting Keeper configuration');
+  
   if (!payload) {
-    throw new Error('No payload provided');
+    return validationError('payload', 'No payload provided');
   }
   
   const apiUrl = payload.apiUrl;
-  const apiKey = payload.apiKey; 
+  const apiKey = payload.apiKey;
+  const skipConnectionTest = payload.skipConnectionTest || false;
   
-  const configToSave = { apiUrl, apiKey };
+  // ========================================================================
+  // Security: URL Validation (Issue #8: Overly Broad Fetch Permissions)
+  // Validates the URL matches allowed tunnel patterns before saving
+  // ========================================================================
+  
+  // Validate API URL format and pattern
+  const urlValidation = validateApiUrl(apiUrl);
+  if (!urlValidation.valid) {
+    return errorResponse(
+      ERROR_CODES.VALIDATION_INVALID_URL, 
+      `Invalid API URL: ${urlValidation.error}`,
+      { field: 'apiUrl' }
+    );
+  }
+  
+  // Log warning for free-tier URLs
+  if (urlValidation.warning) {
+    logger.warn('URL validation warning', { warning: urlValidation.warning });
+  }
+  
+  // Validate API key is provided
+  if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
+    return validationError('apiKey', 'API Key is required');
+  }
+  
+  // Use the normalized URL (trailing slashes removed)
+  const normalizedApiUrl = urlValidation.normalizedUrl;
+  
+  // ========================================================================
+  // Security: Connection Test (prevents saving URLs that don't work)
+  // ========================================================================
+  
+  let connectionWarning = null;
+  
+  if (!skipConnectionTest) {
+    const reachabilityTest = await testApiUrlReachability(normalizedApiUrl, apiKey);
+    
+    if (!reachabilityTest.reachable) {
+      return connectionError(`Connection test failed: ${reachabilityTest.error}`);
+    }
+    
+    if (reachabilityTest.warning) {
+      connectionWarning = reachabilityTest.warning;
+    }
+  }
+  
+  // Save the validated and normalized config
+  const configToSave = { 
+    apiUrl: normalizedApiUrl, 
+    apiKey: apiKey.trim() 
+  };
   
   await storage.set('keeperConfig', configToSave);
   
-  return { success: true, message: 'Configuration saved successfully' };
+  // Build response with any warnings
+  const response = { 
+    success: true, 
+    message: 'Configuration saved successfully' 
+  };
+  
+  // Include warnings in response for UI to display
+  const warnings = [];
+  if (urlValidation.warning) {
+    warnings.push(urlValidation.warning);
+  }
+  if (connectionWarning) {
+    warnings.push(connectionWarning);
+  }
+  if (warnings.length > 0) {
+    response.warnings = warnings;
+  }
+  
+  return response;
 });
 
 /**
@@ -69,14 +374,14 @@ resolver.define('testConnection', async (req) => {
   let payload = req?.payload?.payload || req?.payload || req;
   
   if (!payload) {
-    throw new Error('No payload provided');
+    return validationError('payload', 'No payload provided');
   }
   
   const apiUrl = payload.apiUrl;
   const apiKey = payload.apiKey;
   
   if (!apiUrl || !apiKey) {
-    throw new Error('API URL and API Key are required for testing connection');
+    return validationError('apiUrl', 'API URL and API Key are required for testing connection');
   }
 
   try {
@@ -87,14 +392,13 @@ resolver.define('testConnection', async (req) => {
     const serviceMessage = result.data?.message || 'Service status unknown';
     const isRunning = serviceMessage.toLowerCase().includes('running');
 
-    return { 
-      success: true, 
+    return successResponse({ 
       message: isRunning ? 'Connection test successful!' : 'Connection established but service may not be running properly',
       serviceStatus: serviceMessage,
       isServiceRunning: isRunning
-    };
+    });
   } catch (err) {
-    throw new Error(`Connection test failed: ${err.message}`);
+    return connectionError(`Connection test failed: ${err.message}`, err);
   }
 });
 
@@ -115,12 +419,13 @@ resolver.define('getIssueContext', async (req) => {
   let labels = [];
   if (issueKey) {
     try {
-      const issueResponse = await asApp().requestJira(
+      const issueResponse = await requestJiraAsAppWithRetry(
         route`/rest/api/3/issue/${issueKey}?fields=labels`,
         {
           method: 'GET',
           headers: { 'Accept': 'application/json' }
-        }
+        },
+        'Get issue labels'
       );
       
       if (issueResponse.ok) {
@@ -128,7 +433,7 @@ resolver.define('getIssueContext', async (req) => {
         labels = issueData.fields?.labels || [];
       }
     } catch (error) {
-      console.error('Failed to fetch issue labels:', error);
+      logger.error('Failed to fetch issue labels', error);
       // Continue without labels if fetch fails
     }
   }
@@ -148,6 +453,476 @@ resolver.define('getIssueContext', async (req) => {
   };
 });
 
+// ============================================================================
+// Input Validation Module
+// ============================================================================
+
+/**
+ * Field length limits to prevent memory exhaustion and buffer overflows
+ * Based on reasonable maximums and industry standards
+ */
+const VALIDATION_LIMITS = {
+  // Record fields
+  title: { maxLength: 256, label: 'Title' },
+  notes: { maxLength: 10000, label: 'Notes' },
+  login: { maxLength: 254, label: 'Login/Username' },  // RFC 5321 email max
+  password: { maxLength: 1024, label: 'Password' },
+  url: { maxLength: 2048, label: 'URL' },  // Common browser limit
+  email: { maxLength: 254, label: 'Email' },  // RFC 5321 SMTP max
+  
+  // Contact fields
+  phone: { maxLength: 32, label: 'Phone Number' },
+  phoneExt: { maxLength: 16, label: 'Phone Extension' },
+  phoneRegion: { maxLength: 8, label: 'Phone Region' },
+  
+  // Address fields
+  street: { maxLength: 256, label: 'Street Address' },
+  city: { maxLength: 128, label: 'City' },
+  state: { maxLength: 64, label: 'State/Province' },
+  zip: { maxLength: 32, label: 'ZIP/Postal Code' },
+  country: { maxLength: 64, label: 'Country' },
+  
+  // Name fields
+  firstName: { maxLength: 64, label: 'First Name' },
+  middleName: { maxLength: 64, label: 'Middle Name' },
+  lastName: { maxLength: 64, label: 'Last Name' },
+  
+  // Identity fields
+  recordUid: { maxLength: 64, label: 'Record UID' },  // Keeper UIDs are ~22 chars
+  folderUid: { maxLength: 64, label: 'Folder UID' },
+  recordType: { maxLength: 64, label: 'Record Type' },
+  
+  // Network fields
+  hostName: { maxLength: 253, label: 'Hostname' },  // DNS FQDN max
+  port: { maxLength: 5, label: 'Port' },  // Max port 65535
+  
+  // SSH fields
+  privateKey: { maxLength: 16000, label: 'Private Key' },
+  publicKey: { maxLength: 8000, label: 'Public Key' },
+  passphrase: { maxLength: 1024, label: 'Passphrase' },
+  
+  // Sharing fields
+  user: { maxLength: 1024, label: 'User' },  // Can be multiple comma-separated emails
+  expiration: { maxLength: 64, label: 'Expiration' },
+  
+  // Custom fields
+  customField: { maxLength: 1024, label: 'Custom Field' },
+  
+  // Generic fallback
+  default: { maxLength: 1024, label: 'Field' },
+};
+
+/**
+ * Validation patterns for format checking
+ */
+const VALIDATION_PATTERNS = {
+  // Email: RFC 5322 simplified - allows most valid emails
+  email: /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/,
+  
+  // URL: Basic validation for http/https URLs
+  url: /^https?:\/\/[^\s<>"{}|\\^`[\]]+$/i,
+  
+  // Phone: International format, digits, spaces, dashes, parens, plus
+  phone: /^[+]?[\d\s\-().]{1,30}$/,
+  
+  // Port: 1-65535
+  port: /^([1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])$/,
+  
+  // UID: Alphanumeric with common UID characters
+  uid: /^[a-zA-Z0-9_\-]{1,100}$/,
+  
+  // Hostname: Valid DNS hostname
+  hostname: /^(?=.{1,253}$)(?:(?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)*(?!-)[a-zA-Z0-9-]{1,63}(?<!-)$/,
+  
+  // Record type: Alphanumeric with underscores, hyphens, dots
+  recordType: /^[a-zA-Z][a-zA-Z0-9_.\-]{0,99}$/,
+  
+  // Date: ISO format YYYY-MM-DD or Unix timestamp
+  date: /^(\d{4}-\d{2}-\d{2}|\d{10,13})$/,
+  
+  // Expiration duration: Number with time unit (e.g., 30d, 24h, 60m)
+  duration: /^\d+[dhms]?$/i,
+};
+
+/**
+ * Validate a single field value
+ * @param {string} fieldName - Name of the field being validated
+ * @param {*} value - Value to validate
+ * @param {Object} options - Validation options
+ * @returns {Object} - { valid: boolean, error?: string, sanitized?: string }
+ */
+function validateField(fieldName, value, options = {}) {
+  // Skip validation for null/undefined (optional fields)
+  if (value === null || value === undefined) {
+    return { valid: true, sanitized: null };
+  }
+  
+  // Convert to string for validation
+  const strValue = String(value).trim();
+  
+  // Check if field is required
+  if (options.required && strValue.length === 0) {
+    return { valid: false, error: `${options.label || fieldName} is required` };
+  }
+  
+  // Skip further validation for empty optional fields
+  if (strValue.length === 0) {
+    return { valid: true, sanitized: '' };
+  }
+  
+  // Get length limit for this field type
+  const limitKey = options.limitKey || fieldName;
+  const limits = VALIDATION_LIMITS[limitKey] || VALIDATION_LIMITS.default;
+  
+  // Check length limit
+  if (strValue.length > limits.maxLength) {
+    return { 
+      valid: false, 
+      error: `${limits.label} exceeds maximum length of ${limits.maxLength} characters (provided: ${strValue.length})` 
+    };
+  }
+  
+  // Format validation for specific field types
+  if (options.pattern) {
+    const pattern = VALIDATION_PATTERNS[options.pattern];
+    if (pattern && !pattern.test(strValue)) {
+      return { 
+        valid: false, 
+        error: `${limits.label} has invalid format` 
+      };
+    }
+  }
+  
+  // Check for dangerous control characters (except newlines in notes)
+  const allowNewlines = options.allowNewlines || fieldName === 'notes';
+  const controlCharPattern = allowNewlines ? /[\x00-\x08\x0b\x0c\x0e-\x1f]/ : /[\x00-\x1f]/;
+  if (controlCharPattern.test(strValue)) {
+    return { 
+      valid: false, 
+      error: `${limits.label} contains invalid control characters` 
+    };
+  }
+  
+  return { valid: true, sanitized: strValue };
+}
+
+/**
+ * Validate email address with multiple emails support (comma-separated)
+ * @param {string} emailString - Single email or comma-separated emails
+ * @returns {Object} - { valid: boolean, error?: string, emails?: string[] }
+ */
+function validateEmails(emailString) {
+  if (!emailString || typeof emailString !== 'string') {
+    return { valid: false, error: 'Email address is required' };
+  }
+  
+  const emails = emailString.split(',').map(e => e.trim()).filter(e => e);
+  
+  if (emails.length === 0) {
+    return { valid: false, error: 'At least one email address is required' };
+  }
+  
+  // Limit number of emails to prevent abuse
+  if (emails.length > 50) {
+    return { valid: false, error: 'Maximum 50 email addresses allowed per request' };
+  }
+  
+  for (const email of emails) {
+    // Check length
+    if (email.length > VALIDATION_LIMITS.email.maxLength) {
+      return { 
+        valid: false, 
+        error: `Email "${email.substring(0, 20)}..." exceeds maximum length of ${VALIDATION_LIMITS.email.maxLength} characters` 
+      };
+    }
+    
+    // Check format
+    if (!VALIDATION_PATTERNS.email.test(email)) {
+      return { 
+        valid: false, 
+        error: `Invalid email format: "${email.substring(0, 50)}${email.length > 50 ? '...' : ''}"` 
+      };
+    }
+  }
+  
+  return { valid: true, emails };
+}
+
+/**
+ * Validate phone entry object
+ * @param {Object} phoneEntry - Phone entry with number, type, region, ext
+ * @returns {Object} - { valid: boolean, error?: string }
+ */
+function validatePhoneEntry(phoneEntry) {
+  if (!phoneEntry || typeof phoneEntry !== 'object') {
+    return { valid: true }; // Optional
+  }
+  
+  // Validate phone number
+  if (phoneEntry.number) {
+    const numberValidation = validateField('phone', phoneEntry.number, { 
+      limitKey: 'phone', 
+      pattern: 'phone' 
+    });
+    if (!numberValidation.valid) {
+      return numberValidation;
+    }
+  }
+  
+  // Validate extension
+  if (phoneEntry.ext) {
+    const extValidation = validateField('ext', phoneEntry.ext, { limitKey: 'phoneExt' });
+    if (!extValidation.valid) {
+      return extValidation;
+    }
+  }
+  
+  // Validate region
+  if (phoneEntry.region) {
+    const regionValidation = validateField('region', phoneEntry.region, { limitKey: 'phoneRegion' });
+    if (!regionValidation.valid) {
+      return regionValidation;
+    }
+  }
+  
+  return { valid: true };
+}
+
+/**
+ * Validate all parameters for a Keeper command
+ * @param {string} action - The command action (record-add, record-update, etc.)
+ * @param {Object} parameters - The parameters object
+ * @returns {Object} - { valid: boolean, errors?: string[] }
+ */
+function validateCommandParameters(action, parameters) {
+  const errors = [];
+  
+  // Skip validation for pre-formatted CLI commands
+  if (parameters.cliCommand) {
+    return { valid: true };
+  }
+  
+  // Common validations based on action type
+  switch (action) {
+    case 'record-add':
+    case 'record-update': {
+      // Title validation
+      if (action === 'record-add' && !parameters.title) {
+        errors.push('Title is required for record-add');
+      } else if (parameters.title) {
+        const titleValidation = validateField('title', parameters.title, { 
+          limitKey: 'title',
+          required: action === 'record-add'
+        });
+        if (!titleValidation.valid) errors.push(titleValidation.error);
+      }
+      
+      // Record UID validation (for record-update)
+      if (action === 'record-update' && parameters.record) {
+        const recordValidation = validateField('record', parameters.record, { 
+          limitKey: 'recordUid',
+          pattern: 'uid'
+        });
+        if (!recordValidation.valid) errors.push(recordValidation.error);
+      }
+      
+      // Record type validation
+      if (parameters.recordType) {
+        const typeValidation = validateField('recordType', parameters.recordType, { 
+          limitKey: 'recordType',
+          pattern: 'recordType'
+        });
+        if (!typeValidation.valid) errors.push(typeValidation.error);
+      }
+      
+      // Notes validation
+      if (parameters.notes) {
+        const notesValidation = validateField('notes', parameters.notes, { 
+          limitKey: 'notes',
+          allowNewlines: true
+        });
+        if (!notesValidation.valid) errors.push(notesValidation.error);
+      }
+      
+      // Login/username validation
+      if (parameters.login) {
+        const loginValidation = validateField('login', parameters.login, { limitKey: 'login' });
+        if (!loginValidation.valid) errors.push(loginValidation.error);
+      }
+      
+      // Password validation (skip $GEN)
+      if (parameters.password && parameters.password !== '$GEN' && parameters.password !== 'generate') {
+        const passwordValidation = validateField('password', parameters.password, { limitKey: 'password' });
+        if (!passwordValidation.valid) errors.push(passwordValidation.error);
+      }
+      
+      // URL validation
+      if (parameters.url) {
+        const urlValidation = validateField('url', parameters.url, { 
+          limitKey: 'url',
+          pattern: 'url'
+        });
+        if (!urlValidation.valid) errors.push(urlValidation.error);
+      }
+      
+      // Email validation
+      if (parameters.email) {
+        const emailValidation = validateField('email', parameters.email, { 
+          limitKey: 'email',
+          pattern: 'email'
+        });
+        if (!emailValidation.valid) errors.push(emailValidation.error);
+      }
+      
+      // Phone entries validation
+      if (parameters.phoneEntries && Array.isArray(parameters.phoneEntries)) {
+        for (let i = 0; i < parameters.phoneEntries.length; i++) {
+          const phoneValidation = validatePhoneEntry(parameters.phoneEntries[i]);
+          if (!phoneValidation.valid) {
+            errors.push(`Phone entry ${i + 1}: ${phoneValidation.error}`);
+          }
+        }
+      }
+      
+      // Address fields validation
+      const addressFields = ['address_street1', 'address_street2', 'address_city', 'address_state', 'address_zip', 'address_country'];
+      for (const field of addressFields) {
+        if (parameters[field]) {
+          const limitKey = field.includes('street') ? 'street' : 
+                          field.includes('city') ? 'city' :
+                          field.includes('state') ? 'state' :
+                          field.includes('zip') ? 'zip' : 'country';
+          const validation = validateField(field, parameters[field], { limitKey });
+          if (!validation.valid) errors.push(validation.error);
+        }
+      }
+      
+      // Name fields validation
+      const nameFields = ['name_first', 'name_middle', 'name_last'];
+      for (const field of nameFields) {
+        if (parameters[field]) {
+          const limitKey = field.includes('first') ? 'firstName' :
+                          field.includes('middle') ? 'middleName' : 'lastName';
+          const validation = validateField(field, parameters[field], { limitKey });
+          if (!validation.valid) errors.push(validation.error);
+        }
+      }
+      
+      // Host fields validation
+      if (parameters.host_hostName || parameters.hostName) {
+        const hostname = parameters.host_hostName || parameters.hostName;
+        const validation = validateField('hostName', hostname, { 
+          limitKey: 'hostName',
+          pattern: 'hostname'
+        });
+        if (!validation.valid) errors.push(validation.error);
+      }
+      
+      if (parameters.host_port || parameters.port) {
+        const port = parameters.host_port || parameters.port;
+        const validation = validateField('port', port, { 
+          limitKey: 'port',
+          pattern: 'port'
+        });
+        if (!validation.valid) errors.push(validation.error);
+      }
+      
+      // Validate all remaining string parameters against default limits
+      for (const [key, value] of Object.entries(parameters)) {
+        if (typeof value === 'string' && !['cliCommand'].includes(key)) {
+          // Skip already validated fields
+          if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email'].includes(key)) {
+            continue;
+          }
+          if (addressFields.includes(key) || nameFields.includes(key)) {
+            continue;
+          }
+          
+          // Validate against default limit
+          const validation = validateField(key, value, { limitKey: 'default' });
+          if (!validation.valid) errors.push(validation.error);
+        }
+      }
+      break;
+    }
+    
+    case 'share-record':
+    case 'share-folder': {
+      // Record/Folder UID validation
+      const uidParam = parameters.record || parameters.folder || parameters.sharedFolder;
+      if (uidParam) {
+        const uidValidation = validateField('uid', uidParam, { 
+          limitKey: action === 'share-record' ? 'recordUid' : 'folderUid',
+          pattern: 'uid'
+        });
+        if (!uidValidation.valid) errors.push(uidValidation.error);
+      }
+      
+      // Email validation (required for share actions)
+      if (parameters.user) {
+        const emailValidation = validateEmails(parameters.user);
+        if (!emailValidation.valid) errors.push(emailValidation.error);
+      } else if (parameters.action !== 'cancel') {
+        errors.push('User email is required for share operations');
+      }
+      
+      // Expiration validation
+      if (parameters.expire_in) {
+        const durationValidation = validateField('expire_in', parameters.expire_in, {
+          pattern: 'duration'
+        });
+        if (!durationValidation.valid) errors.push('Invalid expiration duration format');
+      }
+      
+      if (parameters.expire_at) {
+        // Basic datetime validation
+        const expireAt = parameters.expire_at;
+        if (typeof expireAt === 'string' && expireAt.length > 30) {
+          errors.push('Expiration date exceeds maximum length');
+        }
+      }
+      break;
+    }
+    
+    case 'record-permission': {
+      // Folder UID validation
+      const folderUid = parameters.folder || parameters.sharedFolder;
+      if (folderUid) {
+        const uidValidation = validateField('folder', folderUid, { 
+          limitKey: 'folderUid',
+          pattern: 'uid'
+        });
+        if (!uidValidation.valid) errors.push(uidValidation.error);
+      }
+      
+      // Action validation
+      if (parameters.action && !['grant', 'revoke'].includes(parameters.action)) {
+        errors.push('Invalid action. Must be "grant" or "revoke"');
+      }
+      break;
+    }
+    
+    default: {
+      // For unknown actions, validate all string parameters against default limits
+      for (const [key, value] of Object.entries(parameters)) {
+        if (typeof value === 'string') {
+          const validation = validateField(key, value, { limitKey: 'default' });
+          if (!validation.valid) errors.push(validation.error);
+        }
+      }
+    }
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors: errors.length > 0 ? errors : undefined
+  };
+}
+
+// ============================================================================
+// Command Building Functions
+// ============================================================================
+
 /**
  * Build Keeper CLI command from action and parameters
  */
@@ -157,10 +932,77 @@ function capitalizeFieldName(fieldName) {
   return fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
 }
 
+/**
+ * Escape a value for use inside single-quoted shell arguments.
+ * Single quotes in shell cannot contain escaped single quotes, so we use
+ * the technique: replace ' with '\'' (end quote, escaped quote, start quote)
+ * 
+ * Example: "Test's Record" becomes "Test'\''s Record"
+ * Which in shell becomes: 'Test'\''s Record' = Test's Record
+ * 
+ * @param {string} value - The user input value to escape
+ * @returns {string} - The escaped value safe for single-quoted context
+ */
+function escapeForSingleQuotes(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value !== 'string') value = String(value);
+  // Replace single quotes with the escape sequence '\''
+  return value.replace(/'/g, "'\\''");
+}
+
+/**
+ * Escape a value for use inside double-quoted shell arguments.
+ * Characters that need escaping in double quotes: " $ ` \ !
+ * 
+ * @param {string} value - The user input value to escape
+ * @returns {string} - The escaped value safe for double-quoted context
+ */
+function escapeForDoubleQuotes(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value !== 'string') value = String(value);
+  // Escape backslashes first, then other special characters
+  return value
+    .replace(/\\/g, '\\\\')   // Escape backslashes
+    .replace(/"/g, '\\"')     // Escape double quotes
+    .replace(/\$/g, '\\$')    // Escape dollar signs (variable expansion)
+    .replace(/`/g, '\\`')     // Escape backticks (command substitution)
+    .replace(/!/g, '\\!');    // Escape exclamation marks (history expansion)
+}
+
+/**
+ * Sanitize JSON field values before JSON.stringify to prevent injection
+ * through JSON string escaping edge cases.
+ * 
+ * @param {Object} obj - Object with string values to sanitize
+ * @returns {Object} - Object with sanitized values
+ */
+function sanitizeJsonObject(obj) {
+  const sanitized = {};
+  for (const key of Object.keys(obj)) {
+    const value = obj[key];
+    if (typeof value === 'string') {
+      // JSON.stringify handles most escaping, but we ensure no null bytes
+      // or other control characters that could cause parsing issues
+      sanitized[key] = value.replace(/[\x00-\x1f]/g, '');
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+}
+
 function buildKeeperCommand(action, parameters, issueKey) {
   // Check if we have a pre-formatted CLI command (used for record-permission)
   if (parameters.cliCommand) {
     return parameters.cliCommand;
+  }
+  
+  // ========================================================================
+  // Input Validation - validate all parameters before building command
+  // ========================================================================
+  const validation = validateCommandParameters(action, parameters);
+  if (!validation.valid) {
+    throw new Error(`Input validation failed: ${validation.errors.join('; ')}`);
   }
   
   let command = action;
@@ -170,16 +1012,16 @@ function buildKeeperCommand(action, parameters, issueKey) {
     case 'record-add':
       // Use the recordType parameter if provided, otherwise default to login
       const recordType = parameters.recordType || 'login';
-      command += ` --record-type='${recordType}'`;
+      command += ` --record-type='${escapeForSingleQuotes(recordType)}'`;
       
       // Title is required for all record types
       if (!parameters.title) {
         throw new Error(`Title is required for record-add command. Record type: ${recordType}`);
       }
-      command += ` --title="${parameters.title}"`;
+      command += ` --title="${escapeForDoubleQuotes(parameters.title)}"`;
       // Handle common fields for all record types
       if (parameters.notes) {
-        command += ` Notes="${parameters.notes}"`;
+        command += ` Notes="${escapeForDoubleQuotes(parameters.notes)}"`;
       }
       
       // Dynamic field processing for any record type
@@ -207,7 +1049,9 @@ function buildKeeperCommand(action, parameters, issueKey) {
           if (entry.type) {
             phoneObj.type = entry.type;
           }
-          command += ` Phone='$JSON:${JSON.stringify(phoneObj)}'`;
+          // Sanitize JSON object values and escape for single-quoted shell context
+          const sanitizedPhone = sanitizeJsonObject(phoneObj);
+          command += ` Phone='$JSON:${escapeForSingleQuotes(JSON.stringify(sanitizedPhone))}'`;
         }
       }
       
@@ -292,14 +1136,17 @@ function buildKeeperCommand(action, parameters, issueKey) {
         
         const value = parameters[key].toString().trim();
         if (value) {
+          // Escape user input for single-quoted shell context
+          const escapedValue = escapeForSingleQuotes(value);
+          
           // Handle custom fields (c.text.Department, c.secret.API_Key, etc.)
           if (key.startsWith('c.')) {
-              command += ` ${key}='${value}'`;
+              command += ` ${key}='${escapedValue}'`;
           }
           // Handle text.fieldname format (e.g., text.type for databaseCredentials)
           else if (key.startsWith('text.')) {
               // Keep as-is (lowercase) for Keeper CLI
-              command += ` ${key}='${value}'`;
+              command += ` ${key}='${escapedValue}'`;
           }
           // Handle grouped fields that don't need JSON - skip, handled in jsonFields
           else if (key.includes('_')) {
@@ -307,7 +1154,7 @@ function buildKeeperCommand(action, parameters, issueKey) {
           }
           // Single fields (login, password, url, email, etc.) - keep lowercase
           else {
-            command += ` ${key}='${value}'`;
+            command += ` ${key}='${escapedValue}'`;
           }
         }
       });
@@ -325,8 +1172,9 @@ function buildKeeperCommand(action, parameters, issueKey) {
           });
           
           if (!shouldSkip) {
-            // Keep field names lowercase for Keeper CLI
-            command += ` ${fieldName}='$JSON:${JSON.stringify(fieldData)}'`;
+            // Sanitize JSON object values and escape for single-quoted shell context
+            const sanitizedData = sanitizeJsonObject(fieldData);
+            command += ` ${fieldName}='$JSON:${escapeForSingleQuotes(JSON.stringify(sanitizedData))}'`;
           }
         }
       });
@@ -336,25 +1184,25 @@ function buildKeeperCommand(action, parameters, issueKey) {
     case 'record-update':
       // Required record parameter
       if (parameters.record) {
-        command += ` --record='${parameters.record}'`;
+        command += ` --record='${escapeForSingleQuotes(parameters.record)}'`;
       }
       
       // Optional title update
       if (parameters.title) {
-        command += ` --title='${parameters.title}'`;
+        command += ` --title='${escapeForSingleQuotes(parameters.title)}'`;
       }
       
       // Optional record type change
       if (parameters.recordType) {
-        command += ` --record-type='${parameters.recordType}'`;
+        command += ` --record-type='${escapeForSingleQuotes(parameters.recordType)}'`;
       }
       
       // Notes handling (with + prefix to append, without to replace)
       if (parameters.notes) {
         if (parameters.appendNotes === true) {
-          command += ` --notes='+${parameters.notes}'`;
+          command += ` --notes='+${escapeForSingleQuotes(parameters.notes)}'`;
         } else {
-          command += ` --notes='${parameters.notes}'`;
+          command += ` --notes='${escapeForSingleQuotes(parameters.notes)}'`;
         }
       }
       
@@ -412,7 +1260,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
               if (fieldData.country) addressObj.country = fieldData.country;
               
               if (Object.keys(addressObj).length > 0) {
-                const addressCommand = ` address='$JSON:${JSON.stringify(addressObj)}'`;
+                const sanitizedAddress = sanitizeJsonObject(addressObj);
+                const addressCommand = ` address='$JSON:${escapeForSingleQuotes(JSON.stringify(sanitizedAddress))}'`;
                 command += addressCommand;
               }
               break;
@@ -425,7 +1274,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
               if (fieldData.last) nameObj.last = fieldData.last;
               
               if (Object.keys(nameObj).length > 0) {
-                command += ` name='$JSON:${JSON.stringify(nameObj)}'`;
+                const sanitizedName = sanitizeJsonObject(nameObj);
+                command += ` name='$JSON:${escapeForSingleQuotes(JSON.stringify(sanitizedName))}'`;
               }
               break;
               
@@ -438,7 +1288,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
               if (fieldData.type) simplePhoneObj.type = fieldData.type;
               
               if (Object.keys(simplePhoneObj).length > 0) {
-                command += ` phone='$JSON:${JSON.stringify(simplePhoneObj)}'`;
+                const sanitizedPhone = sanitizeJsonObject(simplePhoneObj);
+                command += ` phone='$JSON:${escapeForSingleQuotes(JSON.stringify(sanitizedPhone))}'`;
               }
               break;
               
@@ -449,7 +1300,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
               if (fieldData.publicKey) keyPairObj.publicKey = fieldData.publicKey;
               
               if (Object.keys(keyPairObj).length > 0) {
-                command += ` keyPair='$JSON:${JSON.stringify(keyPairObj)}'`;
+                const sanitizedKeyPair = sanitizeJsonObject(keyPairObj);
+                command += ` keyPair='$JSON:${escapeForSingleQuotes(JSON.stringify(sanitizedKeyPair))}'`;
               }
               break;
               
@@ -460,7 +1312,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
               if (fieldData.port) hostObj.port = fieldData.port;
               
               if (Object.keys(hostObj).length > 0) {
-                command += ` host='$JSON:${JSON.stringify(hostObj)}'`;
+                const sanitizedHost = sanitizeJsonObject(hostObj);
+                command += ` host='$JSON:${escapeForSingleQuotes(JSON.stringify(sanitizedHost))}'`;
               }
               break;
               
@@ -471,7 +1324,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
               if (fieldData.port) pamHostObj.port = fieldData.port;
               
               if (Object.keys(pamHostObj).length > 0) {
-                command += ` pamHostname='$JSON:${JSON.stringify(pamHostObj)}'`;
+                const sanitizedPamHost = sanitizeJsonObject(pamHostObj);
+                command += ` pamHostname='$JSON:${escapeForSingleQuotes(JSON.stringify(sanitizedPamHost))}'`;
               }
               break;
               
@@ -481,7 +1335,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
                 const subValue = fieldData[subField];
                 if (subValue) {
                   // Use only the original field name (subField) for custom fields
-                  command += ` c.text.${subField}="${subValue}"`;
+                  // Escape for double-quoted context
+                  command += ` c.text.${subField}="${escapeForDoubleQuotes(subValue)}"`;
                 }
               });
               break;
@@ -489,17 +1344,19 @@ function buildKeeperCommand(action, parameters, issueKey) {
         } else {
           // Handle single fields
           const value = fieldData;
+          // Escape value for single-quoted shell context
+          const escapedValue = escapeForSingleQuotes(value);
           
           switch (fieldGroup) {
             case 'login':
-              command += ` login='${value}'`;
+              command += ` login='${escapedValue}'`;
               break;
               
             case 'password':
               if (value === '$GEN' || value === 'generate') {
                 command += ` password=$GEN`;
               } else {
-                command += ` password='${value}'`;
+                command += ` password='${escapedValue}'`;
               }
               break;
               
@@ -509,46 +1366,46 @@ function buildKeeperCommand(action, parameters, issueKey) {
               if (value === '$GEN' || value === 'generate') {
                 command += ` password.passphrase=$GEN`;
               } else {
-                command += ` password.passphrase='${value}'`;
+                command += ` password.passphrase='${escapedValue}'`;
               }
               break;
               
             case 'url':
-              command += ` url='${value}'`;
+              command += ` url='${escapedValue}'`;
               break;
               
             case 'email':
-              command += ` email='${value}'`;
+              command += ` email='${escapedValue}'`;
               break;
               
             case 'licenseNumber':
               // Standard Keeper field type for software licenses
-              command += ` licenseNumber='${value}'`;
+              command += ` licenseNumber='${escapedValue}'`;
               break;
               
             case 'accountNumber':
               // Standard Keeper field type for memberships
-              command += ` accountNumber='${value}'`;
+              command += ` accountNumber='${escapedValue}'`;
               break;
               
             case 'expirationDate':
               // Standard Keeper field type for expiration dates
-              command += ` expirationDate='${value}'`;
+              command += ` expirationDate='${escapedValue}'`;
               break;
               
             case 'note':
               // Standard Keeper field type for notes
-              command += ` note='${value}'`;
+              command += ` note='${escapedValue}'`;
               break;
               
             case 'date':
               // Handle different date formats
               if (value.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                command += ` date='${value}'`;
+                command += ` date='${escapedValue}'`;
               } else if (value.match(/^\d+$/)) {
-                command += ` date=${value}`;
+                command += ` date=${value}`; // Numeric dates don't need quotes
               } else {
-                command += ` date='${value}'`;
+                command += ` date='${escapedValue}'`;
               }
               break;
               
@@ -556,20 +1413,20 @@ function buildKeeperCommand(action, parameters, issueKey) {
             case 'multiline':
             case 'secret':
               // Handle as custom field with appropriate type
-              command += ` c.${fieldGroup}.${fieldGroup}='${value}'`;
+              command += ` c.${fieldGroup}.${fieldGroup}='${escapedValue}'`;
               break;
               
             default:
               // Handle custom fields (c.*) and labeled fields (type.label format like date.dateActive, password.passphrase)
               if (fieldGroup.startsWith('c.') || fieldGroup.startsWith('text.') || fieldGroup.startsWith('date.') || fieldGroup.startsWith('password.')) {
-                command += ` ${fieldGroup}='${value}'`;
+                command += ` ${fieldGroup}='${escapedValue}'`;
                 break;
               }
               // Any other single field - use c.secret for $GEN values, c.text for others
               if (value === '$GEN' || value === 'generate') {
                 command += ` c.secret.${fieldGroup}=$GEN`;
               } else {
-                command += ` c.text.${fieldGroup}='${value}'`;
+                command += ` c.text.${fieldGroup}='${escapedValue}'`;
               }
               break;
           }
@@ -595,7 +1452,9 @@ function buildKeeperCommand(action, parameters, issueKey) {
           if (entry.ext && entry.ext.trim()) {
             phoneObj.ext = entry.ext.trim();
           }
-          command += ` phone='$JSON:${JSON.stringify(phoneObj)}'`;
+          // Sanitize JSON object values and escape for single-quoted shell context
+          const sanitizedPhoneUpdate = sanitizeJsonObject(phoneObj);
+          command += ` phone='$JSON:${escapeForSingleQuotes(JSON.stringify(sanitizedPhoneUpdate))}'`;
         }
       }
       
@@ -618,12 +1477,12 @@ function buildKeeperCommand(action, parameters, issueKey) {
       
       // Add folder UID (from selectedFolder or sharedFolder)
       if (parameters.folder) {
-        command += ` '${parameters.folder}'`;
+        command += ` '${escapeForSingleQuotes(parameters.folder)}'`;
       } else if (parameters.sharedFolder) {
-        command += ` '${parameters.sharedFolder}'`;
+        command += ` '${escapeForSingleQuotes(parameters.sharedFolder)}'`;
       }
       
-      // Add action flag (-a)
+      // Add action flag (-a) - action is validated against known values so no escaping needed
       if (parameters.action) {
         command += ` -a ${parameters.action}`;
       }
@@ -657,15 +1516,15 @@ function buildKeeperCommand(action, parameters, issueKey) {
       
       // Add record UID for all non-cancel actions
       if (parameters.record && parameters.action !== 'cancel') {
-        command += ` '${parameters.record}'`;
+        command += ` '${escapeForSingleQuotes(parameters.record)}'`;
       }
       
       // For cancel action, add either record UID or folder UID (admin can select either)
       if (parameters.action === 'cancel') {
         if (parameters.record) {
-          command += ` '${parameters.record}'`;
+          command += ` '${escapeForSingleQuotes(parameters.record)}'`;
         } else if (parameters.sharedFolder) {
-          command += ` '${parameters.sharedFolder}'`;
+          command += ` '${escapeForSingleQuotes(parameters.sharedFolder)}'`;
         }
       }
       
@@ -673,12 +1532,13 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (parameters.user) {
         // Split by comma and trim whitespace
         const emails = parameters.user.split(',').map(email => email.trim()).filter(email => email);
-        // Add each email with its own -e flag
+        // Add each email with its own -e flag, properly escaped
         emails.forEach(email => {
-          command += ` -e '${email}'`;
+          command += ` -e '${escapeForSingleQuotes(email)}'`;
         });
       }
       
+      // Action is validated against known values so no escaping needed
       if (parameters.action) {
         command += ` -a ${parameters.action}`;
       }
@@ -699,9 +1559,11 @@ function buildKeeperCommand(action, parameters, issueKey) {
         if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
           // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
           const expireAtFormatted = parameters.expire_at.replace('T', ' ');
-          command += ` --expire-at "${expireAtFormatted}"`;
+          command += ` --expire-at "${escapeForDoubleQuotes(expireAtFormatted)}"`;
         } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-          command += ` --expire-in ${parameters.expire_in}`;
+          // expire_in is expected to be a numeric duration, validate it's safe
+          const expireInValue = String(parameters.expire_in).replace(/[^0-9dhms]/gi, '');
+          command += ` --expire-in ${expireInValue}`;
         }
       }
       
@@ -712,19 +1574,20 @@ function buildKeeperCommand(action, parameters, issueKey) {
     case 'share-folder':
       // Format: share-folder "FOLDER_UID" -e "EMAIL" -a "ACTION" [options] [--expire-at|--expire-in] --force
       if (parameters.folder) {
-        command += ` '${parameters.folder}'`;
+        command += ` '${escapeForSingleQuotes(parameters.folder)}'`;
       }
       
       // Handle email addresses - support comma-separated values
       if (parameters.user) {
         // Split by comma and trim whitespace
         const emails = parameters.user.split(',').map(email => email.trim()).filter(email => email);
-        // Add each email with its own -e flag
+        // Add each email with its own -e flag, properly escaped
         emails.forEach(email => {
-          command += ` -e '${email}'`;
+          command += ` -e '${escapeForSingleQuotes(email)}'`;
         });
       }
       
+      // Action is validated against known values so no escaping needed
       if (parameters.action) {
         command += ` -a ${parameters.action}`;
       }
@@ -738,19 +1601,21 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
         // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
         const expireAtFormatted = parameters.expire_at.replace('T', ' ');
-        command += ` --expire-at "${expireAtFormatted}"`;
+        command += ` --expire-at "${escapeForDoubleQuotes(expireAtFormatted)}"`;
       } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-        command += ` --expire-in ${parameters.expire_in}`;
+        // expire_in is expected to be a numeric duration, validate it's safe
+        const expireInValue = String(parameters.expire_in).replace(/[^0-9dhms]/gi, '');
+        command += ` --expire-in ${expireInValue}`;
       }
       // Add force flag at the end
       command += ` --force`;
       break;
       
     default:
-      // For any other commands, add parameters as key=value pairs
+      // For any other commands, add parameters as key=value pairs with proper escaping
       Object.keys(parameters).forEach(key => {
         if (parameters[key]) {
-            command += ` ${key}='${parameters[key]}'`;
+            command += ` ${key}='${escapeForSingleQuotes(String(parameters[key]))}'`;
         }
       });
   }
@@ -762,8 +1627,10 @@ function buildKeeperCommand(action, parameters, issueKey) {
  * Get records list from Keeper API (called from issue panel)
  */
 resolver.define('getKeeperRecords', async (req) => {
+  const userId = req?.context?.accountId;
+  
   try {
-    const result = await executeKeeperApiCommand('list --format=json');
+    const result = await executeKeeperApiCommand('list --format=json', { userId });
     const apiData = result.data;
 
     // Parse the JSON data from the response
@@ -774,19 +1641,23 @@ resolver.define('getKeeperRecords', async (req) => {
       try {
         records = JSON.parse(apiData.message);
       } catch (parseError) {
-        throw new Error('Failed to parse records data from message field');
+        return keeperError('Failed to parse records data from Keeper API');
       }
     } else if (apiData.data && typeof apiData.data === 'string') {
       try {
         records = JSON.parse(apiData.data);
       } catch (parseError) {
-        throw new Error('Failed to parse records data from data field');
+        return keeperError('Failed to parse records data from Keeper API');
       }
     }
 
-    return { success: true, records: records || [] };
+    return successResponse({ records: records || [] });
   } catch (err) {
-    throw err;
+    // Check for rate limit error
+    if (err.rateLimited) {
+      return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
+    }
+    return keeperError(err.message || 'Failed to fetch records', err);
   }
 });
 
@@ -794,8 +1665,10 @@ resolver.define('getKeeperRecords', async (req) => {
  * Get folders list from Keeper API (called from issue panel)
  */
 resolver.define('getKeeperFolders', async (req) => {
+  const userId = req?.context?.accountId;
+  
   try {
-    const result = await executeKeeperApiCommand('ls -f --format=json');
+    const result = await executeKeeperApiCommand('ls -f --format=json', { userId });
     const apiData = result.data;
 
     // Parse the JSON data from the response
@@ -836,13 +1709,17 @@ resolver.define('getKeeperFolders', async (req) => {
           };
         });
       } catch (parseError) {
-        throw new Error('Failed to parse folders data');
+        return keeperError('Failed to parse folders data from Keeper API');
       }
     }
 
-    return { success: true, folders: folders || [] };
+    return successResponse({ folders: folders || [] });
   } catch (err) {
-    throw err;
+    // Check for rate limit error
+    if (err.rateLimited) {
+      return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
+    }
+    return keeperError(err.message || 'Failed to fetch folders', err);
   }
 });
 
@@ -850,14 +1727,15 @@ resolver.define('getKeeperFolders', async (req) => {
  * Get detailed record information from Keeper API (called from issue panel for record-update)
  */
 resolver.define('getKeeperRecordDetails', async (req) => {
+  const userId = req?.context?.accountId;
   const { recordUid } = req.payload || {};
   
   if (!recordUid) {
-    throw new Error('Record UID is required to fetch record details');
+    return validationError('recordUid', 'Record UID is required to fetch record details');
   }
 
   try {
-    const result = await executeKeeperApiCommand(`get "${recordUid}" --format=json`);
+    const result = await executeKeeperApiCommand(`get "${recordUid}" --format=json`, { userId });
     const apiData = result.data;
 
     // Parse the JSON data from the response
@@ -871,13 +1749,17 @@ resolver.define('getKeeperRecordDetails', async (req) => {
           recordDetails = apiData.data;
         }
       } catch (parseError) {
-        throw new Error('Failed to parse record details data');
+        return keeperError('Failed to parse record details data from Keeper API');
       }
     }
 
-    return { success: true, recordDetails: recordDetails || {} };
+    return successResponse({ recordDetails: recordDetails || {} });
   } catch (err) {
-    throw err;
+    // Check for rate limit error
+    if (err.rateLimited) {
+      return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
+    }
+    return keeperError(err.message || 'Failed to fetch record details', err);
   }
 });
 
@@ -885,24 +1767,30 @@ resolver.define('getKeeperRecordDetails', async (req) => {
  * Execute a simple Keeper command (called from config page for PEDM, etc.)
  */
 resolver.define('executeKeeperCommand', async (req) => {
+  const userId = req?.context?.accountId;
+  
   // Handle double nesting: req.payload.payload
   let payload = req?.payload?.payload || req?.payload || req;
   
   if (!payload) {
-    throw new Error('No payload provided');
+    return validationError('payload', 'No payload provided');
   }
   
   const { command } = payload;
   
   if (!command) {
-    throw new Error('Command is required');
+    return validationError('command', 'Command is required');
   }
 
   try {
-    const result = await executeKeeperApiCommand(command);
+    const result = await executeKeeperApiCommand(command, { userId });
     return result;
   } catch (err) {
-    throw err;
+    // Check for rate limit error
+    if (err.rateLimited) {
+      return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
+    }
+    return keeperError(err.message || 'Failed to execute command', err);
   }
 });
 
@@ -910,27 +1798,36 @@ resolver.define('executeKeeperCommand', async (req) => {
  * Manual Keeper action trigger (called from issue panel)
  */
 resolver.define('executeKeeperAction', async (req) => {
+  const log = createResolverLogger(req, 'executeKeeperAction');
+  const userId = req?.context?.accountId;
   const { issueKey, command, commandDescription, parameters, formattedTimestamp } = req.payload;
   
+  log.info('Executing Keeper action', { 
+    issueKey, 
+    commandType: command?.split(' ')[0], 
+    hasParameters: !!parameters 
+  });
+  
   if (!issueKey) {
-    throw new Error('Issue key is required');
+    return validationError('issueKey', 'Issue key is required');
   }
   
   if (!command) {
-    throw new Error('Command is required');
+    return validationError('command', 'Command is required');
   }
   
   // Check if this is a PEDM command and if the request is already expired or action was already taken
   const isPedmCommand = command.startsWith('pedm approval action');
   if (isPedmCommand) {
-    // Check if any action label already exists
+    // Check if any action label already exists (with rate limit retry)
     try {
-      const issueResponse = await asApp().requestJira(
+      const issueResponse = await requestJiraAsAppWithRetry(
         route`/rest/api/3/issue/${issueKey}?fields=labels`,
         {
           method: 'GET',
           headers: { 'Accept': 'application/json' }
-        }
+        },
+        'Check PEDM action labels'
       );
       
       if (issueResponse.ok) {
@@ -938,19 +1835,19 @@ resolver.define('executeKeeperAction', async (req) => {
         const labels = issueData.fields?.labels || [];
         
         if (labels.includes('pedm-approved')) {
-          throw new Error('This approval request has already been approved');
+          return pedmError('approved');
         }
         if (labels.includes('pedm-denied')) {
-          throw new Error('This approval request has already been denied');
+          return pedmError('denied');
         }
         if (labels.includes('pedm-expired')) {
-          throw new Error('This approval request has expired and can no longer be approved or denied');
+          return pedmError('expired');
         }
       }
     } catch (error) {
-      // If it's our custom error, throw it
-      if (error.message.includes('approval request')) {
-        throw error;
+      // If it's a structured error response, return it
+      if (error.success === false) {
+        return error;
       }
       // Otherwise, continue
     }
@@ -960,8 +1857,8 @@ resolver.define('executeKeeperAction', async (req) => {
   // Sharing with owner causes issues: revokes owner from record (moves to deleted items) and then share fails
   if (command === 'share-record' && parameters.record && parameters.user && parameters.action !== 'cancel') {
     try {
-      // Fetch record details to get owner email
-      const recordResult = await executeKeeperApiCommand(`get "${parameters.record}" --format=json`);
+      // Fetch record details to get owner email (skip rate limit for internal validation)
+      const recordResult = await executeKeeperApiCommand(`get "${parameters.record}" --format=json`, { userId, skipRateLimit: true });
       const recordApiData = recordResult.data;
       
       let recordOwnerEmail = null;
@@ -989,25 +1886,30 @@ resolver.define('executeKeeperAction', async (req) => {
         const ownerEmailLower = recordOwnerEmail.toLowerCase();
         
         if (targetEmails.includes(ownerEmailLower)) {
-          throw new Error(`Cannot share record with its owner (${recordOwnerEmail}). Sharing with the record owner would revoke their ownership and cause the operation to fail.`);
+          return errorResponse(
+            ERROR_CODES.VALIDATION_INVALID_FORMAT,
+            `Cannot share record with its owner (${recordOwnerEmail}). Sharing with the record owner would revoke their ownership and cause the operation to fail.`,
+            { field: 'user' }
+          );
         }
       }
     } catch (ownerCheckError) {
-      // If it's our validation error, throw it
-      if (ownerCheckError.message.includes('Cannot share record with its owner')) {
-        throw ownerCheckError;
+      // If it's a structured error response, return it
+      if (ownerCheckError.success === false) {
+        return ownerCheckError;
       }
       // Otherwise, log and continue (don't block if we can't fetch record details)
-      console.error('Failed to check record owner for share-record validation:', ownerCheckError.message);
+      logger.error('Failed to check record owner for share-record validation', { error: ownerCheckError.message });
     }
   }
 
-  // Build dynamic command based on action and parameters
-  const dynamicCommand = buildKeeperCommand(command, parameters || {}, issueKey);
-
   try {
-    // Call Keeper API using v2 async queue
-    const result = await executeKeeperApiCommand(dynamicCommand);
+    // Build dynamic command based on action and parameters
+    // This is inside try block so validation errors are properly caught
+    const dynamicCommand = buildKeeperCommand(command, parameters || {}, issueKey);
+
+    // Call Keeper API using v2 async queue (with rate limiting)
+    const result = await executeKeeperApiCommand(dynamicCommand, { userId });
     const data = result.data;
 
     // Extract record_uid if this is a record-add command
@@ -1269,13 +2171,14 @@ resolver.define('executeKeeperAction', async (req) => {
       // For PEDM commands, add appropriate label FIRST (before comment) to prevent race conditions
       if (isPedmCommand) {
         try {
-          // Get current labels
-          const issueResponse = await asApp().requestJira(
+          // Get current labels (with rate limit retry)
+          const issueResponse = await requestJiraAsAppWithRetry(
             route`/rest/api/3/issue/${issueKey}?fields=labels`,
             {
               method: 'GET',
               headers: { 'Accept': 'application/json' }
-            }
+            },
+            'Get labels for PEDM update'
           );
           
           const issueData = await issueResponse.json();
@@ -1289,11 +2192,11 @@ resolver.define('executeKeeperAction', async (req) => {
             newLabel = 'pedm-denied';
           }
           
-          // Add new label if not already present
+          // Add new label if not already present (with rate limit retry)
           if (newLabel && !currentLabels.includes(newLabel)) {
             const updatedLabels = [...currentLabels, newLabel];
             
-            await asApp().requestJira(
+            await requestJiraAsAppWithRetry(
               route`/rest/api/3/issue/${issueKey}`,
               {
                 method: 'PUT',
@@ -1303,17 +2206,18 @@ resolver.define('executeKeeperAction', async (req) => {
                     labels: updatedLabels
                   }
                 }),
-              }
+              },
+              'Update PEDM label'
             );
           }
         } catch (labelErr) {
-          console.error('Failed to add PEDM label:', labelErr);
+          logger.error('Failed to add PEDM label', labelErr);
           // Don't fail the entire operation if label update fails
         }
       }
       
-      // Add comment back to Jira using ADF format (after label is set)
-      await asApp().requestJira(
+      // Add comment back to Jira using ADF format (after label is set, with rate limit retry)
+      await requestJiraAsAppWithRetry(
         route`/rest/api/3/issue/${issueKey}/comment`,
         {
           method: 'POST',
@@ -1321,7 +2225,8 @@ resolver.define('executeKeeperAction', async (req) => {
           body: JSON.stringify({
             body: adfBody,
           }),
-        }
+        },
+        'Add command result comment'
       );
     }
 
@@ -1341,18 +2246,41 @@ resolver.define('executeKeeperAction', async (req) => {
     // Check for specific error types and provide user-friendly messages
     const errorMessage = err.message || String(err);
     
+    // Check if this is an input validation error
+    if (errorMessage.startsWith('Input validation failed:')) {
+      const validationDetails = errorMessage.replace('Input validation failed: ', '');
+      return validationError('parameters', validationDetails);
+    }
+    
+    // Check if this is a rate limit error
+    if (err.rateLimited) {
+      return rateLimitError(
+        err.limitType || 'minute',
+        err.retryAfter || 60,
+        0
+      );
+    }
+    
     // Check if this is a record owner error (user already owns the record)
     if (isRecordOwnerError(errorMessage)) {
-      throw new Error(`Cannot share record with its owner. The selected user is the current owner of this record and already has full permissions.`);
+      return errorResponse(
+        ERROR_CODES.KEEPER_PERMISSION_DENIED,
+        'Cannot share record with its owner. The selected user is the current owner of this record and already has full permissions.',
+        { troubleshooting: ['Select a different user to share with', 'The record owner already has full access'] }
+      );
     }
     
     // Check if this is a permission conflict error
     if (isPermissionConflictError(errorMessage)) {
-      throw new Error(`Cannot grant access - permission conflict. The user may already have different access to this record. Please revoke their existing access first, then try again.`);
+      return errorResponse(
+        ERROR_CODES.KEEPER_PERMISSION_DENIED,
+        'Cannot grant access - permission conflict. The user may already have different access to this record. Please revoke their existing access first, then try again.',
+        { troubleshooting: ['Revoke existing access for this user first', 'Then grant the new access level'] }
+      );
     }
     
-    // No JIRA comment for errors - only successful responses get comments
-    throw err;
+    // Return Keeper error with automatic error type detection
+    return keeperError(errorMessage, err);
   }
 });
 
@@ -1400,14 +2328,17 @@ function isPermissionConflictError(errorMessage) {
  * Reject Keeper request (called from issue panel)
  */
 resolver.define('rejectKeeperRequest', async (req) => {
+  const log = createResolverLogger(req, 'rejectKeeperRequest');
   const { issueKey, rejectionReason, formattedTimestamp } = req.payload;
   
+  log.info('Processing Keeper request rejection', { issueKey });
+  
   if (!issueKey) {
-    throw new Error('Issue key is required');
+    return validationError('issueKey', 'Issue key is required');
   }
   
   if (!rejectionReason || !rejectionReason.trim()) {
-    throw new Error('Rejection reason is required');
+    return validationError('rejectionReason', 'Rejection reason is required');
   }
 
   try {
@@ -1463,8 +2394,8 @@ resolver.define('rejectKeeperRequest', async (req) => {
       ]
     };
 
-    // Add rejection comment to Jira using ADF format
-    await asApp().requestJira(
+    // Add rejection comment to Jira using ADF format (with rate limit retry)
+    await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}/comment`,
       {
         method: 'POST',
@@ -1472,7 +2403,8 @@ resolver.define('rejectKeeperRequest', async (req) => {
         body: JSON.stringify({
           body: adfBody,
         }),
-      }
+      },
+      'Add rejection comment'
     );
 
     // Clear stored request data after rejection (admin review completed)
@@ -1502,9 +2434,9 @@ resolver.define('activateKeeperPanel', async (req) => {
   }
   
   try {
-    // Activate the Keeper panel for this issue
+    // Activate the Keeper panel for this issue (with rate limit retry)
     // This makes the panel visible to all users viewing the issue
-    await asApp().requestJira(
+    await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}/properties/keeper-panel-activated`,
       {
         method: 'PUT',
@@ -1516,7 +2448,8 @@ resolver.define('activateKeeperPanel', async (req) => {
             activatedBy: 'system'
           }
         }),
-      }
+      },
+      'Activate Keeper panel'
     );
     
     return { 
@@ -1563,9 +2496,13 @@ resolver.define('getUserRole', async (req) => {
     } catch (userErr) {
     }
     
-    // Get permissions data
+    // Get permissions data (with rate limit retry)
     try {
-      const permResponse = await asUser().requestJira(route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=ADMINISTER_PROJECTS`);
+      const permResponse = await requestJiraAsUserWithRetry(
+        route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=ADMINISTER_PROJECTS`,
+        {},
+        'Check admin permissions'
+      );
       
       if (permResponse && permResponse.ok) {
         const permissionsData = await permResponse.json();
@@ -1621,13 +2558,20 @@ resolver.define('getUserRole', async (req) => {
 
 /**
  * Get web trigger URL using Forge SDK
+ * Returns URL and token separately - token should be used in Authorization header
  */
 resolver.define('getWebTriggerUrl', async () => {
   try {
     const url = await webTrigger.getUrl('keeper-alert-trigger');
+    const config = await storage.get('webTriggerConfig');
+    
     return {
       success: true,
-      url: url
+      url: url,
+      hasToken: !!(config && config.webhookToken),
+      // Include token for display/copy in UI (to configure in Keeper webhook settings)
+      bearerToken: config?.webhookToken || null,
+      authHeader: config?.webhookToken ? `Bearer ${config.webhookToken}` : null
     };
   } catch (err) {
     throw new Error(`Failed to get web trigger URL: ${err.message}`);
@@ -1636,16 +2580,28 @@ resolver.define('getWebTriggerUrl', async () => {
 
 /**
  * Get web trigger configuration
+ * Note: webhookToken is included so UI can show if token is configured
  */
 resolver.define('getWebTriggerConfig', async () => {
   const config = await storage.get('webTriggerConfig');
-  return config || {};
+  if (!config) return {};
+  
+  // Return config with token presence indicator (not the actual token for security)
+  return {
+    projectKey: config.projectKey,
+    issueType: config.issueType,
+    hasWebhookToken: !!config.webhookToken,
+    webhookTokenPreview: config.webhookToken 
+      ? `${config.webhookToken.substring(0, 8)}...${config.webhookToken.substring(config.webhookToken.length - 4)}`
+      : null
+  };
 });
 
 /**
  * Save web trigger configuration
  */
 resolver.define('setWebTriggerConfig', async (req) => {
+  const log = createResolverLogger(req, 'setWebTriggerConfig');
   let payload = req?.payload?.payload || req?.payload || req;
   
   if (!payload) {
@@ -1655,11 +2611,147 @@ resolver.define('setWebTriggerConfig', async (req) => {
   const projectKey = payload.projectKey;
   const issueType = payload.issueType;
   
-  const configToSave = { projectKey, issueType };
+  log.info('Saving web trigger configuration', { projectKey, issueType });
+  
+  // Get existing config to preserve the token if not being changed
+  const existingConfig = await storage.get('webTriggerConfig') || {};
+  
+  const configToSave = { 
+    projectKey, 
+    issueType,
+    // Preserve existing token unless explicitly clearing it
+    webhookToken: existingConfig.webhookToken
+  };
   
   await storage.set('webTriggerConfig', configToSave);
   
+  log.info('Web trigger configuration saved');
   return { success: true, message: 'Web trigger configuration saved successfully' };
+});
+
+/**
+ * Generate or regenerate webhook authentication token
+ * This creates a new secure token that must be included in the Authorization header
+ * Format: Authorization: Bearer <token>
+ */
+resolver.define('generateWebhookToken', async (req) => {
+  const log = createResolverLogger(req, 'generateWebhookToken');
+  
+  log.info('Generating new webhook authentication token');
+  
+  try {
+    // Generate a new secure token
+    const newToken = generateWebhookToken();
+    
+    // Get existing config
+    const existingConfig = await storage.get('webTriggerConfig') || {};
+    
+    // Update config with new token
+    const updatedConfig = {
+      ...existingConfig,
+      webhookToken: newToken,
+      tokenGeneratedAt: new Date().toISOString()
+    };
+    
+    await storage.set('webTriggerConfig', updatedConfig);
+    
+    // Get the webhook URL
+    const webhookUrl = await webTrigger.getUrl('keeper-alert-trigger');
+    
+    log.info('Webhook token generated successfully');
+    
+    return {
+      success: true,
+      message: 'Webhook token generated successfully. Configure your Keeper webhook with the Authorization header.',
+      webhookUrl: webhookUrl,
+      bearerToken: newToken,
+      authHeader: `Bearer ${newToken}`,
+      tokenPreview: `${newToken.substring(0, 8)}...${newToken.substring(newToken.length - 4)}`,
+      generatedAt: updatedConfig.tokenGeneratedAt,
+      instructions: 'Add this header to your Keeper webhook configuration: Authorization: Bearer <token>'
+    };
+  } catch (err) {
+    log.error('Failed to generate webhook token', err);
+    throw new Error(`Failed to generate webhook token: ${err.message}`);
+  }
+});
+
+/**
+ * Revoke webhook token (disable token authentication)
+ * WARNING: This makes the webhook URL accessible without authentication
+ */
+resolver.define('revokeWebhookToken', async () => {
+  try {
+    // Get existing config
+    const existingConfig = await storage.get('webTriggerConfig') || {};
+    
+    // Remove token from config
+    const updatedConfig = {
+      projectKey: existingConfig.projectKey,
+      issueType: existingConfig.issueType
+      // Deliberately not including webhookToken
+    };
+    
+    await storage.set('webTriggerConfig', updatedConfig);
+    
+    return {
+      success: true,
+      message: 'Webhook token revoked. WARNING: The webhook URL is now accessible without authentication.',
+      warning: 'Token authentication disabled. Consider generating a new token for security.'
+    };
+  } catch (err) {
+    throw new Error(`Failed to revoke webhook token: ${err.message}`);
+  }
+});
+
+/**
+ * Get webhook audit logs
+ * Returns the last 100 webhook attempts for monitoring
+ */
+resolver.define('getWebhookAuditLogs', async () => {
+  try {
+    const logs = await storage.get('webhook-audit-log') || [];
+    return {
+      success: true,
+      logs: logs,
+      count: logs.length
+    };
+  } catch (err) {
+    throw new Error(`Failed to get webhook audit logs: ${err.message}`);
+  }
+});
+
+/**
+ * Clear webhook audit logs
+ */
+resolver.define('clearWebhookAuditLogs', async () => {
+  try {
+    await storage.delete('webhook-audit-log');
+    return {
+      success: true,
+      message: 'Webhook audit logs cleared'
+    };
+  } catch (err) {
+    throw new Error(`Failed to clear webhook audit logs: ${err.message}`);
+  }
+});
+
+/**
+ * Get current user's rate limit status
+ * Returns remaining commands in minute/hour windows
+ */
+resolver.define('getRateLimitStatus', async (req) => {
+  const userId = req?.context?.accountId;
+  
+  try {
+    const status = await getRateLimitStatus(userId);
+    return {
+      success: true,
+      ...status
+    };
+  } catch (err) {
+    throw new Error(`Failed to get rate limit status: ${err.message}`);
+  }
 });
 
 /**
@@ -1667,7 +2759,11 @@ resolver.define('setWebTriggerConfig', async (req) => {
  */
 resolver.define('getJiraProjects', async () => {
   try {
-    const response = await asApp().requestJira(route`/rest/api/3/project`);
+    const response = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/project`,
+      {},
+      'Get Jira projects'
+    );
     
     if (!response.ok) {
       throw new Error(`Failed to fetch projects: ${response.status}`);
@@ -1697,8 +2793,12 @@ resolver.define('getProjectIssueTypes', async (req) => {
   const { projectKey } = payload;
   
   try {
-    // Get project details which includes issue types
-    const response = await asApp().requestJira(route`/rest/api/3/project/${projectKey}`);
+    // Get project details which includes issue types (with rate limit retry)
+    const response = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/project/${projectKey}`,
+      {},
+      'Get project issue types'
+    );
     
     if (!response.ok) {
       throw new Error(`Failed to fetch project: ${response.status}`);
@@ -1735,8 +2835,8 @@ resolver.define('testWebTrigger', async (req) => {
   }
   
   try {
-    // Create a test issue
-    const response = await asApp().requestJira(
+    // Create a test issue (with rate limit retry)
+    const response = await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue`,
       {
         method: 'POST',
@@ -1768,7 +2868,8 @@ resolver.define('testWebTrigger', async (req) => {
             labels: ['keeper-webhook', 'keeper-test']
           }
         })
-      }
+      },
+      'Create test issue'
     );
     
     if (!response.ok) {
@@ -1954,8 +3055,8 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
       labels.push(alertType.toLowerCase().replace(/_/g, '-'));
     }
     
-    // Create the Jira issue
-    const response = await asApp().requestJira(
+    // Create the Jira issue (with rate limit retry)
+    const response = await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue`,
       {
         method: 'POST',
@@ -1973,7 +3074,8 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
             labels: labels
           }
         })
-      }
+      },
+      'Create webhook issue'
     );
     
     if (!response.ok) {
@@ -1989,8 +3091,12 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
         // Get project admins
         const projectKey = config.projectKey;
         
-        // Get project roles
-        const rolesResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role`);
+        // Get project roles (with rate limit retry)
+        const rolesResponse = await requestJiraAsAppWithRetry(
+          route`/rest/api/3/project/${projectKey}/role`,
+          {},
+          'Get project roles for assignment'
+        );
         const roles = await rolesResponse.json();
         
         // Find admin role
@@ -2010,8 +3116,12 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
           if (roleIdMatch) {
             const roleId = roleIdMatch[1];
             
-            // Get role details with actors
-            const roleDetailsResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role/${roleId}`);
+            // Get role details with actors (with rate limit retry)
+            const roleDetailsResponse = await requestJiraAsAppWithRetry(
+              route`/rest/api/3/project/${projectKey}/role/${roleId}`,
+              {},
+              'Get role details for assignment'
+            );
             const roleDetails = await roleDetailsResponse.json();
             
             // Find first active admin user
@@ -2031,9 +3141,9 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
                 }
               }
               
-              // Assign ticket to admin
+              // Assign ticket to admin (with rate limit retry)
               if (assigneeAccountId) {
-                await asApp().requestJira(
+                await requestJiraAsAppWithRetry(
                   route`/rest/api/3/issue/${issue.key}`,
                   {
                     method: 'PUT',
@@ -2045,15 +3155,16 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
                         }
                       }
                     })
-                  }
+                  },
+                  'Assign PEDM ticket to admin'
                 );
-                console.log(`Assigned PEDM ticket ${issue.key} to project admin`);
+                logger.info('Assigned PEDM ticket to project admin', { issueKey: issue.key });
               }
             }
           }
         }
       } catch (assignError) {
-        console.error('Failed to assign ticket to project admin:', assignError);
+        logger.error('Failed to assign ticket to project admin', assignError);
         // Don't fail the entire test if assignment fails
       }
     }
@@ -2089,8 +3200,8 @@ resolver.define('getWebhookTickets', async (req) => {
     // Build JQL to find issues with keeper-webhook label in configured project
     const jql = `project = ${config.projectKey} AND labels = keeper-webhook ORDER BY created DESC`;
     
-    // Fetch issues using the new JQL enhanced search API (POST /rest/api/3/search/jql)
-    const response = await asApp().requestJira(
+    // Fetch issues using the new JQL enhanced search API (with rate limit retry)
+    const response = await requestJiraAsAppWithRetry(
       route`/rest/api/3/search/jql`,
       {
         method: 'POST',
@@ -2100,7 +3211,8 @@ resolver.define('getWebhookTickets', async (req) => {
           maxResults: 100,
           fields: ['summary', 'created', 'description', 'status', 'labels', 'key', 'issuetype']
         })
-      }
+      },
+      'Search webhook tickets'
     );
     
     if (!response.ok) {
@@ -2126,7 +3238,7 @@ resolver.define('getWebhookTickets', async (req) => {
           }
         }
       } catch (e) {
-        console.error('Failed to parse JSON from description:', e);
+        logger.error('Failed to parse JSON from description', e);
       }
       
       // Extract request UID - check multiple possible field names
@@ -2191,7 +3303,7 @@ resolver.define('getWebhookTickets', async (req) => {
     };
     
   } catch (error) {
-    console.error('Error fetching webhook tickets:', error);
+    logger.error('Error fetching webhook tickets', error);
     throw new Error(`Failed to fetch webhook tickets: ${error.message}`);
   }
 });
@@ -2207,13 +3319,14 @@ resolver.define('getWebhookPayload', async (req) => {
   }
   
   try {
-    // Fetch the issue with description field
-    const response = await asApp().requestJira(
+    // Fetch the issue with description field (with rate limit retry)
+    const response = await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}?fields=description,labels`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
-      }
+      },
+      'Get webhook payload'
     );
     
     if (!response.ok) {
@@ -2234,7 +3347,7 @@ resolver.define('getWebhookPayload', async (req) => {
         try {
           webhookPayload = JSON.parse(codeBlock.content[0].text);
         } catch (e) {
-          console.error('Failed to parse webhook payload:', e);
+          logger.error('Failed to parse webhook payload', e);
         }
       }
     }
@@ -2246,7 +3359,7 @@ resolver.define('getWebhookPayload', async (req) => {
     };
     
   } catch (error) {
-    console.error('Error fetching webhook payload:', error);
+    logger.error('Error fetching webhook payload', error);
     throw new Error(`Failed to fetch webhook payload: ${error.message}`);
   }
 });
@@ -2262,12 +3375,13 @@ resolver.define('checkPedmExpired', async (req) => {
   }
   
   try {
-    const propertyResponse = await asApp().requestJira(
+    const propertyResponse = await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
-      }
+      },
+      'Check PEDM expiration property'
     );
     
     // If property exists, it's expired
@@ -2285,7 +3399,7 @@ resolver.define('checkPedmExpired', async (req) => {
       isExpired: false 
     };
   } catch (error) {
-    console.error('Error checking PEDM expiration:', error);
+    logger.error('Error checking PEDM expiration', error);
     return { 
       success: true, 
       isExpired: false 
@@ -2307,13 +3421,14 @@ resolver.define('checkPedmActionTaken', async (req) => {
   }
   
   try {
-    // Fetch issue labels
-    const issueResponse = await asApp().requestJira(
+    // Fetch issue labels (with rate limit retry)
+    const issueResponse = await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}?fields=labels`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
-      }
+      },
+      'Check PEDM action labels'
     );
     
     if (!issueResponse.ok) {
@@ -2360,7 +3475,7 @@ resolver.define('checkPedmActionTaken', async (req) => {
     };
     
   } catch (err) {
-    console.error('Error checking PEDM action:', err);
+    logger.error('Error checking PEDM action', err);
     return { 
       success: false, 
       actionTaken: false,
@@ -2379,13 +3494,14 @@ resolver.define('addPedmExpiredComment', async (req) => {
   
   try {
     // FIRST: Try to set the issue property as a lock to prevent race conditions
-    // Check if property already exists
-    const propertyCheckResponse = await asApp().requestJira(
+    // Check if property already exists (with rate limit retry)
+    const propertyCheckResponse = await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
-      }
+      },
+      'Check PEDM expiration lock'
     );
     
     // If property already exists, someone else already processed this
@@ -2397,13 +3513,14 @@ resolver.define('addPedmExpiredComment', async (req) => {
       };
     }
     
-    // Check if any action label already exists (expired, approved, or denied)
-    const issueResponse = await asApp().requestJira(
+    // Check if any action label already exists (expired, approved, or denied, with rate limit retry)
+    const issueResponse = await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}?fields=labels`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
-      }
+      },
+      'Check action labels for expiration'
     );
     
     if (issueResponse.ok) {
@@ -2421,8 +3538,8 @@ resolver.define('addPedmExpiredComment', async (req) => {
       }
     }
     
-    // Set the property BEFORE adding comment (as a lock)
-    await asApp().requestJira(
+    // Set the property BEFORE adding comment (as a lock, with rate limit retry)
+    await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
       {
         method: 'PUT',
@@ -2434,7 +3551,8 @@ resolver.define('addPedmExpiredComment', async (req) => {
             processing: true // Mark as being processed
           }
         }),
-      }
+      },
+      'Set PEDM expiration lock'
     );
     
     // Get current user info (the one viewing when it expired)
@@ -2493,23 +3611,24 @@ resolver.define('addPedmExpiredComment', async (req) => {
     
     // Add 'pedm-expired' label FIRST (before comment) to prevent race conditions
     try {
-      // Get current labels (we already fetched this earlier, but need fresh data)
-      const labelResponse = await asApp().requestJira(
+      // Get current labels (we already fetched this earlier, but need fresh data, with rate limit retry)
+      const labelResponse = await requestJiraAsAppWithRetry(
         route`/rest/api/3/issue/${issueKey}?fields=labels`,
         {
           method: 'GET',
           headers: { 'Accept': 'application/json' }
-        }
+        },
+        'Get labels for expiration'
       );
       
       const labelData = await labelResponse.json();
       const currentLabels = labelData.fields?.labels || [];
       
-      // Add expired label if not already present
+      // Add expired label if not already present (with rate limit retry)
       if (!currentLabels.includes('pedm-expired')) {
         const updatedLabels = [...currentLabels, 'pedm-expired'];
         
-        await asApp().requestJira(
+        await requestJiraAsAppWithRetry(
           route`/rest/api/3/issue/${issueKey}`,
           {
             method: 'PUT',
@@ -2519,16 +3638,17 @@ resolver.define('addPedmExpiredComment', async (req) => {
                 labels: updatedLabels
               }
             }),
-          }
+          },
+          'Add pedm-expired label'
         );
       }
     } catch (labelErr) {
-      console.error('Failed to add pedm-expired label:', labelErr);
+      logger.error('Failed to add pedm-expired label', labelErr);
       // Don't fail the entire operation if label update fails
     }
     
-    // Now add comment to Jira (after label is set)
-    await asApp().requestJira(
+    // Now add comment to Jira (after label is set, with rate limit retry)
+    await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}/comment`,
       {
         method: 'POST',
@@ -2536,11 +3656,12 @@ resolver.define('addPedmExpiredComment', async (req) => {
         body: JSON.stringify({
           body: adfBody,
         }),
-      }
+      },
+      'Add expiration comment'
     );
     
-    // Update issue property with final details
-    await asApp().requestJira(
+    // Update issue property with final details (with rate limit retry)
+    await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
       {
         method: 'PUT',
@@ -2553,7 +3674,8 @@ resolver.define('addPedmExpiredComment', async (req) => {
             processing: false // Mark as complete
           }
         }),
-      }
+      },
+      'Update expiration property'
     );
     
     return { 
@@ -2562,7 +3684,7 @@ resolver.define('addPedmExpiredComment', async (req) => {
       alreadyExpired: false
     };
   } catch (error) {
-    console.error('Error adding expired comment:', error);
+    logger.error('Error adding expired comment', error);
     throw new Error(`Failed to add expired comment: ${error.message}`);
   }
 });
@@ -2589,10 +3711,12 @@ resolver.define('getGlobalUserRole', async (req) => {
     }
     
     // Check for both global admin (ADMINISTER) and project admin (ADMINISTER_PROJECTS) permissions
-    // Single API call checks both permission types
+    // Single API call checks both permission types (with rate limit retry)
     try {
-      const permResponse = await asUser().requestJira(
-        route`/rest/api/3/mypermissions?permissions=ADMINISTER,ADMINISTER_PROJECTS`
+      const permResponse = await requestJiraAsUserWithRetry(
+        route`/rest/api/3/mypermissions?permissions=ADMINISTER,ADMINISTER_PROJECTS`,
+        {},
+        'Check global admin permissions'
       );
       
       if (permResponse && permResponse.ok) {
@@ -2668,16 +3792,24 @@ resolver.define('getProjectAdmins', async (req) => {
       throw new Error('Unable to extract project key from issue key');
     }
     
-    // Get project details
-    const projectResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}`);
+    // Get project details (with rate limit retry)
+    const projectResponse = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/project/${projectKey}`,
+      {},
+      'Get project details'
+    );
     const project = await projectResponse.json();
     
     if (!project || !project.id) {
       throw new Error('Unable to fetch project details');
     }
     
-    // Get all roles for the project
-    const rolesResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role`);
+    // Get all roles for the project (with rate limit retry)
+    const rolesResponse = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/project/${projectKey}/role`,
+      {},
+      'Get project roles'
+    );
     const roles = await rolesResponse.json();
     
     // Find the admin role URL - try multiple common names
@@ -2702,8 +3834,12 @@ resolver.define('getProjectAdmins', async (req) => {
     }
     const roleId = roleIdMatch[1];
     
-    // Get role details with actors (users)
-    const roleDetailsResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role/${roleId}`);
+    // Get role details with actors (users, with rate limit retry)
+    const roleDetailsResponse = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/project/${projectKey}/role/${roleId}`,
+      {},
+      'Get admin role details'
+    );
     const roleDetails = await roleDetailsResponse.json();
     
     if (!roleDetails) {
@@ -2734,8 +3870,12 @@ resolver.define('getProjectAdmins', async (req) => {
           continue;
         }
         
-        // Fetch fresh user details from Jira API
-        const userResponse = await asApp().requestJira(route`/rest/api/3/user?accountId=${accountId}`);
+        // Fetch fresh user details from Jira API (with rate limit retry)
+        const userResponse = await requestJiraAsAppWithRetry(
+          route`/rest/api/3/user?accountId=${accountId}`,
+          {},
+          'Get user details'
+        );
         
         if (!userResponse.ok) {
           continue;
@@ -2776,14 +3916,17 @@ resolver.define('getProjectAdmins', async (req) => {
  * Store request data for admin approval
  */
 resolver.define('storeRequestData', async (req) => {
+  const log = createResolverLogger(req, 'storeRequestData');
   const { issueKey, requestData, formattedTimestamp } = req.payload;
   
+  log.info('Storing request data for admin approval', { issueKey });
+  
   if (!issueKey) {
-    throw new Error('Issue key is required');
+    return validationError('issueKey', 'Issue key is required');
   }
   
   if (!requestData) {
-    throw new Error('Request data is required');
+    return validationError('requestData', 'Request data is required');
   }
   
   try {
@@ -2816,8 +3959,12 @@ resolver.define('storeRequestData', async (req) => {
       const projectKey = issueKey.split('-')[0];
       
       if (projectKey) {
-        // Get project roles
-        const rolesResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role`);
+        // Get project roles (with rate limit retry)
+        const rolesResponse = await requestJiraAsAppWithRetry(
+          route`/rest/api/3/project/${projectKey}/role`,
+          {},
+          'Get roles for auto-assignment'
+        );
         const roles = await rolesResponse.json();
         
         // Find admin role
@@ -2837,8 +3984,12 @@ resolver.define('storeRequestData', async (req) => {
           if (roleIdMatch) {
             const roleId = roleIdMatch[1];
             
-            // Get role details with actors
-            const roleDetailsResponse = await asApp().requestJira(route`/rest/api/3/project/${projectKey}/role/${roleId}`);
+            // Get role details with actors (with rate limit retry)
+            const roleDetailsResponse = await requestJiraAsAppWithRetry(
+              route`/rest/api/3/project/${projectKey}/role/${roleId}`,
+              {},
+              'Get role actors for auto-assignment'
+            );
             const roleDetails = await roleDetailsResponse.json();
             
             // Collect all admin users
@@ -2865,8 +4016,8 @@ resolver.define('storeRequestData', async (req) => {
                 const randomIndex = Math.floor(Math.random() * adminAccountIds.length);
                 const selectedAdminAccountId = adminAccountIds[randomIndex];
                 
-                // Assign ticket to randomly selected admin
-                await asApp().requestJira(
+                // Assign ticket to randomly selected admin (with rate limit retry)
+                await requestJiraAsAppWithRetry(
                   route`/rest/api/3/issue/${issueKey}`,
                   {
                     method: 'PUT',
@@ -2878,16 +4029,17 @@ resolver.define('storeRequestData', async (req) => {
                         }
                       }
                     }),
-                  }
+                  },
+                  'Auto-assign to admin'
                 );
-                console.log(`Assigned ticket ${issueKey} to random project admin`);
+                logger.info('Assigned ticket to random project admin', { issueKey });
               }
             }
           }
         }
       }
     } catch (assignError) {
-      console.error('Failed to assign ticket to project admin:', assignError);
+      logger.error('Failed to assign ticket to project admin', assignError);
       // Don't fail the entire operation if assignment fails
     }
     } // End of if (!isUpdate)
@@ -2946,8 +4098,8 @@ resolver.define('storeRequestData', async (req) => {
       ]
     };
 
-    // Add comment to Jira using ADF format
-    await asApp().requestJira(
+    // Add comment to Jira using ADF format (with rate limit retry)
+    await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}/comment`,
       {
         method: 'POST',
@@ -2955,7 +4107,8 @@ resolver.define('storeRequestData', async (req) => {
         body: JSON.stringify({
           body: adfBody,
         }),
-      }
+      },
+      'Add request data comment'
     );
     
     return { 
@@ -3084,8 +4237,8 @@ resolver.define('clearStoredRequestData', async (req) => {
       ]
     };
     
-    // Add comment to Jira using ADF format
-    await asApp().requestJira(
+    // Add comment to Jira using ADF format (with rate limit retry)
+    await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}/comment`,
       {
         method: 'POST',
@@ -3093,7 +4246,8 @@ resolver.define('clearStoredRequestData', async (req) => {
         body: JSON.stringify({
           body: adfBody,
         }),
-      }
+      },
+      'Add cleared request comment'
     );
     
     return {

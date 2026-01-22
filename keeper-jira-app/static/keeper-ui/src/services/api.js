@@ -146,3 +146,36 @@ export const getWebhookTickets = async () => {
   return await invoke("getWebhookTickets");
 };
 
+/**
+ * Generate or regenerate webhook authentication token
+ * @returns {Promise<Object>} - Response object with new webhook URL
+ */
+export const generateWebhookToken = async () => {
+  return await invoke("generateWebhookToken");
+};
+
+/**
+ * Revoke webhook authentication token
+ * WARNING: Disables token authentication
+ * @returns {Promise<Object>} - Response object
+ */
+export const revokeWebhookToken = async () => {
+  return await invoke("revokeWebhookToken");
+};
+
+/**
+ * Get webhook audit logs
+ * @returns {Promise<Object>} - Response object with logs array
+ */
+export const getWebhookAuditLogs = async () => {
+  return await invoke("getWebhookAuditLogs");
+};
+
+/**
+ * Clear webhook audit logs
+ * @returns {Promise<Object>} - Response object
+ */
+export const clearWebhookAuditLogs = async () => {
+  return await invoke("clearWebhookAuditLogs");
+};
+

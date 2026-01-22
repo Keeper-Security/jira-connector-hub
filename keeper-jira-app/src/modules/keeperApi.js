@@ -7,6 +7,7 @@
  */
 
 import { storage, fetch } from '@forge/api';
+import { logger } from './utils/logger.js';
 
 // ============================================================================
 // Configuration Constants
@@ -22,6 +23,16 @@ const API_CONFIG = {
     maxIntervalMs: 5000,      // Maximum interval between polls
   },
   
+  // Fetch retry configuration for Keeper API calls
+  fetchRetry: {
+    maxRetries: 3,            // Maximum retry attempts
+    initialDelayMs: 1000,     // Initial delay (1 second)
+    maxDelayMs: 10000,        // Maximum delay (10 seconds)
+    backoffMultiplier: 2,     // Exponential backoff multiplier
+    jitterFactor: 0.2,        // Add up to 20% random jitter
+    retryableStatusCodes: [429, 503, 502, 504], // Status codes that trigger retry
+  },
+  
   // Request states from API v2
   requestStates: {
     QUEUED: 'queued',
@@ -30,15 +41,334 @@ const API_CONFIG = {
     FAILED: 'failed',
     EXPIRED: 'expired',
   },
+  
+  // Rate limiting configuration
+  // Keeper Commander queue capacity is 100 requests
+  // These limits allow ~10 concurrent users before queue stress
+  rateLimit: {
+    // Per-user limits
+    perMinute: 5,                    // Max commands per minute per user
+    perHour: 50,                     // Max commands per hour per user
+    minuteWindowMs: 60 * 1000,       // 1 minute window
+    hourWindowMs: 60 * 60 * 1000,    // 1 hour window
+  },
 };
+
+// ============================================================================
+// Fetch Retry Helper Functions
+// ============================================================================
+
+/**
+ * Add jitter to delay to prevent thundering herd problem
+ * @param {number} delay - Base delay in milliseconds
+ * @returns {number} - Delay with jitter added
+ */
+function addFetchJitter(delay) {
+  const jitter = delay * API_CONFIG.fetchRetry.jitterFactor * Math.random();
+  return Math.floor(delay + jitter);
+}
+
+/**
+ * Sleep utility for async/await
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise<void>}
+ */
+function sleepMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Parse Retry-After header value
+ * @param {Response} response - Fetch response object
+ * @returns {number|null} - Delay in milliseconds or null
+ */
+function parseRetryAfterHeader(response) {
+  const retryAfter = response.headers?.get?.('Retry-After') || 
+                     response.headers?.get?.('retry-after');
+  
+  if (!retryAfter) return null;
+  
+  // Try parsing as seconds
+  const seconds = parseInt(retryAfter, 10);
+  if (!isNaN(seconds)) {
+    return seconds * 1000;
+  }
+  
+  // Try parsing as HTTP-date
+  try {
+    const date = new Date(retryAfter);
+    if (!isNaN(date.getTime())) {
+      const delayMs = date.getTime() - Date.now();
+      return Math.max(delayMs, 0);
+    }
+  } catch (e) {
+    // Ignore parsing errors
+  }
+  
+  return null;
+}
+
+/**
+ * Execute a fetch request with retry logic and exponential backoff
+ * Handles transient errors (429, 503, 502, 504) from Keeper API
+ * 
+ * @param {string} url - URL to fetch
+ * @param {Object} options - Fetch options
+ * @param {string} operationName - Name of the operation for logging
+ * @returns {Promise<Response>} - Fetch response
+ */
+async function fetchWithRetry(url, options = {}, operationName = 'Keeper API') {
+  const { maxRetries, initialDelayMs, maxDelayMs, backoffMultiplier, retryableStatusCodes } = API_CONFIG.fetchRetry;
+  let lastResponse;
+  let delay = initialDelayMs;
+  
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      lastResponse = response;
+      
+      // Check if we should retry
+      if (retryableStatusCodes.includes(response.status)) {
+        if (attempt > maxRetries) {
+          // Out of retries, return the response for caller to handle
+          logger.warn('Keeper API failed after retries', {
+            operation: operationName,
+            status: response.status,
+            maxRetries
+          });
+          return response;
+        }
+        
+        // Get Retry-After header if present
+        const retryAfterMs = parseRetryAfterHeader(response);
+        const actualDelay = retryAfterMs !== null 
+          ? Math.min(addFetchJitter(retryAfterMs), maxDelayMs * 2)
+          : addFetchJitter(delay);
+        
+        logger.warn('Keeper API retryable error, retrying', {
+          operation: operationName,
+          status: response.status,
+          attempt,
+          maxAttempts: maxRetries + 1,
+          retryDelayMs: actualDelay
+        });
+        
+        await sleepMs(actualDelay);
+        delay = Math.min(delay * backoffMultiplier, maxDelayMs);
+        continue;
+      }
+      
+      // Not a retryable status, return the response
+      return response;
+      
+    } catch (error) {
+      // Network errors
+      if (attempt > maxRetries) {
+        logger.error('Keeper API network error after retries', {
+          operation: operationName,
+          maxRetries,
+          error: error.message
+        });
+        throw error;
+      }
+      
+      const actualDelay = addFetchJitter(delay);
+      logger.warn('Keeper API network error, retrying', {
+        operation: operationName,
+        attempt,
+        maxAttempts: maxRetries + 1,
+        retryDelayMs: actualDelay,
+        error: error.message
+      });
+      
+      await sleepMs(actualDelay);
+      delay = Math.min(delay * backoffMultiplier, maxDelayMs);
+    }
+  }
+  
+  return lastResponse;
+}
+
+// ============================================================================
+// Rate Limiting Functions
+// ============================================================================
+
+/**
+ * Check and update rate limit for a user
+ * Uses dual-window rate limiting: per-minute and per-hour
+ * 
+ * @param {string} userId - Unique user identifier (accountId)
+ * @returns {Promise<Object>} - { allowed: boolean, error?: string, retryAfter?: number }
+ */
+export async function checkCommandRateLimit(userId) {
+  if (!userId) {
+    // If no user ID available, use a global limit (more restrictive)
+    userId = 'global';
+  }
+  
+  const now = Date.now();
+  const minuteWindowStart = now - API_CONFIG.rateLimit.minuteWindowMs;
+  const hourWindowStart = now - API_CONFIG.rateLimit.hourWindowMs;
+  
+  const rateLimitKey = `keeper-cmd-ratelimit-${userId}`;
+  
+  // Get current rate limit data
+  let rateLimitData = await storage.get(rateLimitKey);
+  
+  if (!rateLimitData) {
+    rateLimitData = {
+      requests: [],
+      lastCleanup: now
+    };
+  }
+  
+  // Clean old requests outside the hour window
+  rateLimitData.requests = (rateLimitData.requests || []).filter(
+    timestamp => timestamp > hourWindowStart
+  );
+  
+  // Count requests in each window
+  const requestsInMinute = rateLimitData.requests.filter(t => t > minuteWindowStart).length;
+  const requestsInHour = rateLimitData.requests.length;
+  
+  // Check minute limit
+  if (requestsInMinute >= API_CONFIG.rateLimit.perMinute) {
+    // Find when the oldest request in the minute window will expire
+    const oldestInMinute = rateLimitData.requests
+      .filter(t => t > minuteWindowStart)
+      .sort((a, b) => a - b)[0];
+    const retryAfter = Math.ceil((oldestInMinute + API_CONFIG.rateLimit.minuteWindowMs - now) / 1000);
+    
+    // Save the data (to preserve request history)
+    await storage.set(rateLimitKey, rateLimitData);
+    
+    return {
+      allowed: false,
+      error: `Rate limit exceeded: Maximum ${API_CONFIG.rateLimit.perMinute} commands per minute. Please wait ${retryAfter} seconds.`,
+      retryAfter: retryAfter,
+      limitType: 'minute',
+      remaining: {
+        minute: 0,
+        hour: Math.max(0, API_CONFIG.rateLimit.perHour - requestsInHour)
+      }
+    };
+  }
+  
+  // Check hour limit
+  if (requestsInHour >= API_CONFIG.rateLimit.perHour) {
+    // Find when the oldest request in the hour window will expire
+    const oldestInHour = rateLimitData.requests.sort((a, b) => a - b)[0];
+    const retryAfter = Math.ceil((oldestInHour + API_CONFIG.rateLimit.hourWindowMs - now) / 1000);
+    
+    // Save the data
+    await storage.set(rateLimitKey, rateLimitData);
+    
+    return {
+      allowed: false,
+      error: `Rate limit exceeded: Maximum ${API_CONFIG.rateLimit.perHour} commands per hour. Please wait ${Math.ceil(retryAfter / 60)} minutes.`,
+      retryAfter: retryAfter,
+      limitType: 'hour',
+      remaining: {
+        minute: 0,
+        hour: 0
+      }
+    };
+  }
+  
+  // Add current request timestamp
+  rateLimitData.requests.push(now);
+  rateLimitData.lastCleanup = now;
+  
+  // Save updated rate limit data
+  await storage.set(rateLimitKey, rateLimitData);
+  
+  return {
+    allowed: true,
+    remaining: {
+      minute: API_CONFIG.rateLimit.perMinute - requestsInMinute - 1,
+      hour: API_CONFIG.rateLimit.perHour - requestsInHour - 1
+    }
+  };
+}
+
+/**
+ * Get current rate limit status for a user (without incrementing)
+ * @param {string} userId - Unique user identifier
+ * @returns {Promise<Object>} - Current rate limit status
+ */
+export async function getRateLimitStatus(userId) {
+  if (!userId) userId = 'global';
+  
+  const now = Date.now();
+  const minuteWindowStart = now - API_CONFIG.rateLimit.minuteWindowMs;
+  const hourWindowStart = now - API_CONFIG.rateLimit.hourWindowMs;
+  
+  const rateLimitKey = `keeper-cmd-ratelimit-${userId}`;
+  const rateLimitData = await storage.get(rateLimitKey) || { requests: [] };
+  
+  // Filter to current windows
+  const validRequests = rateLimitData.requests.filter(t => t > hourWindowStart);
+  const requestsInMinute = validRequests.filter(t => t > minuteWindowStart).length;
+  const requestsInHour = validRequests.length;
+  
+  return {
+    limits: {
+      perMinute: API_CONFIG.rateLimit.perMinute,
+      perHour: API_CONFIG.rateLimit.perHour
+    },
+    usage: {
+      minute: requestsInMinute,
+      hour: requestsInHour
+    },
+    remaining: {
+      minute: Math.max(0, API_CONFIG.rateLimit.perMinute - requestsInMinute),
+      hour: Math.max(0, API_CONFIG.rateLimit.perHour - requestsInHour)
+    }
+  };
+}
 
 // ============================================================================
 // Utility Functions
 // ============================================================================
 
 /**
+ * Sanitize sensitive data from error messages
+ * Removes API keys, tokens, and other secrets that might be exposed in errors
+ * @param {string} message - The error message to sanitize
+ * @returns {string} - Sanitized message with secrets redacted
+ */
+function sanitizeSensitiveData(message) {
+  if (!message || typeof message !== 'string') return message;
+  
+  let sanitized = message;
+  
+  // Pattern for API keys (long alphanumeric strings, typically 32+ chars)
+  // Matches sequences that look like API keys/tokens
+  sanitized = sanitized.replace(/\b[A-Za-z0-9_-]{32,}\b/g, '[REDACTED]');
+  
+  // Pattern for Bearer tokens in headers
+  sanitized = sanitized.replace(/Bearer\s+[A-Za-z0-9_.-]+/gi, 'Bearer [REDACTED]');
+  
+  // Pattern for api-key header values
+  sanitized = sanitized.replace(/api-key[:\s]+[A-Za-z0-9_.-]+/gi, 'api-key: [REDACTED]');
+  
+  // Pattern for authorization headers
+  sanitized = sanitized.replace(/authorization[:\s]+[^\s]+/gi, 'Authorization: [REDACTED]');
+  
+  // Pattern for password fields in JSON
+  sanitized = sanitized.replace(/"password"\s*:\s*"[^"]*"/gi, '"password": "[REDACTED]"');
+  sanitized = sanitized.replace(/"apiKey"\s*:\s*"[^"]*"/gi, '"apiKey": "[REDACTED]"');
+  sanitized = sanitized.replace(/"api_key"\s*:\s*"[^"]*"/gi, '"api_key": "[REDACTED]"');
+  sanitized = sanitized.replace(/"token"\s*:\s*"[^"]*"/gi, '"token": "[REDACTED]"');
+  sanitized = sanitized.replace(/"secret"\s*:\s*"[^"]*"/gi, '"secret": "[REDACTED]"');
+  
+  return sanitized;
+}
+
+/**
  * Helper function to parse and clean Keeper CLI error messages
  * Extracts the meaningful user-friendly error message from verbose CLI output
+ * Also sanitizes any sensitive data (API keys, tokens) from error messages
  */
 function parseKeeperErrorMessage(errorMessage) {
   if (!errorMessage || typeof errorMessage !== 'string') return errorMessage;
@@ -66,6 +396,8 @@ function parseKeeperErrorMessage(errorMessage) {
     !line.includes('running in service mode')
   );
   
+  let result;
+  
   // If we have meaningful lines, process them
   if (meaningfulLines.length > 0) {
     const lastLine = meaningfulLines[meaningfulLines.length - 1];
@@ -77,15 +409,20 @@ function parseKeeperErrorMessage(errorMessage) {
       const afterColon = lastLine.substring(colonIndex + 2).trim();
       // Check if the part after colon is a meaningful message (not just a short token)
       if (afterColon.length > 20 && !afterColon.includes('Failed to')) {
-        return afterColon;
+        result = afterColon;
       }
     }
     
     // If no colon pattern found, return the last meaningful line
-    return lastLine;
+    if (!result) {
+      result = lastLine;
+    }
+  } else {
+    result = errorText;
   }
   
-  return errorText;
+  // Sanitize sensitive data before returning
+  return sanitizeSensitiveData(result);
 }
 
 /**
@@ -163,16 +500,17 @@ async function submitAsyncCommand(baseUrl, apiKey, command, options = {}) {
     body.filedata = options.filedata;
   }
 
-  const response = await fetch(endpoint, {
+  // Use fetchWithRetry for automatic retry on transient errors
+  const response = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'api-key': apiKey,
     },
     body: JSON.stringify(body),
-  });
+  }, 'Submit async command');
 
-  // Handle specific v2 error codes
+  // Handle error codes that persist after retries
   if (response.status === 503) {
     throw new Error('Keeper API queue is full. Please try again later.');
   }
@@ -209,12 +547,13 @@ async function submitAsyncCommand(baseUrl, apiKey, command, options = {}) {
 async function checkRequestStatus(baseUrl, apiKey, requestId) {
   const endpoint = getApiEndpoint(baseUrl, `status/${requestId}`);
 
-  const response = await fetch(endpoint, {
+  // Use fetchWithRetry for automatic retry on transient errors
+  const response = await fetchWithRetry(endpoint, {
     method: 'GET',
     headers: {
       'api-key': apiKey,
     },
-  });
+  }, 'Check request status');
 
   if (response.status === 404) {
     throw new Error(`Request ${requestId} not found. It may have expired.`);
@@ -248,12 +587,13 @@ async function checkRequestStatus(baseUrl, apiKey, requestId) {
 async function getRequestResult(baseUrl, apiKey, requestId) {
   const endpoint = getApiEndpoint(baseUrl, `result/${requestId}`);
 
-  const response = await fetch(endpoint, {
+  // Use fetchWithRetry for automatic retry on transient errors
+  const response = await fetchWithRetry(endpoint, {
     method: 'GET',
     headers: {
       'api-key': apiKey,
     },
-  });
+  }, 'Get request result');
 
   if (response.status === 404) {
     throw new Error(`Result for request ${requestId} not found. It may have expired.`);
@@ -456,10 +796,29 @@ export async function fetchPedmApprovalDetails(requestUid) {
 
 /**
  * Execute a Keeper Commander command using API v2 async queue
+ * Includes per-user rate limiting to prevent queue overflow
+ * 
  * @param {string} command - The command to execute
+ * @param {Object} options - Optional configuration
+ * @param {string} options.userId - User ID for rate limiting (accountId)
+ * @param {boolean} options.skipRateLimit - Skip rate limiting (for internal/system calls)
  * @returns {Promise<Object>} - API response
  */
-export async function executeKeeperCommand(command) {
+export async function executeKeeperCommand(command, options = {}) {
+  const { userId, skipRateLimit = false } = options;
+  
+  // Apply rate limiting unless explicitly skipped
+  if (!skipRateLimit) {
+    const rateLimit = await checkCommandRateLimit(userId);
+    if (!rateLimit.allowed) {
+      const error = new Error(rateLimit.error);
+      error.rateLimited = true;
+      error.retryAfter = rateLimit.retryAfter;
+      error.limitType = rateLimit.limitType;
+      throw error;
+    }
+  }
+  
   const config = await storage.get('keeperConfig');
   if (!config) {
     throw new Error('Keeper configuration not found. Please configure the app first.');

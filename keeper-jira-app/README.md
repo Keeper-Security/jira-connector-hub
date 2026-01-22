@@ -63,7 +63,8 @@ A powerful Atlassian Forge application that integrates Keeper Security's vault m
 ### 1. Install the Forge App
 
 ```bash
-# Install dependencies
+# Install dependencies (from keeper-jira-app directory)
+cd keeper-jira-app
 npm install
 
 # Build the UI components
@@ -116,6 +117,9 @@ keeper service-create \
 ```
 
 **With Cloudflare Tunneling (Built-in):**
+
+> **Note:** Cloudflare tunnel flags (`-cf`, `-cfd`) require Keeper Commander CLI version 17.2.0 or later. Check your version with `keeper --version`.
+
 ```bash
 keeper service-create \
   -p=9009 \

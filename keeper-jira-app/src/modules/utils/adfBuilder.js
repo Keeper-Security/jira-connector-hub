@@ -1,14 +1,32 @@
 /**
  * ADF (Atlassian Document Format) Builder Utilities
  * Builds rich formatted descriptions for Jira tickets
+ * 
+ * Security: Applies sensitive data redaction to prevent information disclosure
+ * to users with "Browse Projects" permission (Issue #10)
  */
+
+import {
+  redactUsername,
+  redactCommand,
+  redactFilePath,
+  truncateJustification,
+  redactSensitiveObject
+} from './sensitiveDataRedactor.js';
 
 /**
  * Build enriched ticket description from PEDM approval details
+ * Applies redaction to sensitive data (Issue #10)
  */
 export function buildEnrichedTicketDescription(approvalDetails, payload) {
   const accountInfo = approvalDetails.account_info || {};
   const appInfo = approvalDetails.application_info || {};
+  
+  // Apply redaction to sensitive fields
+  const redactedUsername = redactUsername(accountInfo.Username) || 'N/A';
+  const redactedJustification = truncateJustification(approvalDetails.justification) || 'N/A';
+  const redactedCommand = appInfo.CommandLine ? redactCommand(appInfo.CommandLine) : null;
+  const redactedFilePath = appInfo.FilePath ? redactFilePath(appInfo.FilePath) : null;
   
   const content = [
     { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: 'KEPM Approval Request' }] },
@@ -30,11 +48,11 @@ export function buildEnrichedTicketDescription(approvalDetails, payload) {
         ]}] },
         { type: 'listItem', content: [{ type: 'paragraph', content: [
           { type: 'text', text: 'Username: ', marks: [{ type: 'strong' }] },
-          { type: 'text', text: accountInfo.Username || 'N/A' }
+          { type: 'text', text: redactedUsername }
         ]}] },
         { type: 'listItem', content: [{ type: 'paragraph', content: [
           { type: 'text', text: 'Justification: ', marks: [{ type: 'strong' }] },
-          { type: 'text', text: approvalDetails.justification || 'N/A' }
+          { type: 'text', text: redactedJustification }
         ]}] },
         { type: 'listItem', content: [{ type: 'paragraph', content: [
           { type: 'text', text: 'Created: ', marks: [{ type: 'strong' }] },
@@ -48,7 +66,7 @@ export function buildEnrichedTicketDescription(approvalDetails, payload) {
     }
   ];
 
-  // Add application details if available
+  // Add application details if available (with redacted sensitive data)
   if (appInfo.FileName || appInfo.CommandLine) {
     content.push({ type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'Application Details' }] });
     const appDetails = [];
@@ -59,22 +77,22 @@ export function buildEnrichedTicketDescription(approvalDetails, payload) {
         { type: 'text', text: appInfo.FileName }
       ]}] });
     }
-    if (appInfo.FilePath) {
+    if (redactedFilePath) {
       appDetails.push({ type: 'listItem', content: [{ type: 'paragraph', content: [
-        { type: 'text', text: 'File Path: ', marks: [{ type: 'strong' }] },
-        { type: 'text', text: appInfo.FilePath }
+        { type: 'text', text: 'File: ', marks: [{ type: 'strong' }] },
+        { type: 'text', text: redactedFilePath }
       ]}] });
     }
-    if (appInfo.CommandLine) {
+    if (redactedCommand) {
       appDetails.push({ type: 'listItem', content: [{ type: 'paragraph', content: [
         { type: 'text', text: 'Command: ', marks: [{ type: 'strong' }] },
-        { type: 'text', text: appInfo.CommandLine, marks: [{ type: 'code' }] }
+        { type: 'text', text: redactedCommand, marks: [{ type: 'code' }] }
       ]}] });
     }
     if (appInfo.Description) {
       appDetails.push({ type: 'listItem', content: [{ type: 'paragraph', content: [
         { type: 'text', text: 'Description: ', marks: [{ type: 'strong' }] },
-        { type: 'text', text: appInfo.Description }
+        { type: 'text', text: truncateJustification(appInfo.Description, 150) }
       ]}] });
     }
     
@@ -83,12 +101,12 @@ export function buildEnrichedTicketDescription(approvalDetails, payload) {
     }
   }
 
-  // Add full API response
-  content.push({ type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'Full API Response' }] });
+  // Add redacted API response (for admin reference, with sensitive data redacted)
+  content.push({ type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'API Response (Redacted)' }] });
   content.push({ 
     type: 'codeBlock', 
     attrs: { language: 'json' }, 
-    content: [{ type: 'text', text: JSON.stringify(approvalDetails, null, 2) }] 
+    content: [{ type: 'text', text: JSON.stringify(redactSensitiveObject(approvalDetails), null, 2) }] 
   });
 
   return { type: 'doc', version: 1, content };
@@ -96,33 +114,47 @@ export function buildEnrichedTicketDescription(approvalDetails, payload) {
 
 /**
  * Build basic ticket description from webhook payload (fallback)
+ * Applies redaction to sensitive data (Issue #10)
  */
 export function buildBasicTicketDescription(payload) {
+  // Apply redaction to description
+  const redactedDescription = truncateJustification(
+    payload.description || payload.message || 'Security alert from Keeper.',
+    200
+  );
+  
   const content = [
     { type: 'heading', attrs: { level: 3 }, content: [{ type: 'text', text: 'Keeper Security Alert' }] },
-    { type: 'paragraph', content: [{ type: 'text', text: payload.description || payload.message || 'Security alert from Keeper.' }] },
+    { type: 'paragraph', content: [{ type: 'text', text: redactedDescription }] },
     { type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'Alert Details' }] }
   ];
 
-  const alertDetails = [];
+  // Define fields with redaction functions
   const fields = [
-    { key: 'alert_name', label: 'Alert Name' },
-    { key: 'audit_event', label: 'Audit Event' },
-    { key: 'category', label: 'Category' },
-    { key: 'username', label: 'Username' },
-    { key: 'remote_address', label: 'Remote Address' },
-    { key: 'timestamp', label: 'Timestamp' },
-    { key: 'agent_uid', label: 'Agent UID' },
-    { key: 'request_uid', label: 'Request UID' }
+    { key: 'alert_name', label: 'Alert Name', redact: null },
+    { key: 'audit_event', label: 'Audit Event', redact: null },
+    { key: 'category', label: 'Category', redact: null },
+    { key: 'username', label: 'Username', redact: redactUsername },
+    { key: 'remote_address', label: 'Source', redact: () => '[REDACTED]' },
+    { key: 'timestamp', label: 'Timestamp', redact: null },
+    { key: 'agent_uid', label: 'Agent UID', redact: null },
+    { key: 'request_uid', label: 'Request UID', redact: null }
   ];
 
+  const alertDetails = [];
+  
   fields.forEach(field => {
     if (payload[field.key]) {
+      // Apply redaction if defined, otherwise use raw value
+      const value = field.redact 
+        ? field.redact(String(payload[field.key]))
+        : String(payload[field.key]);
+      
       alertDetails.push({
         type: 'listItem',
         content: [{ type: 'paragraph', content: [
           { type: 'text', text: `${field.label}: `, marks: [{ type: 'strong' }] },
-          { type: 'text', text: String(payload[field.key]) }
+          { type: 'text', text: value }
         ]}]
       });
     }
@@ -132,12 +164,12 @@ export function buildBasicTicketDescription(payload) {
     content.push({ type: 'bulletList', content: alertDetails });
   }
 
-  // Add full payload
-  content.push({ type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'Full Payload' }] });
+  // Add redacted payload (for admin reference)
+  content.push({ type: 'heading', attrs: { level: 4 }, content: [{ type: 'text', text: 'Payload (Redacted)' }] });
   content.push({ 
     type: 'codeBlock', 
     attrs: { language: 'json' }, 
-    content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] 
+    content: [{ type: 'text', text: JSON.stringify(redactSensitiveObject(payload), null, 2) }] 
   });
 
   return { type: 'doc', version: 1, content };

@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "homepage": ".",
+  "overrides": {
+    "postcss": "^8.4.31",
+    "word-wrap": "^1.2.5",
+    "nth-check": "^2.0.1",
+    "svgo": "^2.8.0",
+    "webpack-dev-server": "^5.2.1"
+  },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",

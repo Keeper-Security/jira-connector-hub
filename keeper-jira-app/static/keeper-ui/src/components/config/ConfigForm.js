@@ -57,7 +57,8 @@ const ConfigForm = ({
                   placeholder="https://your-domain.com/api/v2"
                 />
                 <div className="config-form-helper-text">
-                  Enter the complete API v2 URL of your Keeper Commander Service including the <code>/api/v2</code> path (e.g., <code>https://your-tunnel.ngrok.io/api/v2</code> or <code>https://keeper.your-domain.com/api/v2</code>). 
+                  Enter the base URL of your Keeper Commander Service (e.g., <code>https://your-tunnel.ngrok-free.app</code> or your custom domain). 
+                  <strong>Built-in support:</strong> ngrok, Cloudflare tunnels. <strong>Custom domains</strong> are supported for per-customer deployments (ensure added to manifest.yml).
                   Requires Commander 17.1.7+ with queue enabled (<code>-q y</code>).{' '}
                   <span 
                     onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api/api-usage")} 
@@ -117,6 +118,15 @@ const ConfigForm = ({
                     </button>
                   </div>
                 </div>
+                {/* Security warning when API key is visible */}
+                {!isApiKeyMasked && formValues.apiKey && (
+                  <div className="api-key-visible-warning">
+                    <span className="warning-icon">Warning:</span>
+                    <span className="warning-text">
+                      API Key is visible - avoid screenshots or screen sharing
+                    </span>
+                  </div>
+                )}
                 {error && (
                   <div className="config-form-error">
                     {error}
@@ -156,7 +166,7 @@ const ConfigForm = ({
           {(!formValues.apiUrl.trim() || !formValues.apiKey.trim()) && (
             <div className="setup-instructions">
               <div className="setup-instructions-title">
-                📋 Setup Instructions:
+                Setup Instructions:
               </div>
               <div className="setup-instructions-content">
                 1. Fill in the API URL and API Key fields above<br/>
@@ -170,7 +180,7 @@ const ConfigForm = ({
           {hasFormChanges && !connectionTested && formValues.apiUrl.trim() && formValues.apiKey.trim() && (
             <div className="config-warning">
               <span className="config-warning-text">
-                ⚠️ Please test the connection before saving settings.
+                Please test the connection before saving settings.
               </span>
             </div>
           )}
