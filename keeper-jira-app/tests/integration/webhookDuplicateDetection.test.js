@@ -12,7 +12,7 @@ const { storage } = require('@forge/api');
 
 // Mock the webhookHandler dependencies
 jest.mock('../../src/modules/keeperApi', () => ({
-  fetchPedmApprovalDetails: jest.fn()
+  fetchEpmApprovalDetails: jest.fn()
 }));
 
 jest.mock('../../src/modules/utils/adfBuilder', () => ({
@@ -205,7 +205,7 @@ describe('Webhook Payload Validation', () => {
     }
     
     // Category validation
-    const validCategories = ['pedm_approval', 'pedm_alert', 'general'];
+    const validCategories = ['epm_approval', 'epm_alert', 'general'];
     if (payload.category && !validCategories.includes(payload.category)) {
       errors.push(`Invalid category: ${payload.category}`);
     }
@@ -228,11 +228,11 @@ describe('Webhook Payload Validation', () => {
     expect(result.errors).toContain('request_uid is required');
   });
 
-  test('accepts valid PEDM approval payload', () => {
+  test('accepts valid EPM approval payload', () => {
     const payload = {
       request_uid: 'abc123',
-      category: 'pedm_approval',
-      audit_event: 'EPM_PEDM_APPROVAL_REQUEST'
+      category: 'epm_approval',
+      audit_event: 'EPM_APPROVAL_REQUEST'
     };
     
     const result = validatePayload(payload);

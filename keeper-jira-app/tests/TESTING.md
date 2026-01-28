@@ -122,7 +122,7 @@ Tests the structured error response system:
 | `rateLimitError` | Minute/hour limits, retry info |
 | `connectionError` | Auto-detection of error types |
 | `keeperError` | Keeper-specific error classification |
-| `pedmError` | PEDM state errors (approved/denied/expired) |
+| `epmError` | EPM state errors (approved/denied/expired) |
 
 ---
 
@@ -212,12 +212,12 @@ E2E testing for Forge apps requires a real Jira Cloud environment.
 [ ] Share with owner → Error message (not allowed)
 ```
 
-#### 4. PEDM Approval Flow
+#### 4. EPM Approval Flow
 
 ```
 [ ] Webhook creates ticket with correct labels
-[ ] Approve request → Keeper processes, label changes to "pedm-approved"
-[ ] Deny request → Comment added, label changes to "pedm-denied"
+[ ] Approve request → Keeper processes, label changes to "epm-approved"
+[ ] Deny request → Comment added, label changes to "epm-denied"
 [ ] Expired request → Cannot approve/deny, shows expired message
 [ ] Duplicate webhook → Only one ticket created
 ```
@@ -250,7 +250,7 @@ forge invoke testConnection --payload '{"apiUrl":"https://test.ngrok-free.app","
 curl -X POST "$(forge webtrigger --url keeper-alert-trigger)" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"request_uid":"test-123","category":"pedm_approval"}'
+  -d '{"request_uid":"test-123","category":"epm_approval"}'
 ```
 
 ### E2E Test Data Setup
@@ -269,8 +269,8 @@ const testData = {
   },
   webhookPayload: {
     request_uid: `e2e-${Date.now()}`,
-    category: 'pedm_approval',
-    audit_event: 'EPM_PEDM_APPROVAL_REQUEST'
+    category: 'epm_approval',
+    audit_event: 'EPM_APPROVAL_REQUEST'
   }
 };
 ```

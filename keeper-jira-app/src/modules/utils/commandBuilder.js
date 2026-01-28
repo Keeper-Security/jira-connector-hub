@@ -298,7 +298,7 @@ function validateCommandParameters(action, parameters) {
       break;
     }
     
-    case 'pedm approval action': {
+    case 'epm approval action': {
       // Approval UID required (handled by cliCommand path)
       break;
     }

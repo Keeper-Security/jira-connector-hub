@@ -52,27 +52,27 @@ export const executeKeeperCommand = async (command) => {
 };
 
 /**
- * Approve PEDM request
+ * Approve EPM request
  * @param {string} approvalUid - Approval UID
  * @returns {Promise<Object>} - Response object
  */
-export const approvePedmRequest = async (approvalUid) => {
+export const approveEpmRequest = async (approvalUid) => {
   return await invoke("executeKeeperCommand", {
     payload: {
-      command: `pedm approval action --approve ${approvalUid}`
+      command: `epm approval action --approve ${approvalUid}`
     }
   });
 };
 
 /**
- * Deny PEDM request
+ * Deny EPM request
  * @param {string} approvalUid - Approval UID
  * @returns {Promise<Object>} - Response object
  */
-export const denyPedmRequest = async (approvalUid) => {
+export const denyEpmRequest = async (approvalUid) => {
   return await invoke("executeKeeperCommand", {
     payload: {
-      command: `pedm approval action --deny ${approvalUid}`
+      command: `epm approval action --deny ${approvalUid}`
     }
   });
 };

@@ -1,7 +1,7 @@
 {
   "files": {
-    "main.css": "./static/css/main.77291dc4.css",
-    "main.js": "./static/js/main.8b8186af.js",
+    "main.css": "./static/css/main.1fec5d11.css",
+    "main.js": "./static/js/main.dab694f1.js",
     "@atlaskit-internal_atlassian-custom-theme.js": "./static/js/@atlaskit-internal_atlassian-custom-theme.e17081bc.chunk.js",
     "@atlaskit-internal_atlassian-light.js": "./static/js/@atlaskit-internal_atlassian-light.33de4736.chunk.js",
     "@atlaskit-internal_atlassian-light-future.js": "./static/js/@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js",
@@ -15,8 +15,8 @@
     "@atlaskit-internal_atlassian-typography.js": "./static/js/@atlaskit-internal_atlassian-typography.d38dbd79.chunk.js",
     "@atlaskit-internal_atlassian-shape.js": "./static/js/@atlaskit-internal_atlassian-shape.39d91485.chunk.js",
     "index.html": "./index.html",
-    "main.77291dc4.css.map": "./static/css/main.77291dc4.css.map",
-    "main.8b8186af.js.map": "./static/js/main.8b8186af.js.map",
+    "main.1fec5d11.css.map": "./static/css/main.1fec5d11.css.map",
+    "main.dab694f1.js.map": "./static/js/main.dab694f1.js.map",
     "@atlaskit-internal_atlassian-custom-theme.e17081bc.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-custom-theme.e17081bc.chunk.js.map",
     "@atlaskit-internal_atlassian-light.33de4736.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light.33de4736.chunk.js.map",
     "@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js.map",
@@ -31,7 +31,7 @@
     "@atlaskit-internal_atlassian-shape.39d91485.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-shape.39d91485.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.77291dc4.css",
-    "static/js/main.8b8186af.js"
+    "static/css/main.1fec5d11.css",
+    "static/js/main.dab694f1.js"
   ]
 }

@@ -3,7 +3,7 @@ import { storage, webTrigger } from '@forge/api';
 import { webTriggerHandler, generateWebhookToken } from './modules/webhookHandler.js';
 import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus } from './modules/keeperApi.js';
 import { requestJiraAsAppWithRetry, requestJiraAsUserWithRetry, route } from './modules/utils/jiraApiRetry.js';
-import { logger, createResolverLogger } from './modules/utils/logger.js';
+import { logger } from './modules/utils/logger.js';
 import { 
   ERROR_CODES, 
   successResponse, 
@@ -12,7 +12,7 @@ import {
   rateLimitError, 
   connectionError, 
   keeperError, 
-  pedmError 
+  epmError 
 } from './modules/utils/errorResponse.js';
 
 const resolver = new Resolver();
@@ -276,11 +276,10 @@ resolver.define('getConfig', async () => {
  * Includes URL validation to prevent saving malicious tunnel URLs (Issue #8)
  */
 resolver.define('setConfig', async (req) => {
-  const log = createResolverLogger(req, 'setConfig');
   // Handle double nesting: req.payload.payload
   let payload = req?.payload?.payload || req?.payload || req;
   
-  log.info('Setting Keeper configuration');
+  logger.info('setConfig: Setting Keeper configuration');
   
   if (!payload) {
     return validationError('payload', 'No payload provided');
@@ -1764,7 +1763,7 @@ resolver.define('getKeeperRecordDetails', async (req) => {
 });
 
 /**
- * Execute a simple Keeper command (called from config page for PEDM, etc.)
+ * Execute a simple Keeper command (called from config page for EPM, etc.)
  */
 resolver.define('executeKeeperCommand', async (req) => {
   const userId = req?.context?.accountId;
@@ -1798,11 +1797,10 @@ resolver.define('executeKeeperCommand', async (req) => {
  * Manual Keeper action trigger (called from issue panel)
  */
 resolver.define('executeKeeperAction', async (req) => {
-  const log = createResolverLogger(req, 'executeKeeperAction');
   const userId = req?.context?.accountId;
   const { issueKey, command, commandDescription, parameters, formattedTimestamp } = req.payload;
   
-  log.info('Executing Keeper action', { 
+  logger.info('executeKeeperAction: Executing Keeper action', { 
     issueKey, 
     commandType: command?.split(' ')[0], 
     hasParameters: !!parameters 
@@ -1816,9 +1814,9 @@ resolver.define('executeKeeperAction', async (req) => {
     return validationError('command', 'Command is required');
   }
   
-  // Check if this is a PEDM command and if the request is already expired or action was already taken
-  const isPedmCommand = command.startsWith('pedm approval action');
-  if (isPedmCommand) {
+  // Check if this is an EPM command and if the request is already expired or action was already taken
+  const isEpmCommand = command.startsWith('epm approval action');
+  if (isEpmCommand) {
     // Check if any action label already exists (with rate limit retry)
     try {
       const issueResponse = await requestJiraAsAppWithRetry(
@@ -1827,21 +1825,21 @@ resolver.define('executeKeeperAction', async (req) => {
           method: 'GET',
           headers: { 'Accept': 'application/json' }
         },
-        'Check PEDM action labels'
+        'Check EPM action labels'
       );
       
       if (issueResponse.ok) {
         const issueData = await issueResponse.json();
         const labels = issueData.fields?.labels || [];
         
-        if (labels.includes('pedm-approved')) {
-          return pedmError('approved');
+        if (labels.includes('epm-approved')) {
+          return epmError('approved');
         }
-        if (labels.includes('pedm-denied')) {
-          return pedmError('denied');
+        if (labels.includes('epm-denied')) {
+          return epmError('denied');
         }
-        if (labels.includes('pedm-expired')) {
-          return pedmError('expired');
+        if (labels.includes('epm-expired')) {
+          return epmError('expired');
         }
       }
     } catch (error) {
@@ -1933,15 +1931,15 @@ resolver.define('executeKeeperAction', async (req) => {
       }
     }
 
-    // Check if this is a PEDM command
-    const isPedmCommand = command.startsWith('pedm approval action');
+    // Check if this is an EPM command
+    const isEpmCommand = command.startsWith('epm approval action');
     
     // Only add comment for main record creation, not for records created as references
     // Check if this is a main record creation (not just a reference record)
     // Records created as references will have skipComment: true parameter
     const isMainRecordCreation = !parameters.skipComment;
     
-    if (isMainRecordCreation || isPedmCommand) {
+    if (isMainRecordCreation || isEpmCommand) {
       // Get current user info for the comment
       const currentUser = await getCurrentUser();
       
@@ -1962,8 +1960,8 @@ resolver.define('executeKeeperAction', async (req) => {
       let isShareInvitationPending = false;
       
       // Set command-specific messages
-      // Handle PEDM commands first
-      if (isPedmCommand) {
+      // Handle EPM commands first
+      if (isEpmCommand) {
         if (command.includes('--approve')) {
           actionMessage = `Endpoint privilege approval request has been approved`;
           actionDescription = `Endpoint Privilege Approval: Approved request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
@@ -2080,7 +2078,7 @@ resolver.define('executeKeeperAction', async (req) => {
       
       // Build ADF content with panel (matching save/reject request format)
       let panelTitle = 'Keeper Request Approved and Executed';
-      if (isPedmCommand) {
+      if (isEpmCommand) {
         if (command.includes('--approve')) {
           panelTitle = 'Endpoint Privilege Approval Request - Approved';
         } else if (command.includes('--deny')) {
@@ -2143,7 +2141,7 @@ resolver.define('executeKeeperAction', async (req) => {
       
       // Use different panel types for different scenarios
       let panelType = 'success';
-      if (isPedmCommand && command.includes('--deny')) {
+      if (isEpmCommand && command.includes('--deny')) {
         panelType = 'warning';
       } else if (isShareInvitationPending) {
         panelType = 'info';
@@ -2168,8 +2166,8 @@ resolver.define('executeKeeperAction', async (req) => {
         ]
       };
 
-      // For PEDM commands, add appropriate label FIRST (before comment) to prevent race conditions
-      if (isPedmCommand) {
+      // For EPM commands, add appropriate label FIRST (before comment) to prevent race conditions
+      if (isEpmCommand) {
         try {
           // Get current labels (with rate limit retry)
           const issueResponse = await requestJiraAsAppWithRetry(
@@ -2178,7 +2176,7 @@ resolver.define('executeKeeperAction', async (req) => {
               method: 'GET',
               headers: { 'Accept': 'application/json' }
             },
-            'Get labels for PEDM update'
+            'Get labels for EPM update'
           );
           
           const issueData = await issueResponse.json();
@@ -2187,9 +2185,9 @@ resolver.define('executeKeeperAction', async (req) => {
           // Determine which label to add
           let newLabel = '';
           if (command.includes('--approve')) {
-            newLabel = 'pedm-approved';
+            newLabel = 'epm-approved';
           } else if (command.includes('--deny')) {
-            newLabel = 'pedm-denied';
+            newLabel = 'epm-denied';
           }
           
           // Add new label if not already present (with rate limit retry)
@@ -2207,11 +2205,11 @@ resolver.define('executeKeeperAction', async (req) => {
                   }
                 }),
               },
-              'Update PEDM label'
+              'Update EPM label'
             );
           }
         } catch (labelErr) {
-          logger.error('Failed to add PEDM label', labelErr);
+          logger.error('Failed to add EPM label', labelErr);
           // Don't fail the entire operation if label update fails
         }
       }
@@ -2328,10 +2326,9 @@ function isPermissionConflictError(errorMessage) {
  * Reject Keeper request (called from issue panel)
  */
 resolver.define('rejectKeeperRequest', async (req) => {
-  const log = createResolverLogger(req, 'rejectKeeperRequest');
   const { issueKey, rejectionReason, formattedTimestamp } = req.payload;
   
-  log.info('Processing Keeper request rejection', { issueKey });
+  logger.info('rejectKeeperRequest: Processing Keeper request rejection', { issueKey });
   
   if (!issueKey) {
     return validationError('issueKey', 'Issue key is required');
@@ -2601,7 +2598,6 @@ resolver.define('getWebTriggerConfig', async () => {
  * Save web trigger configuration
  */
 resolver.define('setWebTriggerConfig', async (req) => {
-  const log = createResolverLogger(req, 'setWebTriggerConfig');
   let payload = req?.payload?.payload || req?.payload || req;
   
   if (!payload) {
@@ -2611,7 +2607,7 @@ resolver.define('setWebTriggerConfig', async (req) => {
   const projectKey = payload.projectKey;
   const issueType = payload.issueType;
   
-  log.info('Saving web trigger configuration', { projectKey, issueType });
+  logger.info('setWebTriggerConfig: Saving web trigger configuration', { projectKey, issueType });
   
   // Get existing config to preserve the token if not being changed
   const existingConfig = await storage.get('webTriggerConfig') || {};
@@ -2625,7 +2621,7 @@ resolver.define('setWebTriggerConfig', async (req) => {
   
   await storage.set('webTriggerConfig', configToSave);
   
-  log.info('Web trigger configuration saved');
+  logger.info('setWebTriggerConfig: Web trigger configuration saved');
   return { success: true, message: 'Web trigger configuration saved successfully' };
 });
 
@@ -2635,9 +2631,7 @@ resolver.define('setWebTriggerConfig', async (req) => {
  * Format: Authorization: Bearer <token>
  */
 resolver.define('generateWebhookToken', async (req) => {
-  const log = createResolverLogger(req, 'generateWebhookToken');
-  
-  log.info('Generating new webhook authentication token');
+  logger.info('generateWebhookToken: Generating new webhook authentication token');
   
   try {
     // Generate a new secure token
@@ -2658,7 +2652,7 @@ resolver.define('generateWebhookToken', async (req) => {
     // Get the webhook URL
     const webhookUrl = await webTrigger.getUrl('keeper-alert-trigger');
     
-    log.info('Webhook token generated successfully');
+    logger.info('generateWebhookToken: Webhook token generated successfully');
     
     return {
       success: true,
@@ -2671,7 +2665,7 @@ resolver.define('generateWebhookToken', async (req) => {
       instructions: 'Add this header to your Keeper webhook configuration: Authorization: Bearer <token>'
     };
   } catch (err) {
-    log.error('Failed to generate webhook token', err);
+    logger.error('generateWebhookToken: Failed to generate webhook token', { error: err.message });
     throw new Error(`Failed to generate webhook token: ${err.message}`);
   }
 });
@@ -3085,7 +3079,7 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
     
     const issue = await response.json();
     
-    // For PEDM approval requests (test or real), assign to a project admin
+    // For EPM approval requests (test or real), assign to a project admin
     if (payload.category === 'endpoint_privilege_manager' && payload.audit_event === 'approval_request_created') {
       try {
         // Get project admins
@@ -3156,9 +3150,9 @@ resolver.define('testWebTriggerWithPayload', async (req) => {
                       }
                     })
                   },
-                  'Assign PEDM ticket to admin'
+                  'Assign EPM ticket to admin'
                 );
-                logger.info('Assigned PEDM ticket to project admin', { issueKey: issue.key });
+                logger.info('Assigned EPM ticket to project admin', { issueKey: issue.key });
               }
             }
           }
@@ -3243,7 +3237,7 @@ resolver.define('getWebhookTickets', async (req) => {
       
       // Extract request UID - check multiple possible field names
       // 1. Basic webhook payload uses: request_uid
-      // 2. Enriched PEDM data uses: approval_uid
+      // 2. Enriched EPM data uses: approval_uid
       // 3. Fallback: extract from labels (format: request-<uid>)
       let requestUid = jsonPayload?.request_uid || jsonPayload?.approval_uid || null;
       if (!requestUid) {
@@ -3256,21 +3250,21 @@ resolver.define('getWebhookTickets', async (req) => {
       
       // Extract username - check multiple possible field names
       // 1. Basic webhook payload uses: username
-      // 2. Enriched PEDM data uses: account_info.Username
+      // 2. Enriched EPM data uses: account_info.Username
       let username = jsonPayload?.username || 
                      jsonPayload?.account_info?.Username || 
                      null;
       
-      // If this is enriched PEDM data, try to get additional info
-      const isPedmEnriched = !!jsonPayload?.approval_uid || !!jsonPayload?.account_info;
+      // If this is enriched EPM data, try to get additional info
+      const isEpmEnriched = !!jsonPayload?.approval_uid || !!jsonPayload?.account_info;
       
       // For description, prefer specific fields over summary
       let ticketDescription = issue.fields.summary;
       if (jsonPayload) {
         if (jsonPayload.description) {
           ticketDescription = jsonPayload.description;
-        } else if (isPedmEnriched && jsonPayload.approval_type) {
-          // For PEDM tickets, create a meaningful description
+        } else if (isEpmEnriched && jsonPayload.approval_type) {
+          // For EPM tickets, create a meaningful description
           ticketDescription = `${jsonPayload.approval_type || 'KEPM'} Request - ${requestUid || 'Unknown'}`;
           if (username) {
             ticketDescription = `${username} - ${ticketDescription}`;
@@ -3290,9 +3284,9 @@ resolver.define('getWebhookTickets', async (req) => {
         requestUid: requestUid,
         agentUid: jsonPayload?.agent_uid || jsonPayload?.account_info?.agent_uid || null,
         username: username,
-        category: jsonPayload?.category || (isPedmEnriched ? 'endpoint_privilege_manager' : null),
-        auditEvent: jsonPayload?.audit_event || (isPedmEnriched ? 'approval_request_created' : null),
-        alertName: jsonPayload?.alert_name || (isPedmEnriched ? 'KEPM Approval Request' : null)
+        category: jsonPayload?.category || (isEpmEnriched ? 'endpoint_privilege_manager' : null),
+        auditEvent: jsonPayload?.audit_event || (isEpmEnriched ? 'approval_request_created' : null),
+        alertName: jsonPayload?.alert_name || (isEpmEnriched ? 'KEPM Approval Request' : null)
       };
     });
     
@@ -3365,9 +3359,9 @@ resolver.define('getWebhookPayload', async (req) => {
 });
 
 /**
- * Check if PEDM request is already expired (has the issue property)
+ * Check if EPM request is already expired (has the issue property)
  */
-resolver.define('checkPedmExpired', async (req) => {
+resolver.define('checkEpmExpired', async (req) => {
   const { issueKey } = req.payload;
   
   if (!issueKey) {
@@ -3376,12 +3370,12 @@ resolver.define('checkPedmExpired', async (req) => {
   
   try {
     const propertyResponse = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
+      route`/rest/api/3/issue/${issueKey}/properties/epm-request-expired`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       },
-      'Check PEDM expiration property'
+      'Check EPM expiration property'
     );
     
     // If property exists, it's expired
@@ -3399,7 +3393,7 @@ resolver.define('checkPedmExpired', async (req) => {
       isExpired: false 
     };
   } catch (error) {
-    logger.error('Error checking PEDM expiration', error);
+    logger.error('Error checking EPM expiration', error);
     return { 
       success: true, 
       isExpired: false 
@@ -3408,12 +3402,12 @@ resolver.define('checkPedmExpired', async (req) => {
 });
 
 /**
- * Add comment for expired PEDM approval request
+ * Add comment for expired EPM approval request
  */
 /**
- * Check if PEDM action was already taken by checking labels
+ * Check if EPM action was already taken by checking labels
  */
-resolver.define('checkPedmActionTaken', async (req) => {
+resolver.define('checkEpmActionTaken', async (req) => {
   const { issueKey } = req.payload;
   
   if (!issueKey) {
@@ -3428,7 +3422,7 @@ resolver.define('checkPedmActionTaken', async (req) => {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       },
-      'Check PEDM action labels'
+      'Check EPM action labels'
     );
     
     if (!issueResponse.ok) {
@@ -3438,8 +3432,8 @@ resolver.define('checkPedmActionTaken', async (req) => {
     const issueData = await issueResponse.json();
     const labels = issueData.fields?.labels || [];
     
-    // Check for PEDM action labels
-    if (labels.includes('pedm-approved')) {
+    // Check for EPM action labels
+    if (labels.includes('epm-approved')) {
       return { 
         success: true, 
         actionTaken: true, 
@@ -3448,7 +3442,7 @@ resolver.define('checkPedmActionTaken', async (req) => {
       };
     }
     
-    if (labels.includes('pedm-denied')) {
+    if (labels.includes('epm-denied')) {
       return { 
         success: true, 
         actionTaken: true, 
@@ -3457,7 +3451,7 @@ resolver.define('checkPedmActionTaken', async (req) => {
       };
     }
     
-    if (labels.includes('pedm-expired')) {
+    if (labels.includes('epm-expired')) {
       return { 
         success: true, 
         actionTaken: true, 
@@ -3475,7 +3469,7 @@ resolver.define('checkPedmActionTaken', async (req) => {
     };
     
   } catch (err) {
-    logger.error('Error checking PEDM action', err);
+    logger.error('Error checking EPM action', err);
     return { 
       success: false, 
       actionTaken: false,
@@ -3485,7 +3479,7 @@ resolver.define('checkPedmActionTaken', async (req) => {
   }
 });
 
-resolver.define('addPedmExpiredComment', async (req) => {
+resolver.define('addEpmExpiredComment', async (req) => {
   const { issueKey, formattedTimestamp } = req.payload;
   
   if (!issueKey) {
@@ -3496,12 +3490,12 @@ resolver.define('addPedmExpiredComment', async (req) => {
     // FIRST: Try to set the issue property as a lock to prevent race conditions
     // Check if property already exists (with rate limit retry)
     const propertyCheckResponse = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
+      route`/rest/api/3/issue/${issueKey}/properties/epm-request-expired`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       },
-      'Check PEDM expiration lock'
+      'Check EPM expiration lock'
     );
     
     // If property already exists, someone else already processed this
@@ -3527,9 +3521,9 @@ resolver.define('addPedmExpiredComment', async (req) => {
       const issueData = await issueResponse.json();
       const labels = issueData.fields?.labels || [];
       
-      if (labels.includes('pedm-approved') || 
-          labels.includes('pedm-denied') || 
-          labels.includes('pedm-expired')) {
+      if (labels.includes('epm-approved') || 
+          labels.includes('epm-denied') || 
+          labels.includes('epm-expired')) {
         return { 
           success: true, 
           message: 'Action already taken (label found)',
@@ -3540,7 +3534,7 @@ resolver.define('addPedmExpiredComment', async (req) => {
     
     // Set the property BEFORE adding comment (as a lock, with rate limit retry)
     await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
+      route`/rest/api/3/issue/${issueKey}/properties/epm-request-expired`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -3552,7 +3546,7 @@ resolver.define('addPedmExpiredComment', async (req) => {
           }
         }),
       },
-      'Set PEDM expiration lock'
+      'Set EPM expiration lock'
     );
     
     // Get current user info (the one viewing when it expired)
@@ -3609,7 +3603,7 @@ resolver.define('addPedmExpiredComment', async (req) => {
       ]
     };
     
-    // Add 'pedm-expired' label FIRST (before comment) to prevent race conditions
+    // Add 'epm-expired' label FIRST (before comment) to prevent race conditions
     try {
       // Get current labels (we already fetched this earlier, but need fresh data, with rate limit retry)
       const labelResponse = await requestJiraAsAppWithRetry(
@@ -3625,8 +3619,8 @@ resolver.define('addPedmExpiredComment', async (req) => {
       const currentLabels = labelData.fields?.labels || [];
       
       // Add expired label if not already present (with rate limit retry)
-      if (!currentLabels.includes('pedm-expired')) {
-        const updatedLabels = [...currentLabels, 'pedm-expired'];
+      if (!currentLabels.includes('epm-expired')) {
+        const updatedLabels = [...currentLabels, 'epm-expired'];
         
         await requestJiraAsAppWithRetry(
           route`/rest/api/3/issue/${issueKey}`,
@@ -3639,11 +3633,11 @@ resolver.define('addPedmExpiredComment', async (req) => {
               }
             }),
           },
-          'Add pedm-expired label'
+          'Add epm-expired label'
         );
       }
     } catch (labelErr) {
-      logger.error('Failed to add pedm-expired label', labelErr);
+      logger.error('Failed to add epm-expired label', labelErr);
       // Don't fail the entire operation if label update fails
     }
     
@@ -3662,7 +3656,7 @@ resolver.define('addPedmExpiredComment', async (req) => {
     
     // Update issue property with final details (with rate limit retry)
     await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue/${issueKey}/properties/pedm-request-expired`,
+      route`/rest/api/3/issue/${issueKey}/properties/epm-request-expired`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -3916,10 +3910,9 @@ resolver.define('getProjectAdmins', async (req) => {
  * Store request data for admin approval
  */
 resolver.define('storeRequestData', async (req) => {
-  const log = createResolverLogger(req, 'storeRequestData');
   const { issueKey, requestData, formattedTimestamp } = req.payload;
   
-  log.info('Storing request data for admin approval', { issueKey });
+  logger.info('storeRequestData: Storing request data for admin approval', { issueKey });
   
   if (!issueKey) {
     return validationError('issueKey', 'Issue key is required');
@@ -4266,12 +4259,12 @@ resolver.define('clearStoredRequestData', async (req) => {
 /**
  * Web trigger handler - modularized implementation
  * 
- * Enhanced with API integration for fetching PEDM approval details
+ * Enhanced with API integration for fetching EPM approval details
  * See: modules/webhookHandler.js for full implementation
  * 
  * Features:
  * - Fetches detailed approval data from Keeper API
- * - Auto-sync fallback (pedm sync-down) if data doesn't exist
+ * - Auto-sync fallback (epm sync-down) if data doesn't exist
  * - Creates enriched tickets with detailed information
  * - Graceful fallback to webhook payload if API unavailable
  * - Auto-assigns to project admin

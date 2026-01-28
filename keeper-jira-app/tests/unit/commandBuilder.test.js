@@ -413,8 +413,8 @@ describe('buildKeeperCommand', () => {
 
   describe('pre-formatted commands', () => {
     test('returns cliCommand as-is', () => {
-      const prebuilt = 'pedm approval action --approve abc123';
-      const command = buildKeeperCommand('pedm approval action', {
+      const prebuilt = 'epm approval action --approve abc123';
+      const command = buildKeeperCommand('epm approval action', {
         cliCommand: prebuilt
       }, 'TEST-1');
       

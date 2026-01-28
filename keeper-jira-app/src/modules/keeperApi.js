@@ -683,12 +683,12 @@ async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
 // ============================================================================
 
 /**
- * Extract PEDM approval data from various API response formats
+ * Extract EPM approval data from various API response formats
  * Handles different structures returned by Commander API v2
  * @param {Object} rawData - Raw API response
  * @returns {Object|null} - Extracted approval details or null
  */
-function extractPedmApprovalData(rawData) {
+function extractEpmApprovalData(rawData) {
   if (!rawData) return null;
 
   // Structure 1: Direct data array - { status: 'success', data: [...] }
@@ -729,7 +729,7 @@ function extractPedmApprovalData(rawData) {
   if (rawData.output && typeof rawData.output === 'string') {
     try {
       const parsed = JSON.parse(rawData.output);
-      return extractPedmApprovalData(parsed); // Recursively extract from parsed output
+      return extractEpmApprovalData(parsed); // Recursively extract from parsed output
     } catch (e) {
       // Not JSON, ignore
     }
@@ -739,11 +739,11 @@ function extractPedmApprovalData(rawData) {
 }
 
 /**
- * Fetch PEDM approval details from Keeper API with auto-sync fallback
+ * Fetch EPM approval details from Keeper API with auto-sync fallback
  * @param {string} requestUid - The request UID to fetch details for
  * @returns {Promise<Object|null>} - Approval details or null if failed
  */
-export async function fetchPedmApprovalDetails(requestUid) {
+export async function fetchEpmApprovalDetails(requestUid) {
   try {
     const keeperConfig = await storage.get('keeperConfig');
     if (!keeperConfig || !keeperConfig.apiUrl || !keeperConfig.apiKey) {
@@ -752,7 +752,7 @@ export async function fetchPedmApprovalDetails(requestUid) {
 
     const { apiUrl, apiKey } = keeperConfig;
     const baseUrl = normalizeApiUrl(apiUrl);
-    const viewCommand = `pedm approval view ${requestUid} --format=json`;
+    const viewCommand = `epm approval view ${requestUid} --format=json`;
 
     // Execute view command using API v2
     let rawData;
@@ -769,7 +769,7 @@ export async function fetchPedmApprovalDetails(requestUid) {
 
       // Try sync-down and retry
       try {
-        await executeCommandAsync(baseUrl, apiKey, 'pedm sync-down');
+        await executeCommandAsync(baseUrl, apiKey, 'epm sync-down');
       } catch (syncError) {
         return null;
       }
@@ -786,7 +786,7 @@ export async function fetchPedmApprovalDetails(requestUid) {
     }
 
     // Extract approval data from various possible response structures
-    const approvalData = extractPedmApprovalData(rawData);
+    const approvalData = extractEpmApprovalData(rawData);
     
     return approvalData || null;
   } catch (error) {

@@ -52,11 +52,11 @@ const ERROR_CODES = {
   KEEPER_QUEUE_FULL: 'KEEPER_QUEUE_FULL',
   KEEPER_TIMEOUT: 'KEEPER_TIMEOUT',
   
-  // PEDM-specific Errors
-  PEDM_ALREADY_APPROVED: 'PEDM_ALREADY_APPROVED',
-  PEDM_ALREADY_DENIED: 'PEDM_ALREADY_DENIED',
-  PEDM_EXPIRED: 'PEDM_EXPIRED',
-  PEDM_INVALID_UID: 'PEDM_INVALID_UID',
+  // EPM-specific Errors (Endpoint Privilege Manager)
+  EPM_ALREADY_APPROVED: 'EPM_ALREADY_APPROVED',
+  EPM_ALREADY_DENIED: 'EPM_ALREADY_DENIED',
+  EPM_EXPIRED: 'EPM_EXPIRED',
+  EPM_INVALID_UID: 'EPM_INVALID_UID',
   
   // Jira API Errors
   JIRA_API_ERROR: 'JIRA_API_ERROR',
@@ -175,16 +175,16 @@ const TROUBLESHOOTING = {
     'Try again in a few moments'
   ],
   
-  // PEDM
-  [ERROR_CODES.PEDM_ALREADY_APPROVED]: [
+  // EPM (Endpoint Privilege Manager)
+  [ERROR_CODES.EPM_ALREADY_APPROVED]: [
     'This approval request has already been processed',
     'No further action is needed'
   ],
-  [ERROR_CODES.PEDM_ALREADY_DENIED]: [
+  [ERROR_CODES.EPM_ALREADY_DENIED]: [
     'This approval request has already been denied',
     'A new request must be submitted if access is still needed'
   ],
-  [ERROR_CODES.PEDM_EXPIRED]: [
+  [ERROR_CODES.EPM_EXPIRED]: [
     'This approval request has expired',
     'The user must submit a new access request'
   ],
@@ -379,16 +379,16 @@ function keeperError(message, originalError = null) {
 }
 
 /**
- * Create a PEDM-specific error response
+ * Create an EPM-specific error response (Endpoint Privilege Manager)
  * @param {string} type - 'approved', 'denied', or 'expired'
  * @param {string} message - Optional custom message
- * @returns {Object} Structured PEDM error response
+ * @returns {Object} Structured EPM error response
  */
-function pedmError(type, message = null) {
+function epmError(type, message = null) {
   const codeMap = {
-    approved: ERROR_CODES.PEDM_ALREADY_APPROVED,
-    denied: ERROR_CODES.PEDM_ALREADY_DENIED,
-    expired: ERROR_CODES.PEDM_EXPIRED
+    approved: ERROR_CODES.EPM_ALREADY_APPROVED,
+    denied: ERROR_CODES.EPM_ALREADY_DENIED,
+    expired: ERROR_CODES.EPM_EXPIRED
   };
   
   const messageMap = {
@@ -398,7 +398,7 @@ function pedmError(type, message = null) {
   };
   
   const code = codeMap[type] || ERROR_CODES.INTERNAL_ERROR;
-  const defaultMessage = messageMap[type] || 'Unknown PEDM error';
+  const defaultMessage = messageMap[type] || 'Unknown EPM error';
   
   return errorResponse(code, message || defaultMessage);
 }
@@ -448,13 +448,13 @@ function errorFromException(error) {
   
   // Detect error type from message
   if (lowerMessage.includes('approval request has already been approved')) {
-    return pedmError('approved', message);
+    return epmError('approved', message);
   }
   if (lowerMessage.includes('approval request has already been denied')) {
-    return pedmError('denied', message);
+    return epmError('denied', message);
   }
   if (lowerMessage.includes('expired')) {
-    return pedmError('expired', message);
+    return epmError('expired', message);
   }
   if (lowerMessage.includes('rate limit')) {
     return errorResponse(ERROR_CODES.RATE_LIMIT_EXCEEDED, message);
@@ -489,7 +489,7 @@ module.exports = {
   rateLimitError,
   connectionError,
   keeperError,
-  pedmError,
+  epmError,
   withErrorHandling,
   errorFromException
 };

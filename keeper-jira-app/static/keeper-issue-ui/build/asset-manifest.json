@@ -1,8 +1,8 @@
 {
   "files": {
-    "main.css": "./static/css/main.dc95f46c.css",
-    "main.js": "./static/js/main.f700c558.js",
-    "@atlaskit-internal_atlassian-custom-theme.js": "./static/js/@atlaskit-internal_atlassian-custom-theme.e17081bc.chunk.js",
+    "main.css": "./static/css/main.cbdf14c3.css",
+    "main.js": "./static/js/main.4df26ce0.js",
+    "@atlaskit-internal_atlassian-custom-theme.js": "./static/js/@atlaskit-internal_atlassian-custom-theme.9c96b164.chunk.js",
     "@atlaskit-internal_atlassian-light.js": "./static/js/@atlaskit-internal_atlassian-light.33de4736.chunk.js",
     "@atlaskit-internal_atlassian-light-future.js": "./static/js/@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js",
     "@atlaskit-internal_atlassian-light-increased-contrast.js": "./static/js/@atlaskit-internal_atlassian-light-increased-contrast.06755506.chunk.js",
@@ -15,9 +15,9 @@
     "@atlaskit-internal_atlassian-typography.js": "./static/js/@atlaskit-internal_atlassian-typography.d38dbd79.chunk.js",
     "@atlaskit-internal_atlassian-shape.js": "./static/js/@atlaskit-internal_atlassian-shape.39d91485.chunk.js",
     "index.html": "./index.html",
-    "main.dc95f46c.css.map": "./static/css/main.dc95f46c.css.map",
-    "main.f700c558.js.map": "./static/js/main.f700c558.js.map",
-    "@atlaskit-internal_atlassian-custom-theme.e17081bc.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-custom-theme.e17081bc.chunk.js.map",
+    "main.cbdf14c3.css.map": "./static/css/main.cbdf14c3.css.map",
+    "main.4df26ce0.js.map": "./static/js/main.4df26ce0.js.map",
+    "@atlaskit-internal_atlassian-custom-theme.9c96b164.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-custom-theme.9c96b164.chunk.js.map",
     "@atlaskit-internal_atlassian-light.33de4736.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light.33de4736.chunk.js.map",
     "@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js.map",
     "@atlaskit-internal_atlassian-light-increased-contrast.06755506.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light-increased-contrast.06755506.chunk.js.map",
@@ -31,7 +31,7 @@
     "@atlaskit-internal_atlassian-shape.39d91485.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-shape.39d91485.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.dc95f46c.css",
-    "static/js/main.f700c558.js"
+    "static/css/main.cbdf14c3.css",
+    "static/js/main.4df26ce0.js"
   ]
 }

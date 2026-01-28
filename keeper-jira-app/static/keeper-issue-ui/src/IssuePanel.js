@@ -13,7 +13,7 @@ import CrossIcon from "@atlaskit/icon/glyph/cross";
 import { KEEPER_ACTION_OPTIONS, PAGINATION_SETTINGS } from "./constants";
 import * as api from "./services/api";
 import { handleApiError as handleApiErrorUtil, isStructuredError, getErrorCode } from "./utils/errorHandler";
-import PedmApprovalPanel from "./components/issue/PedmApprovalPanel";
+import EpmApprovalPanel from "./components/issue/EpmApprovalPanel";
 import "./styles/IssuePanel.css";
 
 // Keeper action options - using imported constant
@@ -4405,9 +4405,9 @@ const IssuePanel = () => {
     );
   }
 
-  // Show custom PEDM UI for webhook-created tickets when user is admin
+  // Show custom EPM UI for webhook-created tickets when user is admin
   if (isRestrictedWebhookTicket && isAdmin) {
-    return <PedmApprovalPanel issueContext={issueContext} />;
+    return <EpmApprovalPanel issueContext={issueContext} />;
   }
 
   const rootClassName = `app-root ${

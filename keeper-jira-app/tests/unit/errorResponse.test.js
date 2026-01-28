@@ -13,7 +13,7 @@ const {
   rateLimitError,
   connectionError,
   keeperError,
-  pedmError,
+  epmError,
   errorFromException
 } = require('../../src/modules/utils/errorResponse');
 
@@ -170,26 +170,26 @@ describe('keeperError', () => {
   });
 });
 
-describe('pedmError', () => {
+describe('epmError', () => {
   test('creates approved error', () => {
-    const result = pedmError('approved');
+    const result = epmError('approved');
     expect(result.success).toBe(false);
-    expect(result.error).toBe(ERROR_CODES.PEDM_ALREADY_APPROVED);
+    expect(result.error).toBe(ERROR_CODES.EPM_ALREADY_APPROVED);
     expect(result.message).toContain('already been approved');
   });
 
   test('creates denied error', () => {
-    const result = pedmError('denied');
-    expect(result.error).toBe(ERROR_CODES.PEDM_ALREADY_DENIED);
+    const result = epmError('denied');
+    expect(result.error).toBe(ERROR_CODES.EPM_ALREADY_DENIED);
   });
 
   test('creates expired error', () => {
-    const result = pedmError('expired');
-    expect(result.error).toBe(ERROR_CODES.PEDM_EXPIRED);
+    const result = epmError('expired');
+    expect(result.error).toBe(ERROR_CODES.EPM_EXPIRED);
   });
 
   test('accepts custom message', () => {
-    const result = pedmError('approved', 'Custom message');
+    const result = epmError('approved', 'Custom message');
     expect(result.message).toBe('Custom message');
   });
 });
@@ -202,7 +202,7 @@ describe('errorFromException', () => {
   test('converts approval approved error', () => {
     const error = new Error('This approval request has already been approved');
     const result = errorFromException(error);
-    expect(result.error).toBe(ERROR_CODES.PEDM_ALREADY_APPROVED);
+    expect(result.error).toBe(ERROR_CODES.EPM_ALREADY_APPROVED);
   });
 
   test('converts rate limit error', () => {
@@ -258,9 +258,9 @@ describe('ERROR_CODES', () => {
     expect(ERROR_CODES.KEEPER_RECORD_NOT_FOUND).toBeDefined();
   });
 
-  test('has all required PEDM codes', () => {
-    expect(ERROR_CODES.PEDM_ALREADY_APPROVED).toBeDefined();
-    expect(ERROR_CODES.PEDM_ALREADY_DENIED).toBeDefined();
-    expect(ERROR_CODES.PEDM_EXPIRED).toBeDefined();
+  test('has all required EPM codes', () => {
+    expect(ERROR_CODES.EPM_ALREADY_APPROVED).toBeDefined();
+    expect(ERROR_CODES.EPM_ALREADY_DENIED).toBeDefined();
+    expect(ERROR_CODES.EPM_EXPIRED).toBeDefined();
   });
 });

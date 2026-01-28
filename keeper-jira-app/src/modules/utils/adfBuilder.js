@@ -15,7 +15,7 @@ import {
 } from './sensitiveDataRedactor.js';
 
 /**
- * Build enriched ticket description from PEDM approval details
+ * Build enriched ticket description from EPM approval details
  * Applies redaction to sensitive data (Issue #10)
  */
 export function buildEnrichedTicketDescription(approvalDetails, payload) {

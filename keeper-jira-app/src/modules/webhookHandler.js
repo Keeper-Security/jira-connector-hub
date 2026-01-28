@@ -10,11 +10,11 @@
  */
 
 import { storage } from '@forge/api';
-import { fetchPedmApprovalDetails } from './keeperApi.js';
+import { fetchEpmApprovalDetails } from './keeperApi.js';
 import { buildEnrichedTicketDescription, buildBasicTicketDescription } from './utils/adfBuilder.js';
 import { buildTicketLabels } from './utils/labelBuilder.js';
 import { requestJiraAsAppWithRetry, route } from './utils/jiraApiRetry.js';
-import { createWebhookLogger, logger } from './utils/logger.js';
+import { logger } from './utils/logger.js';
 
 // ============================================================================
 // Security Configuration
@@ -320,11 +320,11 @@ function validatePayloadSchema(payload) {
     return { valid: false, error: 'Invalid payload: must be a JSON object' };
   }
   
-  // For PEDM approval requests, validate required fields
+  // For EPM approval requests, validate required fields
   if (payload.category === 'endpoint_privilege_manager' && 
       payload.audit_event === 'approval_request_created') {
     
-    // request_uid is required for PEDM approval requests
+    // request_uid is required for EPM approval requests
     if (!payload.request_uid && !payload.requestUid) {
       return { 
         valid: false, 
@@ -411,16 +411,15 @@ function getSourceIdentifier(request) {
  */
 export async function webTriggerHandler(request) {
   const sourceId = getSourceIdentifier(request);
-  const log = createWebhookLogger(request, sourceId);
   
-  log.info('Webhook received', { method: request.method });
+  logger.info('webTrigger: Webhook received', { sourceId, method: request.method });
   
   try {
     // Get the web trigger configuration (with retry for 429 errors)
     const config = await storageGetWithRetry('webTriggerConfig');
     
     if (!config || !config.projectKey || !config.issueType) {
-      log.warn('Webhook rejected - not configured');
+      logger.warn('webTrigger: Webhook rejected - not configured', { sourceId });
       await logWebhookAttempt({
         source: sourceId,
         status: 'rejected',
@@ -441,7 +440,7 @@ export async function webTriggerHandler(request) {
     // ========================================================================
     const tokenValidation = validateWebhookToken(request, config);
     if (!tokenValidation.valid) {
-      log.warn('Webhook rejected - invalid token', { error: tokenValidation.error });
+      logger.warn('webTrigger: Webhook rejected - invalid token', { sourceId, error: tokenValidation.error });
       await logWebhookAttempt({
         source: sourceId,
         status: 'rejected',
@@ -463,7 +462,8 @@ export async function webTriggerHandler(request) {
     // ========================================================================
     const rateLimit = await checkRateLimit(sourceId);
     if (!rateLimit.allowed) {
-      log.warn('Webhook rejected - rate limited', { 
+      logger.warn('webTrigger: Webhook rejected - rate limited', { 
+        sourceId,
         remaining: rateLimit.remaining, 
         resetAt: rateLimit.resetAt 
       });
@@ -636,8 +636,8 @@ export async function webTriggerHandler(request) {
       created: new Date().toISOString()
     });
     
-    // Fetch detailed PEDM approval data from Keeper API
-    const approvalDetails = await fetchPedmApprovalDetails(requestUid);
+    // Fetch detailed EPM approval data from Keeper API
+    const approvalDetails = await fetchEpmApprovalDetails(requestUid);
     
     // Build ticket summary and description based on available data
     let summary;
@@ -699,7 +699,7 @@ export async function webTriggerHandler(request) {
       created: new Date().toISOString()
     });
     
-    // For PEDM approval requests, assign to a project admin
+    // For EPM approval requests, assign to a project admin
     if (payload.category === 'endpoint_privilege_manager' && payload.audit_event === 'approval_request_created') {
       try {
         await assignToProjectAdmin(config.projectKey, issue.key);
@@ -709,7 +709,8 @@ export async function webTriggerHandler(request) {
     }
     
     // Log successful webhook processing
-    log.info('Webhook processed successfully - ticket created', {
+    logger.info('webTrigger: Webhook processed successfully - ticket created', {
+      sourceId,
       issueKey: issue.key,
       issueId: issue.id,
       requestUid: requestUid,
@@ -742,7 +743,7 @@ export async function webTriggerHandler(request) {
     
   } catch (error) {
     // Log the error
-    log.error('Webhook processing failed', error);
+    logger.error('webTrigger: Webhook processing failed', { sourceId, error: error.message });
     
     await logWebhookAttempt({
       source: sourceId,
