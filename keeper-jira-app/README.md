@@ -7,20 +7,35 @@ A powerful Atlassian Forge application that integrates Keeper Security's vault m
 ### Vault Operations from Jira Issues
 - **Create New Secrets** - Add login credentials, secure notes, and other record types directly from Jira
 - **Update Records** - Modify existing vault records including passwords, usernames, and custom fields
-- **Share Records** - Grant or revoke user access to individual records with configurable permissions
+- **Share Records** - Grant or revoke user access to individual records with configurable permissions and expiration
 - **Share Folders** - Manage folder-level access and permissions for users or teams
 - **Record Permissions** - Control granular permissions within shared folders
 
-### Endpoint Privilege Management (PEDM)
-- Automated ticket creation for Keeper Security PEDM alerts via webhooks
-- Real-time approval workflows with Approve/Deny action buttons
-- Live countdown timers for time-sensitive approval requests
+### Keeper Endpoint Privilege Manager (KEPM)
+- Automated ticket creation for Keeper Security KEPM alerts via webhooks
+- Real-time approval workflows with **Approve/Deny** action buttons
+- **Live countdown timer** showing time remaining before request expiration (30 minutes)
+- Auto-detection of expired requests with automatic comment posting
+- Duplicate webhook prevention using unique request UIDs
 - Enriched ticket details with user context and justification messages
+- Automatic ticket assignment to project administrators
 
-### Centralized Configuration
-- Global settings page for API configuration
+### Centralized Configuration (Global Settings)
+- API URL and API Key configuration with validation
 - Built-in connection verification and status monitoring
-- Web trigger configuration for PEDM webhook integration
+- URL pattern validation (ngrok, Cloudflare tunnels, custom domains)
+
+### Webhook Configuration
+- Secure webhook endpoint for Keeper KEPM alerts
+- **Token-based authentication** (`Authorization: Bearer <token>`)
+- Token generation and revocation from UI
+- Webhook audit logs (last 100 entries)
+- Test webhook functionality with sample payloads
+- View webhook-created tickets
+
+### Rate Limiting
+- **Keeper Commands**: 5 per minute, 50 per hour (per user)
+- **Webhooks**: 50 per hour (per source IP)
 
 ## Architecture
 
@@ -63,7 +78,8 @@ A powerful Atlassian Forge application that integrates Keeper Security's vault m
 ### 1. Install the Forge App
 
 ```bash
-# Install dependencies
+# Install dependencies (from keeper-jira-app directory)
+cd keeper-jira-app
 npm install
 
 # Build the UI components
@@ -97,7 +113,7 @@ this-device timeout 30d
 ```bash
 keeper service-create \
   -p=9009 \
-  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" \
+  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" \
   -rm="foreground" \
   -q=y \
   -f=json
@@ -107,7 +123,7 @@ keeper service-create \
 ```bash
 keeper service-create \
   -p=9009 \
-  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" \
+  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" \
   -rm="foreground" \
   -q=y \
   -ng="<ngrok-auth-token>" \
@@ -116,10 +132,13 @@ keeper service-create \
 ```
 
 **With Cloudflare Tunneling (Built-in):**
+
+> **Note:** Cloudflare tunnel flags (`-cf`, `-cfd`) require Keeper Commander CLI version 17.2.0 or later. Check your version with `keeper --version`.
+
 ```bash
 keeper service-create \
   -p=9009 \
-  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" \
+  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" \
   -rm="foreground" \
   -q=y \
   -cf="<cloudflare-tunnel-token>" \
@@ -154,10 +173,58 @@ This integration uses **Keeper Commander API v2** (async queue mode), which prov
 
 | Setting | Value |
 |---------|-------|
-| Commands List | `record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status` |
+| Commands List | `record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status` |
 | Queue System | `-q y` (Required for API v2) |
 | Run Mode | `-rm foreground` |
 | Output Format | `-f json` |
+
+## Webhook Setup (KEPM Integration)
+
+To receive KEPM approval requests from Keeper Security:
+
+### 1. Configure Webhook Target
+
+1. Navigate to **Jira Settings → Apps → Keeper → Webhook Configuration**
+2. Select the **Target Project** where tickets will be created
+3. Select the **Issue Type** for KEPM tickets
+4. Click **Save Configuration**
+
+### 2. Generate Authentication Token
+
+1. Click **Generate Token** to create a secure webhook token
+2. Copy the token (shown only once) or the full `Authorization` header
+3. The webhook URL is displayed at the top of the configuration panel
+
+### 3. Configure Keeper Security
+
+In your Keeper Security admin console, configure the webhook with:
+
+| Setting | Value |
+|---------|-------|
+| URL | The webhook URL from step 2 |
+| Method | `POST` |
+| Content-Type | `application/json` |
+| Authorization Header | `Bearer <your-token>` |
+
+**Example webhook request:**
+```bash
+curl -X POST "https://your-webhook-url" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-token>" \
+  -d '{
+    "category": "endpoint_privilege_manager",
+    "audit_event": "approval_request_created",
+    "request_uid": "abc123..."
+  }'
+```
+
+### Webhook Security Features
+
+- **Token Authentication**: All requests must include valid `Authorization: Bearer <token>` header
+- **Rate Limiting**: Maximum 50 requests per hour per source IP
+- **Payload Validation**: Schema validation for KEPM events
+- **Duplicate Prevention**: Requests with same `request_uid` return existing ticket instead of creating duplicates
+- **Audit Logging**: Last 100 webhook attempts are logged for debugging
 
 ## Permissions
 
@@ -181,16 +248,28 @@ This integration uses **Keeper Commander API v2** (async queue mode), which prov
 
 ```
 keeper-jira-app/
-├── manifest.yml              # Forge app manifest
+├── manifest.yml                  # Forge app manifest
 ├── src/
-│   ├── index.js              # Main resolver functions
+│   ├── index.js                  # Main resolver functions (34 resolvers)
 │   └── modules/
-│       ├── keeperApi.js      # Keeper API v2 integration
-│       ├── webhookHandler.js # PEDM webhook processing
-│       └── utils/            # Utility functions
+│       ├── keeperApi.js          # Keeper API v2 integration with rate limiting
+│       ├── webhookHandler.js     # KEPM webhook processing with security
+│       └── utils/
+│           ├── logger.js         # Simple logger with sensitive data redaction
+│           ├── errorResponse.js  # Structured error responses
+│           ├── jiraApiRetry.js   # Jira API retry with exponential backoff
+│           ├── adfBuilder.js     # Atlassian Document Format builders
+│           ├── labelBuilder.js   # Jira label generation
+│           └── commandBuilder.js # Keeper CLI command construction
 └── static/
-    ├── keeper-ui/            # Global page React app
-    └── keeper-issue-ui/      # Issue panel React app
+    ├── keeper-ui/                # Global settings page (React)
+    │   └── src/components/
+    │       ├── config/           # ConfigForm, WebTriggerConfig, WebhookTicketsTable
+    │       └── common/           # Loading, StatusMessage, TabBar
+    └── keeper-issue-ui/          # Issue panel (React)
+        └── src/components/
+            ├── issue/            # ActionSelector, EpmApprovalPanel
+            └── common/           # Dropdown, Loading, Modal, StatusMessage
 ```
 
 ### Building
@@ -218,6 +297,62 @@ forge deploy -e staging
 # Deploy to production
 forge deploy -e production
 ```
+
+### Viewing Logs
+
+```bash
+# View recent logs
+forge logs
+
+# View logs with full details
+forge logs --verbose
+
+# View grouped logs (recommended)
+forge logs --verbose --grouped
+
+# Tail logs in real-time
+forge logs -f
+```
+
+## Troubleshooting
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Connection failed` | Tunnel not running or URL incorrect | Start ngrok/Cloudflare tunnel, verify API URL in settings |
+| `Rate limit exceeded` | Too many commands in time window | Wait for rate limit to reset (shown in error message) |
+| `Invalid authentication token` | Wrong or missing Bearer token | Regenerate token in Webhook Configuration |
+| `Webhook not configured` | Missing project/issue type selection | Complete Webhook Configuration setup |
+| `Queue is full` | Commander queue capacity reached | Wait for pending requests to complete |
+| `Request expired` | KEPM approval request timed out | User must submit a new access request |
+
+### Tunnel Troubleshooting
+
+**ngrok:**
+```bash
+# Check ngrok status
+curl https://your-subdomain.ngrok.io/api/v2/status
+
+# Restart ngrok with same domain
+ngrok http 9009 --domain=your-subdomain.ngrok.io
+```
+
+**Cloudflare:**
+```bash
+# Check tunnel status
+cloudflared tunnel info <tunnel-name>
+
+# Restart tunnel
+cloudflared tunnel run <tunnel-name>
+```
+
+### Connection Issues
+
+1. **Verify Commander is running**: Check that `keeper service-create` is active
+2. **Test locally first**: `curl http://localhost:9009/api/v2/status` should return JSON
+3. **Check tunnel logs**: Look for connection errors in ngrok/Cloudflare output
+4. **Verify API URL format**: Must be `https://your-tunnel/api/v2` (include `/api/v2`)
 
 ## Documentation
 

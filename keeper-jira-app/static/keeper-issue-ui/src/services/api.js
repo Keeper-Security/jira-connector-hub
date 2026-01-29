@@ -91,15 +91,15 @@ export const getWebhookPayload = async (issueKey) => {
   return await invoke("getWebhookPayload", { issueKey });
 };
 
-export const addPedmExpiredComment = async (issueKey, formattedTimestamp) => {
-  return await invoke("addPedmExpiredComment", { issueKey, formattedTimestamp });
+export const addEpmExpiredComment = async (issueKey, formattedTimestamp) => {
+  return await invoke("addEpmExpiredComment", { issueKey, formattedTimestamp });
 };
 
-export const checkPedmExpired = async (issueKey) => {
-  return await invoke("checkPedmExpired", { issueKey });
+export const checkEpmExpired = async (issueKey) => {
+  return await invoke("checkEpmExpired", { issueKey });
 };
 
-export const checkPedmActionTaken = async (issueKey) => {
-  return await invoke("checkPedmActionTaken", { issueKey });
+export const checkEpmActionTaken = async (issueKey) => {
+  return await invoke("checkEpmActionTaken", { issueKey });
 };
 

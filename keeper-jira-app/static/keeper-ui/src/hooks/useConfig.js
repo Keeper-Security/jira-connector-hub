@@ -3,7 +3,7 @@
  */
 import { useState, useEffect } from 'react';
 import * as api from '../services/api';
-import { handleApiError, getConnectionErrorContext } from '../utils/errorHandler';
+import { handleApiError, getConnectionErrorContext, isStructuredError } from '../utils/errorHandler';
 import { MESSAGE_TYPES, COPY_MESSAGE_TIMEOUT } from '../constants';
 
 export const useConfig = () => {
@@ -62,7 +62,19 @@ export const useConfig = () => {
   // Handle form submission
   const handleSubmit = async (data) => {
     try {
-      await api.saveConfig(data);
+      const result = await api.saveConfig(data);
+      
+      // Check for structured error response (new pattern)
+      if (isStructuredError(result)) {
+        const errorMessage = handleApiError(result, "Failed to save configuration. Please try again.");
+        setStatusMessage({
+          type: MESSAGE_TYPES.ERROR,
+          title: 'Save Failed',
+          message: errorMessage
+        });
+        setTimeout(() => setStatusMessage(null), 8000);
+        return;
+      }
       
       setFormValues({
         apiUrl: data.apiUrl || "",
@@ -77,12 +89,26 @@ export const useConfig = () => {
       setHasExistingConfig(true);
       setConnectionTested(true);
       
-      setStatusMessage({
-        type: MESSAGE_TYPES.SUCCESS,
-        title: 'Configuration Saved!',
-        message: `Keeper configuration ${hasExistingConfig ? 'updated' : 'saved'} successfully.`
-      });
-      setTimeout(() => setStatusMessage(null), 5000);
+      // Build success message, including any warnings from the server
+      let successMessage = `Keeper configuration ${hasExistingConfig ? 'updated' : 'saved'} successfully.`;
+      
+      // Check for warnings returned from the API (e.g., free-tier URL warnings)
+      if (result && result.warnings && result.warnings.length > 0) {
+        successMessage += '\n\nWarning: ' + result.warnings.join('\nWarning: ');
+        setStatusMessage({
+          type: MESSAGE_TYPES.WARNING,
+          title: 'Configuration Saved with Warnings',
+          message: successMessage
+        });
+        setTimeout(() => setStatusMessage(null), 10000); // Longer timeout for warnings
+      } else {
+        setStatusMessage({
+          type: MESSAGE_TYPES.SUCCESS,
+          title: 'Configuration Saved!',
+          message: successMessage
+        });
+        setTimeout(() => setStatusMessage(null), 5000);
+      }
     } catch (error) {
       const errorMessage = handleApiError(error, "Failed to save configuration. Please try again.");
       setStatusMessage({
@@ -114,6 +140,21 @@ export const useConfig = () => {
 
     try {
       const result = await api.testConnection(currentApiUrl, currentApiKey);
+      
+      // Check for structured error response (new pattern)
+      if (isStructuredError(result)) {
+        let errorMessage = handleApiError(result, 'Connection test failed');
+        errorMessage = getConnectionErrorContext(errorMessage, result);
+        
+        setStatusMessage({
+          type: MESSAGE_TYPES.ERROR,
+          title: 'Connection Failed',
+          message: errorMessage
+        });
+        setConnectionTested(false);
+        setTimeout(() => setStatusMessage(null), 8000);
+        return;
+      }
       
       let successMessage = '';
       if (result.isServiceRunning) {

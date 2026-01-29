@@ -3432,7 +3432,7 @@ textarea.input-field {
   box-sizing: border-box;
 }
 
-/* PEDM Approval Panel Styles */
+/* EPM Approval Panel Styles */
 .app-body {
   padding: 0;
 }
@@ -3463,8 +3463,8 @@ textarea.input-field {
   padding-right: 28px;
 }
 
-/* PEDM Timer */
-.pedm-timer {
+/* EPM Timer */
+.epm-timer {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid #B3D4FF;
@@ -3473,13 +3473,13 @@ textarea.input-field {
   font-weight: 500;
 }
 
-.pedm-timer strong {
+.epm-timer strong {
   font-weight: 700;
   color: #172B4D;
 }
 
-/* PEDM Action Buttons */
-.pedm-approve-btn {
+/* EPM Action Buttons */
+.epm-approve-btn {
   background-color: #5FAD56;
   color: #FFFFFF;
   font-weight: 600;
@@ -3493,16 +3493,16 @@ textarea.input-field {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-.pedm-approve-btn:disabled {
+.epm-approve-btn:disabled {
   cursor: not-allowed;
 }
 
-.pedm-btn-loading {
+.epm-btn-loading {
   background-color: #4A8F45;
   box-shadow: none;
 }
 
-.pedm-reject-btn {
+.epm-reject-btn {
   background-color: #E85D54;
   color: #FFFFFF;
   font-weight: 600;
@@ -3516,7 +3516,7 @@ textarea.input-field {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-.pedm-reject-btn:disabled {
+.epm-reject-btn:disabled {
   cursor: not-allowed;
 }
 
