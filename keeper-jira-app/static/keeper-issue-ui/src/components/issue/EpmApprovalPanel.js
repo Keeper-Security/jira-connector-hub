@@ -187,7 +187,7 @@ const EpmApprovalPanel = ({ issueContext }) => {
       const result = await api.executeKeeperAction(
         issueContext.issueKey,
         command,
-        `KEPM Approval: Approved request ${requestUid}`,
+        `EPM Approval: Approved request ${requestUid}`,
         { cliCommand: command },
         new Date().toLocaleString('en-US', {
           month: '2-digit',
@@ -236,7 +236,7 @@ const EpmApprovalPanel = ({ issueContext }) => {
       const result = await api.executeKeeperAction(
         issueContext.issueKey,
         command,
-        `KEPM Approval: Denied request ${requestUid}`,
+        `EPM Approval: Denied request ${requestUid}`,
         { cliCommand: command },
         new Date().toLocaleString('en-US', {
           month: '2-digit',

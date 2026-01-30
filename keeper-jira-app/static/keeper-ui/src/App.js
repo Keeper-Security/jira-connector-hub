@@ -341,7 +341,7 @@ this-device timeout 30d`}
 
               <div className="setup-help-box">
                 <p className="setup-help-text">
-                  <strong className="about-strong">Need Additional Help?</strong> For comprehensive setup instructions, troubleshooting guides, and advanced configuration options, visit the official Keeper documentation at <span onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/overview")} className="setup-help-link">docs.keeper.io</span>. For technical support, contact <span onClick={() => router.open("mailto:commander@keepersecurity.com")} className="setup-help-link">commander@keepersecurity.com</span>.
+                  <strong className="about-strong">Need Additional Help?</strong> For comprehensive setup instructions, troubleshooting guides, and advanced configuration options, visit the official Keeper documentation at <span onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/overview")} className="setup-help-link">docs.keeper.io</span>. For technical support, visit <span onClick={() => router.open("https://www.keepersecurity.com/support.html")} className="setup-help-link">keepersecurity.com/support</span>.
                 </p>
               </div>
             </>
@@ -376,7 +376,7 @@ this-device timeout 30d`}
                     Endpoint Privilege Management (Administrator Only)
                   </p>
                   <p className="about-feature-text">
-                    The Endpoint Privilege Manager tab provides administrators with the ability to configure automated ticket creation for Keeper Security KEPM (Keeper Endpoint Privilege Manager) alerts through webhooks. This feature enables real-time monitoring and approval workflows for privileged access requests across your organization.
+                    The Endpoint Privilege Manager tab provides administrators with the ability to configure automated ticket creation for Keeper Security EPM (Endpoint Privilege Manager) alerts through webhooks. This feature enables real-time monitoring and approval workflows for privileged access requests across your organization.
                   </p>
                 </div>
 
@@ -515,10 +515,10 @@ this-device timeout 30d`}
                   <p className="about-docs-item-last">
                     <strong>Technical Support:</strong>{" "}
                     <span 
-                      onClick={() => router.open("mailto:commander@keepersecurity.com")}
+                      onClick={() => router.open("https://www.keepersecurity.com/support.html")}
                       className="about-docs-link"
                     >
-                      commander@keepersecurity.com
+                      keepersecurity.com/support
                     </span>
                   </p>
                 </div>

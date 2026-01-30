@@ -3265,7 +3265,7 @@ resolver.define('getWebhookTickets', async (req) => {
           ticketDescription = jsonPayload.description;
         } else if (isEpmEnriched && jsonPayload.approval_type) {
           // For EPM tickets, create a meaningful description
-          ticketDescription = `${jsonPayload.approval_type || 'KEPM'} Request - ${requestUid || 'Unknown'}`;
+          ticketDescription = `${jsonPayload.approval_type || 'EPM'} Request - ${requestUid || 'Unknown'}`;
           if (username) {
             ticketDescription = `${username} - ${ticketDescription}`;
           }
@@ -3286,7 +3286,7 @@ resolver.define('getWebhookTickets', async (req) => {
         username: username,
         category: jsonPayload?.category || (isEpmEnriched ? 'endpoint_privilege_manager' : null),
         auditEvent: jsonPayload?.audit_event || (isEpmEnriched ? 'approval_request_created' : null),
-        alertName: jsonPayload?.alert_name || (isEpmEnriched ? 'KEPM Approval Request' : null)
+        alertName: jsonPayload?.alert_name || (isEpmEnriched ? 'EPM Approval Request' : null)
       };
     });
     

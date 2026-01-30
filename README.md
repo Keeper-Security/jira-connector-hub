@@ -1,4 +1,4 @@
-# Keeper for Jira
+# Keeper Security for Jira Cloud
 
 A powerful Atlassian Forge application that integrates Keeper Security's vault management platform with Jira Cloud. Manage credentials, secrets, and privileged access workflows directly from your Jira issues.
 
@@ -11,8 +11,8 @@ A powerful Atlassian Forge application that integrates Keeper Security's vault m
 - **Share Folders** - Manage folder-level access and permissions for users or teams
 - **Record Permissions** - Control granular permissions within shared folders
 
-### Keeper Endpoint Privilege Manager (KEPM)
-- Automated ticket creation for Keeper Security KEPM alerts via webhooks
+### Endpoint Privilege Manager (EPM)
+- Automated ticket creation for Keeper Security EPM alerts via webhooks
 - Real-time approval workflows with **Approve/Deny** action buttons
 - **Live countdown timer** showing time remaining before request expiration (30 minutes)
 - Auto-detection of expired requests with automatic comment posting
@@ -26,8 +26,8 @@ A powerful Atlassian Forge application that integrates Keeper Security's vault m
 - URL pattern validation (ngrok, Cloudflare tunnels, custom domains)
 
 ### Webhook Configuration
-- Secure webhook endpoint for Keeper KEPM alerts
-- **Token-based authentication** (`Authorization: Bearer <token>`)
+- Secure webhook endpoint for Keeper EPM alerts
+- Token-based authentication
 - Token generation and revocation from UI
 - Webhook audit logs (last 100 entries)
 - Test webhook functionality with sample payloads
@@ -178,21 +178,21 @@ This integration uses **Keeper Commander API v2** (async queue mode), which prov
 | Run Mode | `-rm foreground` |
 | Output Format | `-f json` |
 
-## Webhook Setup (KEPM Integration)
+## Webhook Setup (EPM Integration)
 
-To receive KEPM approval requests from Keeper Security:
+To receive EPM approval requests from Keeper Security:
 
 ### 1. Configure Webhook Target
 
 1. Navigate to **Jira Settings → Apps → Keeper → Webhook Configuration**
 2. Select the **Target Project** where tickets will be created
-3. Select the **Issue Type** for KEPM tickets
+3. Select the **Issue Type** for EPM tickets
 4. Click **Save Configuration**
 
 ### 2. Generate Authentication Token
 
 1. Click **Generate Token** to create a secure webhook token
-2. Copy the token (shown only once) or the full `Authorization` header
+2. Copy the token (shown only once)
 3. The webhook URL is displayed at the top of the configuration panel
 
 ### 3. Configure Keeper Security
@@ -202,9 +202,7 @@ In your Keeper Security admin console, configure the webhook with:
 | Setting | Value |
 |---------|-------|
 | URL | The webhook URL from step 2 |
-| Method | `POST` |
-| Content-Type | `application/json` |
-| Authorization Header | `Bearer <your-token>` |
+| Token | `<your-token>` |
 
 **Example webhook request:**
 ```bash
@@ -222,7 +220,7 @@ curl -X POST "https://your-webhook-url" \
 
 - **Token Authentication**: All requests must include valid `Authorization: Bearer <token>` header
 - **Rate Limiting**: Maximum 50 requests per hour per source IP
-- **Payload Validation**: Schema validation for KEPM events
+- **Payload Validation**: Schema validation for EPM events
 - **Duplicate Prevention**: Requests with same `request_uid` return existing ticket instead of creating duplicates
 - **Audit Logging**: Last 100 webhook attempts are logged for debugging
 
@@ -253,7 +251,7 @@ keeper-jira-app/
 │   ├── index.js                  # Main resolver functions (34 resolvers)
 │   └── modules/
 │       ├── keeperApi.js          # Keeper API v2 integration with rate limiting
-│       ├── webhookHandler.js     # KEPM webhook processing with security
+│       ├── webhookHandler.js     # EPM webhook processing with security
 │       └── utils/
 │           ├── logger.js         # Simple logger with sensitive data redaction
 │           ├── errorResponse.js  # Structured error responses
@@ -325,7 +323,7 @@ forge logs -f
 | `Invalid authentication token` | Wrong or missing Bearer token | Regenerate token in Webhook Configuration |
 | `Webhook not configured` | Missing project/issue type selection | Complete Webhook Configuration setup |
 | `Queue is full` | Commander queue capacity reached | Wait for pending requests to complete |
-| `Request expired` | KEPM approval request timed out | User must submit a new access request |
+| `Request expired` | EPM approval request timed out | User must submit a new access request |
 
 ### Tunnel Troubleshooting
 
@@ -356,17 +354,11 @@ cloudflared tunnel run <tunnel-name>
 
 ## Documentation
 
+- [Jira Workflow Documentation](https://docs.keeper.io/en/keeperpam/secrets-manager/integrations/jira-workflow)
 - [Keeper Commander CLI Documentation](https://docs.keeper.io/en/keeperpam/commander-cli/overview)
 - [Service Mode REST API](https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api)
-- [API v2 Usage Guide](https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api/api-usage)
 - [Atlassian Forge Platform](https://developer.atlassian.com/platform/forge/)
 
 ## Support
 
-- **Technical Support**: commander@keepersecurity.com
-- **Keeper Documentation**: [docs.keeper.io](https://docs.keeper.io)
-- **Forge Documentation**: [developer.atlassian.com/platform/forge](https://developer.atlassian.com/platform/forge/)
-
-## License
-
-MIT License - See LICENSE file for details.
+Please open a Github issue or contact Keeper [customer support](https://www.keepersecurity.com/support.html)
