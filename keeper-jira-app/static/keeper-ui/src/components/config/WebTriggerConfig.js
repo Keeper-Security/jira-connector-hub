@@ -168,14 +168,14 @@ const WebTriggerConfig = ({ statusMessage, setStatusMessage }) => {
     try {
       // Create test payload similar to what Keeper Security would send
       const testPayload = {
-        alert_name: 'Test KEPM Approval Request',
+        alert_name: 'Test EPM Approval Request',
         description: `Test approval request created from Keeper Security ITSM admin interface at ${new Date().toLocaleString()}`,
         audit_event: 'approval_request_created',
         remote_address: '192.168.1.100',
         timestamp: new Date().toISOString(),
         category: 'endpoint_privilege_manager',
         client_version: 'Server.0.0.0',
-        username: 'KEPM Test Agent',
+        username: 'EPM Test Agent',
         agent_uid: `test_agent_${Date.now()}`,
         request_uid: `test_req_${Date.now()}`,
         severity: 'medium',
