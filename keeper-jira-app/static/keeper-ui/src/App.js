@@ -21,7 +21,7 @@ const App = () => {
   const [activeTab, setActiveTab] = useState("config");
   const [isAdmin, setIsAdmin] = useState(false);
   const [isCheckingAdmin, setIsCheckingAdmin] = useState(true);
-  const [pedmStatusMessage, setPedmStatusMessage] = useState(null);
+  const [epmStatusMessage, setEpmStatusMessage] = useState(null);
   
   // Use custom hook for configuration management
   const configHook = useConfig();
@@ -81,7 +81,7 @@ const App = () => {
           )}
 
           {/* Endpoint Privilege Manager Tab - Web Trigger Configuration */}
-          {activeTab === "pedm" && (
+          {activeTab === "epm" && (
             <>
               <h2 className="config-tab-title">
                 Endpoint Privilege Manager
@@ -106,12 +106,12 @@ const App = () => {
               ) : (
                 <>
                   <StatusMessage 
-                    message={pedmStatusMessage} 
-                    onDismiss={() => setPedmStatusMessage(null)} 
+                    message={epmStatusMessage} 
+                    onDismiss={() => setEpmStatusMessage(null)} 
                   />
                   <WebTriggerConfig
-                    statusMessage={pedmStatusMessage}
-                    setStatusMessage={setPedmStatusMessage}
+                    statusMessage={epmStatusMessage}
+                    setStatusMessage={setEpmStatusMessage}
                   />
                 </>
               )}
@@ -225,7 +225,7 @@ const App = () => {
                       <tr>
                         <td>Commands List:</td>
                         <td>
-                          <code className="setup-code-white">record-add, list, ls, get, record-type-info, record-update, share-record, share-folder, rti, record-permission, pedm, service-status</code>
+                          <code className="setup-code-white">record-add, list, ls, get, record-type-info, record-update, share-record, share-folder, rti, record-permission, epm, service-status</code>
                         </td>
                       </tr>
                       <tr>
@@ -263,21 +263,21 @@ const App = () => {
                     Basic Deployment:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q y --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status' -f json -rm foreground -q y --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-subtitle-spacing">
                     With Ngrok Tunneling:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q y -ng &lt;ngrok-auth-token&gt; -cd &lt;custom-domain&gt; --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status' -f json -rm foreground -q y -ng &lt;ngrok-auth-token&gt; -cd &lt;custom-domain&gt; --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-subtitle-spacing">
                     With Cloudflare Tunneling:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status' -f json -rm foreground -q y -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status' -f json -rm foreground -q y -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-note">
@@ -309,21 +309,21 @@ this-device timeout 30d`}
                     Basic Service Creation:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=y -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" -rm="foreground" -q=y -f=json
                   </code>
                   
                   <p className="setup-cli-subtitle-bold">
                     With Ngrok Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=y -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" -rm="foreground" -q=y -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-subtitle-bold">
                     With Cloudflare Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,pedm,service-status" -rm="foreground" -q=y -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" -rm="foreground" -q=y -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-note">
@@ -341,7 +341,7 @@ this-device timeout 30d`}
 
               <div className="setup-help-box">
                 <p className="setup-help-text">
-                  <strong className="about-strong">Need Additional Help?</strong> For comprehensive setup instructions, troubleshooting guides, and advanced configuration options, visit the official Keeper documentation at <span onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/overview")} className="setup-help-link">docs.keeper.io</span>. For technical support, contact <span onClick={() => router.open("mailto:commander@keepersecurity.com")} className="setup-help-link">commander@keepersecurity.com</span>.
+                  <strong className="about-strong">Need Additional Help?</strong> For comprehensive setup instructions, troubleshooting guides, and advanced configuration options, visit the official Keeper documentation at <span onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/overview")} className="setup-help-link">docs.keeper.io</span>. For technical support, visit <span onClick={() => router.open("https://www.keepersecurity.com/support.html")} className="setup-help-link">keepersecurity.com/support</span>.
                 </p>
               </div>
             </>
@@ -376,7 +376,7 @@ this-device timeout 30d`}
                     Endpoint Privilege Management (Administrator Only)
                   </p>
                   <p className="about-feature-text">
-                    The Endpoint Privilege Manager tab provides administrators with the ability to configure automated ticket creation for Keeper Security KEPM (Keeper Endpoint Privilege Manager) alerts through webhooks. This feature enables real-time monitoring and approval workflows for privileged access requests across your organization.
+                    The Endpoint Privilege Manager tab provides administrators with the ability to configure automated ticket creation for Keeper Security EPM (Endpoint Privilege Manager) alerts through webhooks. This feature enables real-time monitoring and approval workflows for privileged access requests across your organization.
                   </p>
                 </div>
 
@@ -480,7 +480,7 @@ this-device timeout 30d`}
                     For Global Jira Administrators or Project Administrators, the integration provides advanced Endpoint Privilege Management capabilities through the dedicated tab. Monitor and manage privileged access requests across your organization with real-time approval workflows.
                   </p>
                   <p className="about-capability-text">
-                    <strong className="about-strong">How it works:</strong> Approval requests automatically create Jira tickets via webhooks. Each ticket includes Approve/Deny action buttons with live countdown timers, user details, application context, and justification messages. Commands used: <code className="about-code">pedm approval view</code> to fetch enriched request details, and <code className="about-code">pedm approval action --approve/--deny</code> to process approval decisions directly from Jira.
+                    <strong className="about-strong">How it works:</strong> Approval requests automatically create Jira tickets via webhooks. Each ticket includes Approve/Deny action buttons with live countdown timers, user details, application context, and justification messages. Commands used: <code className="about-code">epm approval view</code> to fetch enriched request details, and <code className="about-code">epm approval action --approve/--deny</code> to process approval decisions directly from Jira.
                   </p>
                 </div>
 
@@ -515,10 +515,10 @@ this-device timeout 30d`}
                   <p className="about-docs-item-last">
                     <strong>Technical Support:</strong>{" "}
                     <span 
-                      onClick={() => router.open("mailto:commander@keepersecurity.com")}
+                      onClick={() => router.open("https://www.keepersecurity.com/support.html")}
                       className="about-docs-link"
                     >
-                      commander@keepersecurity.com
+                      keepersecurity.com/support
                     </span>
                   </p>
                 </div>

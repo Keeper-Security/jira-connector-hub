@@ -1,12 +1,70 @@
-// Centralized error handler for API calls
+/**
+ * Centralized error handler for API calls
+ * 
+ * Supports both:
+ * 1. Structured error responses: { success: false, error: 'CODE', message: '...', troubleshooting: [...] }
+ * 2. Legacy thrown errors (for backward compatibility)
+ */
+
+// Helper function to check if content contains HTML
+const containsHtml = (text) => {
+  if (typeof text !== 'string') return false;
+  return /<\/?[a-z][\s\S]*>/i.test(text);
+};
+
+/**
+ * Check if a result is a structured error response
+ * @param {Object} result - API result
+ * @returns {boolean} - True if structured error
+ */
+export const isStructuredError = (result) => {
+  return result && typeof result === 'object' && result.success === false && result.error;
+};
+
+/**
+ * Format troubleshooting steps for display
+ * @param {Array<string>} steps - Troubleshooting steps
+ * @returns {string} - Formatted string
+ */
+export const formatTroubleshooting = (steps) => {
+  if (!steps || !Array.isArray(steps) || steps.length === 0) {
+    return '';
+  }
+  return '\n\nTroubleshooting:\n• ' + steps.join('\n• ');
+};
+
+/**
+ * Get the error code from a structured error
+ * @param {Object} error - Error object
+ * @returns {string|null} - Error code or null
+ */
+export const getErrorCode = (error) => {
+  if (isStructuredError(error)) {
+    return error.error;
+  }
+  return null;
+};
+
+/**
+ * Centralized error handler for API calls
+ * @param {Object} error - Error object or structured error response
+ * @param {string} defaultMessage - Default error message
+ * @returns {string} - Formatted error message
+ */
 export const handleApiError = (error, defaultMessage = "An error occurred") => {
-  // Helper function to check if content contains HTML
-  const containsHtml = (text) => {
-    if (typeof text !== 'string') return false;
-    return /<\/?[a-z][\s\S]*>/i.test(text);
-  };
+  // Handle structured error responses (new pattern)
+  if (isStructuredError(error)) {
+    let message = error.message || defaultMessage;
+    
+    // Include troubleshooting steps if available
+    if (error.troubleshooting && error.troubleshooting.length > 0) {
+      message += formatTroubleshooting(error.troubleshooting);
+    }
+    
+    return message;
+  }
   
-  // Try to extract error message from various possible locations
+  // Legacy error handling for thrown errors
   let errorMessage = '';
   
   // Check if error is a string - skip if it contains HTML

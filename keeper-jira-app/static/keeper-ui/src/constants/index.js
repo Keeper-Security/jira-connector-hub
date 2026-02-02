@@ -13,7 +13,7 @@ export const MESSAGE_TYPES = {
 // Tab names
 export const TABS = {
   CONFIG: 'config',
-  PEDM: 'pedm',
+  EPM: 'epm',
   PREREQ: 'prereq',
   ABOUT: 'about'
 };

@@ -24,6 +24,14 @@ const WebTriggerConfig = ({ statusMessage, setStatusMessage }) => {
   const [isTesting, setIsTesting] = useState(false);
   const [showCopiedMessage, setShowCopiedMessage] = useState(false);
   const [showTicketsTable, setShowTicketsTable] = useState(false);
+  
+  // Token management state
+  const [webhookToken, setWebhookToken] = useState('');
+  const [isTokenEnabled, setIsTokenEnabled] = useState(false);
+  const [isGeneratingToken, setIsGeneratingToken] = useState(false);
+  const [isRevokingToken, setIsRevokingToken] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+  const [showTokenCopied, setShowTokenCopied] = useState(false);
 
   // Load web trigger URL and configuration on mount
   useEffect(() => {
@@ -60,6 +68,12 @@ const WebTriggerConfig = ({ statusMessage, setStatusMessage }) => {
             // Load issue types for saved project
             await loadIssueTypes(configResult.projectKey, configResult.issueType);
           }
+        }
+        
+        // Check if token is enabled (token exists in config)
+        if (configResult && configResult.hasWebhookToken) {
+          setIsTokenEnabled(true);
+          // Token value is not returned for security - only status
         }
       } catch (error) {
         console.error('Failed to load web trigger data:', error);
@@ -154,14 +168,14 @@ const WebTriggerConfig = ({ statusMessage, setStatusMessage }) => {
     try {
       // Create test payload similar to what Keeper Security would send
       const testPayload = {
-        alert_name: 'Test KEPM Approval Request',
+        alert_name: 'Test EPM Approval Request',
         description: `Test approval request created from Keeper Security ITSM admin interface at ${new Date().toLocaleString()}`,
         audit_event: 'approval_request_created',
         remote_address: '192.168.1.100',
         timestamp: new Date().toISOString(),
         category: 'endpoint_privilege_manager',
         client_version: 'Server.0.0.0',
-        username: 'KEPM Test Agent',
+        username: 'EPM Test Agent',
         agent_uid: `test_agent_${Date.now()}`,
         request_uid: `test_req_${Date.now()}`,
         severity: 'medium',
@@ -201,6 +215,94 @@ const WebTriggerConfig = ({ statusMessage, setStatusMessage }) => {
       setTimeout(() => setStatusMessage(null), 8000);
     } finally {
       setIsTesting(false);
+    }
+  };
+
+  // Generate webhook token
+  const handleGenerateToken = async () => {
+    setIsGeneratingToken(true);
+    try {
+      const result = await api.generateWebhookToken();
+      if (result && result.success) {
+        setWebhookToken(result.bearerToken);
+        setIsTokenEnabled(true);
+        setShowToken(true); // Show token immediately after generation
+        setStatusMessage({
+          type: MESSAGE_TYPES.SUCCESS,
+          title: 'Token Generated!',
+          message: 'Webhook authentication token generated. Copy this token now - it will only be shown once. Use it in the Authorization header: Bearer <token>'
+        });
+        setTimeout(() => setStatusMessage(null), 10000);
+      } else {
+        setStatusMessage({
+          type: MESSAGE_TYPES.ERROR,
+          title: 'Token Generation Failed',
+          message: result?.error || 'Failed to generate webhook token'
+        });
+        setTimeout(() => setStatusMessage(null), 8000);
+      }
+    } catch (error) {
+      const errorMessage = handleApiError(error, 'Failed to generate token');
+      setStatusMessage({
+        type: MESSAGE_TYPES.ERROR,
+        title: 'Token Generation Failed',
+        message: errorMessage
+      });
+      setTimeout(() => setStatusMessage(null), 8000);
+    } finally {
+      setIsGeneratingToken(false);
+    }
+  };
+
+  // Revoke webhook token
+  const handleRevokeToken = async () => {
+    if (!window.confirm('Are you sure you want to revoke the webhook token? This will disable token authentication and require generating a new token.')) {
+      return;
+    }
+    
+    setIsRevokingToken(true);
+    try {
+      const result = await api.revokeWebhookToken();
+      if (result && result.success) {
+        setWebhookToken('');
+        setIsTokenEnabled(false);
+        setShowToken(false);
+        setStatusMessage({
+          type: MESSAGE_TYPES.SUCCESS,
+          title: 'Token Revoked',
+          message: 'Webhook authentication token has been revoked. Token authentication is now disabled.'
+        });
+        setTimeout(() => setStatusMessage(null), 5000);
+      } else {
+        setStatusMessage({
+          type: MESSAGE_TYPES.ERROR,
+          title: 'Revoke Failed',
+          message: result?.error || 'Failed to revoke webhook token'
+        });
+        setTimeout(() => setStatusMessage(null), 8000);
+      }
+    } catch (error) {
+      const errorMessage = handleApiError(error, 'Failed to revoke token');
+      setStatusMessage({
+        type: MESSAGE_TYPES.ERROR,
+        title: 'Revoke Failed',
+        message: errorMessage
+      });
+      setTimeout(() => setStatusMessage(null), 8000);
+    } finally {
+      setIsRevokingToken(false);
+    }
+  };
+
+  // Copy token to clipboard
+  const copyToken = async () => {
+    if (!webhookToken) return;
+    try {
+      await navigator.clipboard.writeText(webhookToken);
+      setShowTokenCopied(true);
+      setTimeout(() => setShowTokenCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy token:', err);
     }
   };
 
@@ -296,6 +398,83 @@ const WebTriggerConfig = ({ statusMessage, setStatusMessage }) => {
                 </button>
               </div>
             </>
+          )}
+        </div>
+      </div>
+
+      {/* Webhook Authentication Token Section */}
+      <div className="web-trigger-token-section">
+        <div className="web-trigger-token-header">
+          <div className="web-trigger-token-label">
+            Webhook Authentication Token
+          </div>
+          <div className="web-trigger-token-description">
+            Secure your webhook endpoint with Bearer token authentication. Include the token in requests using the <code>Authorization: Bearer &lt;token&gt;</code> header.
+          </div>
+        </div>
+
+        <div className="web-trigger-token-container">
+          <div className="web-trigger-token-status">
+            <span className={`token-status-badge ${isTokenEnabled ? 'enabled' : 'disabled'}`}>
+              {isTokenEnabled ? 'Token Enabled' : 'Token Not Configured'}
+            </span>
+          </div>
+
+          {/* Show token value if just generated */}
+          {webhookToken && (
+            <div className="web-trigger-token-value-section">
+              <div className="web-trigger-token-warning">
+                <span className="warning-icon">Warning:</span>
+                <span>Copy this token now - it won't be shown again!</span>
+              </div>
+              <div className="web-trigger-token-display">
+                <code className="token-value">
+                  {showToken ? webhookToken : '••••••••••••••••••••••••••••••••'}
+                </code>
+                <div className="token-actions">
+                  <button
+                    type="button"
+                    onClick={() => setShowToken(!showToken)}
+                    className="token-action-button"
+                  >
+                    {showToken ? 'Hide' : 'Show'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyToken}
+                    className={`token-action-button ${showTokenCopied ? 'copied' : ''}`}
+                  >
+                    {showTokenCopied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="web-trigger-token-actions">
+            <button
+              onClick={handleGenerateToken}
+              className="web-trigger-generate-token-button"
+              disabled={isGeneratingToken}
+            >
+              {isGeneratingToken ? 'Generating...' : (isTokenEnabled ? 'Regenerate Token' : 'Generate Token')}
+            </button>
+            {isTokenEnabled && (
+              <button
+                onClick={handleRevokeToken}
+                className="web-trigger-revoke-token-button"
+                disabled={isRevokingToken}
+              >
+                {isRevokingToken ? 'Revoking...' : 'Revoke Token'}
+              </button>
+            )}
+          </div>
+
+          {!isTokenEnabled && (
+            <div className="web-trigger-token-info">
+              <span className="info-icon">Note:</span>
+              <span>Without token authentication, any system with your webhook URL can create tickets. Generate a token for enhanced security.</span>
+            </div>
           )}
         </div>
       </div>

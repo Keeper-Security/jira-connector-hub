@@ -1,5 +1,9 @@
 /**
  * Utility functions for handling API errors
+ * 
+ * Supports both:
+ * 1. Structured error responses: { success: false, error: 'CODE', message: '...', troubleshooting: [...] }
+ * 2. Legacy thrown errors (for backward compatibility)
  */
 
 /**
@@ -13,14 +17,49 @@ const containsHtml = (text) => {
 };
 
 /**
+ * Check if a result is a structured error response
+ * @param {Object} result - API result
+ * @returns {boolean} - True if structured error
+ */
+export const isStructuredError = (result) => {
+  return result && typeof result === 'object' && result.success === false && result.error;
+};
+
+/**
+ * Format troubleshooting steps for display
+ * @param {Array<string>} steps - Troubleshooting steps
+ * @returns {string} - Formatted string
+ */
+export const formatTroubleshooting = (steps) => {
+  if (!steps || !Array.isArray(steps) || steps.length === 0) {
+    return '';
+  }
+  return '\n\nTroubleshooting:\n• ' + steps.join('\n• ');
+};
+
+/**
  * Centralized error handler for API calls
- * @param {Object} error - Error object
+ * Handles both structured error responses and legacy thrown errors
+ * 
+ * @param {Object} error - Error object or structured error response
  * @param {string} defaultMessage - Default error message
  * @param {boolean} isAdmin - Whether user is admin
  * @returns {string} - Formatted error message
  */
 export const handleApiError = (error, defaultMessage = "An error occurred", isAdmin = false) => {
-  // Try to extract error message from various possible locations
+  // Handle structured error responses (new pattern)
+  if (isStructuredError(error)) {
+    let message = error.message || defaultMessage;
+    
+    // Include troubleshooting steps if available
+    if (error.troubleshooting && error.troubleshooting.length > 0) {
+      message += formatTroubleshooting(error.troubleshooting);
+    }
+    
+    return message;
+  }
+  
+  // Legacy error handling for thrown errors
   let errorMessage = '';
   
   // Check error.error - skip if it contains HTML

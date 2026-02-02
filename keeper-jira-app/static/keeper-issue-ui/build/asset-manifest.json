@@ -1,13 +1,37 @@
 {
   "files": {
-    "main.css": "./static/css/main.a75573fd.css",
-    "main.js": "./static/js/main.681de6ec.js",
+    "main.css": "./static/css/main.cbdf14c3.css",
+    "main.js": "./static/js/main.f160e713.js",
+    "@atlaskit-internal_atlassian-custom-theme.js": "./static/js/@atlaskit-internal_atlassian-custom-theme.9c96b164.chunk.js",
+    "@atlaskit-internal_atlassian-light.js": "./static/js/@atlaskit-internal_atlassian-light.33de4736.chunk.js",
+    "@atlaskit-internal_atlassian-light-future.js": "./static/js/@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js",
+    "@atlaskit-internal_atlassian-light-increased-contrast.js": "./static/js/@atlaskit-internal_atlassian-light-increased-contrast.06755506.chunk.js",
+    "@atlaskit-internal_atlassian-dark.js": "./static/js/@atlaskit-internal_atlassian-dark.3b4f303b.chunk.js",
+    "@atlaskit-internal_atlassian-dark-future.js": "./static/js/@atlaskit-internal_atlassian-dark-future.783bde9a.chunk.js",
+    "@atlaskit-internal_atlassian-dark-increased-contrast.js": "./static/js/@atlaskit-internal_atlassian-dark-increased-contrast.a4ef38a7.chunk.js",
+    "@atlaskit-internal_atlassian-legacy-light.js": "./static/js/@atlaskit-internal_atlassian-legacy-light.b63b8907.chunk.js",
+    "@atlaskit-internal_atlassian-legacy-dark.js": "./static/js/@atlaskit-internal_atlassian-legacy-dark.cb23efe8.chunk.js",
+    "@atlaskit-internal_atlassian-spacing.js": "./static/js/@atlaskit-internal_atlassian-spacing.3d178609.chunk.js",
+    "@atlaskit-internal_atlassian-typography.js": "./static/js/@atlaskit-internal_atlassian-typography.d38dbd79.chunk.js",
+    "@atlaskit-internal_atlassian-shape.js": "./static/js/@atlaskit-internal_atlassian-shape.39d91485.chunk.js",
     "index.html": "./index.html",
-    "main.a75573fd.css.map": "./static/css/main.a75573fd.css.map",
-    "main.681de6ec.js.map": "./static/js/main.681de6ec.js.map"
+    "main.cbdf14c3.css.map": "./static/css/main.cbdf14c3.css.map",
+    "main.f160e713.js.map": "./static/js/main.f160e713.js.map",
+    "@atlaskit-internal_atlassian-custom-theme.9c96b164.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-custom-theme.9c96b164.chunk.js.map",
+    "@atlaskit-internal_atlassian-light.33de4736.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light.33de4736.chunk.js.map",
+    "@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js.map",
+    "@atlaskit-internal_atlassian-light-increased-contrast.06755506.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light-increased-contrast.06755506.chunk.js.map",
+    "@atlaskit-internal_atlassian-dark.3b4f303b.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-dark.3b4f303b.chunk.js.map",
+    "@atlaskit-internal_atlassian-dark-future.783bde9a.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-dark-future.783bde9a.chunk.js.map",
+    "@atlaskit-internal_atlassian-dark-increased-contrast.a4ef38a7.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-dark-increased-contrast.a4ef38a7.chunk.js.map",
+    "@atlaskit-internal_atlassian-legacy-light.b63b8907.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-legacy-light.b63b8907.chunk.js.map",
+    "@atlaskit-internal_atlassian-legacy-dark.cb23efe8.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-legacy-dark.cb23efe8.chunk.js.map",
+    "@atlaskit-internal_atlassian-spacing.3d178609.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-spacing.3d178609.chunk.js.map",
+    "@atlaskit-internal_atlassian-typography.d38dbd79.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-typography.d38dbd79.chunk.js.map",
+    "@atlaskit-internal_atlassian-shape.39d91485.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-shape.39d91485.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.a75573fd.css",
-    "static/js/main.681de6ec.js"
+    "static/css/main.cbdf14c3.css",
+    "static/js/main.f160e713.js"
   ]
 }

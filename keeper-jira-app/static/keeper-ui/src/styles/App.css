@@ -59,15 +59,15 @@
   color: #0747A6;
 }
 
-/* PEDM Specific Styles */
-.pedm-header {
+/* EPM Specific Styles */
+.epm-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 20px;
 }
 
-.pedm-sync-button {
+.epm-sync-button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -78,11 +78,11 @@
   transition: color 0.2s ease;
 }
 
-.pedm-sync-button:hover {
+.epm-sync-button:hover {
   color: #0052CC;
 }
 
-.pedm-sync-button.disabled {
+.epm-sync-button.disabled {
   cursor: default;
   color: #172B4D;
 }

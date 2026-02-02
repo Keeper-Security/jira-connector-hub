@@ -7,7 +7,7 @@ import CrossIcon from "@atlaskit/icon/glyph/cross";
 
 import * as api from "../../services/api";
 
-const PedmApprovalPanel = ({ issueContext }) => {
+const EpmApprovalPanel = ({ issueContext }) => {
   const [loading, setLoading] = useState(true);
   const [webhookPayload, setWebhookPayload] = useState(null);
   const [error, setError] = useState(null);
@@ -76,7 +76,7 @@ const PedmApprovalPanel = ({ issueContext }) => {
         hour12: false
       });
       
-      await api.addPedmExpiredComment(issueContext.issueKey, formattedTimestamp);
+      await api.addEpmExpiredComment(issueContext.issueKey, formattedTimestamp);
     } catch (err) {
       console.error("Failed to add expired comment:", err);
       // Don't reset the lock even on error to prevent retry loops
@@ -94,7 +94,7 @@ const PedmApprovalPanel = ({ issueContext }) => {
       setLoading(true);
       
       // First, check if any action was already taken (comment already exists)
-      const actionCheck = await api.checkPedmActionTaken(issueContext.issueKey);
+      const actionCheck = await api.checkEpmActionTaken(issueContext.issueKey);
       if (actionCheck.success && actionCheck.actionTaken) {
         // Action already taken - set appropriate state based on action type
         if (actionCheck.action === 'approved') {
@@ -123,7 +123,7 @@ const PedmApprovalPanel = ({ issueContext }) => {
       }
       
       // Check if the request is already marked as expired in backend
-      const expiredCheck = await api.checkPedmExpired(issueContext.issueKey);
+      const expiredCheck = await api.checkEpmExpired(issueContext.issueKey);
       if (expiredCheck.success && expiredCheck.isExpired) {
         setIsExpired(true);
         setExpiredCommentAdded(true);
@@ -183,11 +183,11 @@ const PedmApprovalPanel = ({ issueContext }) => {
     setActionResult(null);
 
     try {
-      const command = `pedm approval action --approve ${requestUid}`;
+      const command = `epm approval action --approve ${requestUid}`;
       const result = await api.executeKeeperAction(
         issueContext.issueKey,
         command,
-        `KEPM Approval: Approved request ${requestUid}`,
+        `EPM Approval: Approved request ${requestUid}`,
         { cliCommand: command },
         new Date().toLocaleString('en-US', {
           month: '2-digit',
@@ -232,11 +232,11 @@ const PedmApprovalPanel = ({ issueContext }) => {
     setActionResult(null);
 
     try {
-      const command = `pedm approval action --deny ${requestUid}`;
+      const command = `epm approval action --deny ${requestUid}`;
       const result = await api.executeKeeperAction(
         issueContext.issueKey,
         command,
-        `KEPM Approval: Denied request ${requestUid}`,
+        `EPM Approval: Denied request ${requestUid}`,
         { cliCommand: command },
         new Date().toLocaleString('en-US', {
           month: '2-digit',
@@ -343,7 +343,7 @@ const PedmApprovalPanel = ({ issueContext }) => {
               Review the approval request details in the ticket description above, then choose an action below.
             </div>
             {timeRemaining && (
-              <div className="pedm-timer">
+              <div className="epm-timer">
                 Time to expire: <strong>{timeRemaining.minutes}m {timeRemaining.seconds}s</strong>
               </div>
             )}
@@ -356,14 +356,14 @@ const PedmApprovalPanel = ({ issueContext }) => {
             <button
               onClick={handleApprove}
               disabled={actionInProgress !== null}
-              className={`pedm-approve-btn ${actionInProgress === 'approve' ? 'pedm-btn-loading' : ''}`}
+              className={`epm-approve-btn ${actionInProgress === 'approve' ? 'epm-btn-loading' : ''}`}
             >
               {actionInProgress === 'approve' ? 'Processing...' : 'Approve Request'}
             </button>
             <button
               onClick={handleDeny}
               disabled={actionInProgress !== null}
-              className="pedm-reject-btn"
+              className="epm-reject-btn"
             >
               {actionInProgress === 'deny' ? 'Processing...' : 'Deny Request'}
             </button>
@@ -374,5 +374,5 @@ const PedmApprovalPanel = ({ issueContext }) => {
   );
 };
 
-export default PedmApprovalPanel;
+export default EpmApprovalPanel;
 
