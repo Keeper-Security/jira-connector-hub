@@ -29,6 +29,12 @@ const SECURITY_CONFIG = {
   maxPayloadSize: 100 * 1024,
 };
 
+// EPM approval request status (approval_request_status_changed webhook)
+export const EPM_STATUS = {
+  APPROVED: 1,
+  DENIED: 2
+};
+
 // ============================================================================
 // Storage Retry Configuration
 // ============================================================================
@@ -333,6 +339,27 @@ function validatePayloadSchema(payload) {
     }
   }
   
+  // For EPM approval status change events, validate required fields
+  if (payload.category === 'endpoint_privilege_manager' && 
+      payload.audit_event === 'approval_request_status_changed') {
+    
+    // request_uid is required for status change events
+    if (!payload.request_uid && !payload.requestUid) {
+      return { 
+        valid: false, 
+        error: 'Invalid payload: missing required field request_uid for approval_request_status_changed event' 
+      };
+    }
+    
+    // request_status is required for status change events
+    if (payload.request_status === undefined && payload.requestStatus === undefined) {
+      return { 
+        valid: false, 
+        error: 'Invalid payload: missing required field request_status for approval_request_status_changed event' 
+      };
+    }
+  }
+  
   // Validate category if provided (must be a string)
   if (payload.category !== undefined && typeof payload.category !== 'string') {
     return { valid: false, error: 'Invalid payload: category must be a string' };
@@ -397,6 +424,313 @@ function getSourceIdentifier(request) {
   
   // Fallback to a generic identifier (all requests share the same limit)
   return 'default';
+}
+
+// ============================================================================
+// EPM Status Change Handler
+// ============================================================================
+
+/**
+ * Handle approval_request_status_changed events (external approval/denial from EPM console)
+ * Finds the existing Jira ticket and updates it with appropriate label and comment
+ * @param {Object} payload - Webhook payload
+ * @param {string} sourceId - Source identifier for logging
+ * @returns {Promise<Object>} - HTTP response
+ */
+export async function handleApprovalStatusChanged(payload, sourceId) {
+  const requestUid = payload.request_uid || payload.requestUid;
+  const requestStatus = payload.request_status;
+  const username = payload.username || 'Unknown user';
+  const timestamp = payload.timestamp || new Date().toISOString();
+  
+  if (!requestUid) {
+    logger.warn('webTrigger: Status change webhook missing request_uid', { sourceId, payload });
+    await logWebhookAttempt({
+      source: sourceId,
+      status: 'rejected',
+      reason: 'missing_request_uid',
+      auditEvent: payload.audit_event
+    });
+    
+    return {
+      statusCode: 400,
+      body: JSON.stringify({
+        success: false,
+        error: 'Missing request_uid in payload'
+      })
+    };
+  }
+  
+  // Validate request_status (1 = approved, 2 = denied)
+  const statusValue = typeof requestStatus === 'string'
+    ? parseInt(requestStatus, 10)
+    : requestStatus;
+
+  if (statusValue !== EPM_STATUS.APPROVED && statusValue !== EPM_STATUS.DENIED) {
+    logger.warn('webTrigger: Status change webhook with unsupported status', { sourceId, requestStatus, requestUid });
+    await logWebhookAttempt({
+      source: sourceId,
+      status: 'skipped',
+      reason: 'unsupported_status',
+      requestStatus,
+      requestUid
+    });
+    
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        success: true,
+        message: `Status change received but skipped - status ${requestStatus} is not approve (1) or deny (2)`,
+        requestUid
+      })
+    };
+  }
+  
+  const isApproved = statusValue === EPM_STATUS.APPROVED;
+  const actionLabel = isApproved ? 'epm-approved' : 'epm-denied';
+  const actionName = isApproved ? 'approved' : 'denied';
+  
+  // Find existing ticket by request_uid label
+  const sanitizedUid = requestUid.replace(/[^a-zA-Z0-9_-]/g, '-');
+  const uidLabel = `request-${sanitizedUid}`;
+  
+  try {
+    // Search for ticket with this request_uid label (using new /rest/api/3/search/jql endpoint)
+    const searchResponse = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/search/jql`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jql: `labels = "${uidLabel}"`,
+          fields: ['labels', 'key']
+        })
+      },
+      'Search for ticket by request_uid'
+    );
+    
+    if (!searchResponse.ok) {
+      const errorText = await searchResponse.text();
+      logger.error('webTrigger: Failed to search for ticket', { sourceId, requestUid, error: errorText });
+      
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          success: false,
+          error: `Failed to search for ticket: ${errorText}`
+        })
+      };
+    }
+    
+    const searchResults = await searchResponse.json();
+    
+    if (!searchResults.issues || searchResults.issues.length === 0) {
+      logger.warn('webTrigger: No ticket found for request_uid', { sourceId, requestUid, uidLabel });
+      await logWebhookAttempt({
+        source: sourceId,
+        status: 'skipped',
+        reason: 'ticket_not_found',
+        requestUid,
+        requestStatus: actionName
+      });
+      
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          message: `No ticket found for request_uid ${requestUid}. The request may have been created before this integration was set up.`,
+          requestUid
+        })
+      };
+    }
+    
+    const existingIssue = searchResults.issues[0];
+    const issueKey = existingIssue.key;
+    const currentLabels = existingIssue.fields?.labels || [];
+    
+    // Check if action was already taken on this ticket
+    if (currentLabels.includes('epm-approved') || currentLabels.includes('epm-denied') || currentLabels.includes('epm-expired')) {
+      await logWebhookAttempt({
+        source: sourceId,
+        status: 'skipped',
+        reason: 'action_already_taken',
+        requestUid,
+        issueKey,
+        existingAction: currentLabels.find(l => l.startsWith('epm-'))
+      });
+      
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          success: true,
+          message: `Ticket ${issueKey} already has an action label`,
+          issueKey,
+          duplicate: true
+        })
+      };
+    }
+    
+    // Add the action label to the ticket
+    const updatedLabels = [...currentLabels, actionLabel, 'epm-external-action'];
+    
+    const labelUpdateResponse = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            labels: updatedLabels
+          }
+        })
+      },
+      'Add EPM action label'
+    );
+    
+    if (!labelUpdateResponse.ok) {
+      const errorText = await labelUpdateResponse.text();
+      logger.error('webTrigger: Failed to add label to ticket', { sourceId, requestUid, issueKey, error: errorText });
+      
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          success: false,
+          error: `Failed to update ticket labels: ${errorText}`
+        })
+      };
+    }
+    
+    // Format timestamp for display
+    let formattedTimestamp;
+    try {
+      formattedTimestamp = new Date(timestamp).toLocaleString('en-US', {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+    } catch (e) {
+      logger.warn('webTrigger: Invalid timestamp in payload', { sourceId, requestUid, timestamp });
+      formattedTimestamp = 'Unknown time';
+    }
+    
+    // Add comment to the ticket indicating external action
+    const commentBody = {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'panel',
+          attrs: {
+            panelType: isApproved ? 'success' : 'warning'
+          },
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: `EPM Approval Request ${isApproved ? 'Approved' : 'Denied'} Externally`,
+                  marks: [{ type: 'strong' }]
+                }
+              ]
+            },
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: `This request was already ${actionName} from other platform or app (not through Jira).`
+                }
+              ]
+            },
+            {
+              type: 'paragraph',
+              content: [
+                {
+                  type: 'text',
+                  text: `Timestamp: `,
+                  marks: [{ type: 'strong' }]
+                },
+                {
+                  type: 'text',
+                  text: formattedTimestamp
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    };
+    
+    const commentResponse = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}/comment`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: commentBody })
+      },
+      'Add EPM external action comment'
+    );
+    
+    if (!commentResponse.ok) {
+      // Log warning but don't fail - label was already added
+      const errorText = await commentResponse.text();
+      logger.warn('webTrigger: Failed to add comment to ticket', { sourceId, requestUid, issueKey, error: errorText });
+    }
+    
+    logger.info('webTrigger: Successfully processed external EPM action', {
+      sourceId,
+      requestUid,
+      issueKey,
+      action: actionName,
+      username
+    });
+    
+    await logWebhookAttempt({
+      source: sourceId,
+      status: 'success',
+      action: actionName,
+      requestUid,
+      issueKey,
+      username,
+      auditEvent: 'approval_request_status_changed'
+    });
+    
+    return {
+      statusCode: 200,
+      body: JSON.stringify({
+        success: true,
+        message: `Ticket ${issueKey} updated - request ${actionName} externally`,
+        issueKey,
+        action: actionName,
+        requestUid
+      })
+    };
+    
+  } catch (error) {
+    logger.error('webTrigger: Error processing status change', { sourceId, requestUid, error: error.message });
+    
+    await logWebhookAttempt({
+      source: sourceId,
+      status: 'error',
+      reason: 'processing_error',
+      error: error.message,
+      requestUid,
+      auditEvent: 'approval_request_status_changed'
+    });
+    
+    return {
+      statusCode: 500,
+      body: JSON.stringify({
+        success: false,
+        error: error.message || 'Internal server error'
+      })
+    };
+  }
 }
 
 // ============================================================================
@@ -552,8 +886,11 @@ export async function webTriggerHandler(request) {
       };
     }
     
-    // Validate that this is an endpoint privilege manager approval request
-    if (payload.category !== 'endpoint_privilege_manager' || payload.audit_event !== 'approval_request_created') {
+    // Validate that this is an endpoint privilege manager event (approval_request_created or approval_request_status_changed)
+    const isApprovalCreated = payload.category === 'endpoint_privilege_manager' && payload.audit_event === 'approval_request_created';
+    const isStatusChanged = payload.category === 'endpoint_privilege_manager' && payload.audit_event === 'approval_request_status_changed';
+    
+    if (!isApprovalCreated && !isStatusChanged) {
       await logWebhookAttempt({
         source: sourceId,
         status: 'skipped',
@@ -566,11 +903,16 @@ export async function webTriggerHandler(request) {
         statusCode: 200,
         body: JSON.stringify({
           success: true,
-          message: 'Webhook received but skipped - only endpoint_privilege_manager approval_request_created events create tickets',
+          message: 'Webhook received but skipped - only endpoint_privilege_manager approval_request_created and approval_request_status_changed events are processed',
           category: payload.category,
           audit_event: payload.audit_event
         })
       };
+    }
+    
+    // Handle approval_request_status_changed events (external approval/denial from EPM console)
+    if (isStatusChanged) {
+      return await handleApprovalStatusChanged(payload, sourceId);
     }
     
     // Extract request_uid
@@ -597,10 +939,17 @@ export async function webTriggerHandler(request) {
       };
     }
     
-    // Also check Jira in case storage was cleared but ticket exists (with rate limit retry)
+    // Also check Jira in case storage was cleared but ticket exists (using new /rest/api/3/search/jql endpoint)
     const searchResponse = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/search?jql=${encodeURIComponent(`labels = "${uidLabel}"`)}`,
-      {},
+      route`/rest/api/3/search/jql`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jql: `labels = "${uidLabel}"`,
+          fields: ['key']
+        })
+      },
       'Search for duplicate ticket'
     );
     
