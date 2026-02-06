@@ -29,6 +29,12 @@ const SECURITY_CONFIG = {
   maxPayloadSize: 100 * 1024,
 };
 
+// EPM approval request status (approval_request_status_changed webhook)
+export const EPM_STATUS = {
+  APPROVED: 1,
+  DENIED: 2
+};
+
 // ============================================================================
 // Storage Retry Configuration
 // ============================================================================
@@ -431,7 +437,7 @@ function getSourceIdentifier(request) {
  * @param {string} sourceId - Source identifier for logging
  * @returns {Promise<Object>} - HTTP response
  */
-async function handleApprovalStatusChanged(payload, sourceId) {
+export async function handleApprovalStatusChanged(payload, sourceId) {
   const requestUid = payload.request_uid || payload.requestUid;
   const requestStatus = payload.request_status;
   const username = payload.username || 'Unknown user';
@@ -456,7 +462,11 @@ async function handleApprovalStatusChanged(payload, sourceId) {
   }
   
   // Validate request_status (1 = approved, 2 = denied)
-  if (requestStatus !== '1' && requestStatus !== '2' && requestStatus !== 1 && requestStatus !== 2) {
+  const statusValue = typeof requestStatus === 'string'
+    ? parseInt(requestStatus, 10)
+    : requestStatus;
+
+  if (statusValue !== EPM_STATUS.APPROVED && statusValue !== EPM_STATUS.DENIED) {
     logger.warn('webTrigger: Status change webhook with unsupported status', { sourceId, requestStatus, requestUid });
     await logWebhookAttempt({
       source: sourceId,
@@ -476,7 +486,7 @@ async function handleApprovalStatusChanged(payload, sourceId) {
     };
   }
   
-  const isApproved = requestStatus === '1' || requestStatus === 1;
+  const isApproved = statusValue === EPM_STATUS.APPROVED;
   const actionLabel = isApproved ? 'epm-approved' : 'epm-denied';
   const actionName = isApproved ? 'approved' : 'denied';
   
@@ -591,15 +601,21 @@ async function handleApprovalStatusChanged(payload, sourceId) {
     }
     
     // Format timestamp for display
-    const formattedTimestamp = new Date(timestamp).toLocaleString('en-US', {
-      month: '2-digit',
-      day: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    });
+    let formattedTimestamp;
+    try {
+      formattedTimestamp = new Date(timestamp).toLocaleString('en-US', {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+    } catch (e) {
+      logger.warn('webTrigger: Invalid timestamp in payload', { sourceId, requestUid, timestamp });
+      formattedTimestamp = 'Unknown time';
+    }
     
     // Add comment to the ticket indicating external action
     const commentBody = {
