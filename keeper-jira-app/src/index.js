@@ -2110,16 +2110,7 @@ resolver.define('executeKeeperAction', async (req) => {
         }
       ];
       
-      // Add record UID if available
-      if (recordUid) {
-        contentArray.push({
-          type: 'hardBreak'
-        });
-        contentArray.push({
-          type: 'text',
-          text: `Record UID: ${recordUid}`
-        });
-      }
+      // Note: Record UID is intentionally not included in comments to avoid exposing it to non-admin users
       
       // Add executed by and timestamp
       contentArray.push({
