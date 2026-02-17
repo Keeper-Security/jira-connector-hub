@@ -13,6 +13,7 @@ import CrossIcon from "@atlaskit/icon/glyph/cross";
 import { KEEPER_ACTION_OPTIONS, PAGINATION_SETTINGS } from "./constants";
 import * as api from "./services/api";
 import { handleApiError as handleApiErrorUtil, isStructuredError, getErrorCode } from "./utils/errorHandler";
+import { formatWithUid, filterByTitleOrUid } from "./utils/formatters";
 import EpmApprovalPanel from "./components/issue/EpmApprovalPanel";
 import "./styles/IssuePanel.css";
 
@@ -154,10 +155,7 @@ const IssuePanel = () => {
   const paginatedOptions = filteredOptions.slice(startIndex, startIndex + itemsPerPage);
 
   // Filter and paginate records (search by title or UID)
-  const filteredRecords = keeperRecords.filter(record =>
-    record.title?.toLowerCase().includes(recordSearchTerm.toLowerCase()) ||
-    record.record_uid?.toLowerCase().includes(recordSearchTerm.toLowerCase())
-  );
+  const filteredRecords = filterByTitleOrUid(keeperRecords, recordSearchTerm, 'title', 'record_uid');
   const totalRecordPages = Math.ceil(filteredRecords.length / recordsPerPage);
   const recordStartIndex = (recordCurrentPage - 1) * recordsPerPage;
   const paginatedRecords = filteredRecords.slice(recordStartIndex, recordStartIndex + recordsPerPage);
@@ -172,10 +170,7 @@ const IssuePanel = () => {
     }
     
     // Apply search filter (search by name/title or UID)
-    return foldersToFilter.filter(folder =>
-      (folder.name || folder.title)?.toLowerCase().includes(folderSearchTerm.toLowerCase()) ||
-      (folder.folder_uid || folder.folderUid)?.toLowerCase().includes(folderSearchTerm.toLowerCase())
-    );
+    return filterByTitleOrUid(foldersToFilter, folderSearchTerm, ['name', 'title'], ['folder_uid', 'folderUid']);
   };
   
   const filteredFolders = getFilteredFolders();
@@ -184,10 +179,7 @@ const IssuePanel = () => {
   const paginatedFolders = filteredFolders.slice(folderStartIndex, folderStartIndex + foldersPerPage);
 
   // Filter and paginate records for record-update (search by title or UID)
-  const filteredRecordsForUpdate = keeperRecords.filter(record =>
-    record.title?.toLowerCase().includes(recordForUpdateSearchTerm.toLowerCase()) ||
-    record.record_uid?.toLowerCase().includes(recordForUpdateSearchTerm.toLowerCase())
-  );
+  const filteredRecordsForUpdate = filterByTitleOrUid(keeperRecords, recordForUpdateSearchTerm, 'title', 'record_uid');
   const totalRecordForUpdatePages = Math.ceil(filteredRecordsForUpdate.length / recordsPerPage);
   const recordForUpdateStartIndex = (recordForUpdateCurrentPage - 1) * recordsPerPage;
   const paginatedRecordsForUpdate = filteredRecordsForUpdate.slice(recordForUpdateStartIndex, recordForUpdateStartIndex + recordsPerPage);
@@ -2906,10 +2898,8 @@ const IssuePanel = () => {
                 ? keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')))
                 : keeperFolders;
               
-              // Apply search filter
-              const searchFiltered = sharedFolders.filter(folder =>
-                (folder.name || folder.folderPath || '').toLowerCase().includes(folderSearchTerm.toLowerCase())
-              );
+              // Apply search filter (search by name/path or UID)
+              const searchFiltered = filterByTitleOrUid(sharedFolders, folderSearchTerm, ['name', 'folderPath'], ['folder_uid', 'folderUid']);
               
               // Pagination
               const totalPages = Math.ceil(searchFiltered.length / foldersPerPage);
@@ -4639,9 +4629,9 @@ const IssuePanel = () => {
                               placeholder={
                                 isFormDisabled ? "Form disabled..." :
                                 showRecordForUpdateDropdown ? "Type to search records by title or UID..." : 
-                                (selectedRecordForUpdate ? `${selectedRecordForUpdate.title}${selectedRecordForUpdate.record_uid ? ` (${selectedRecordForUpdate.record_uid})` : ''}` : "Click to select record to update...")
+                                (selectedRecordForUpdate ? formatWithUid(selectedRecordForUpdate.title, selectedRecordForUpdate.record_uid) : "Click to select record to update...")
                               }
-                              value={showRecordForUpdateDropdown ? recordForUpdateSearchTerm : (selectedRecordForUpdate ? `${selectedRecordForUpdate.title}${selectedRecordForUpdate.record_uid ? ` (${selectedRecordForUpdate.record_uid})` : ''}` : "")}
+                              value={showRecordForUpdateDropdown ? recordForUpdateSearchTerm : (selectedRecordForUpdate ? formatWithUid(selectedRecordForUpdate.title, selectedRecordForUpdate.record_uid) : "")}
                               onChange={(e) => {
                                 if (!isFormDisabled) {
                                   setRecordForUpdateSearchTerm(e.target.value);
@@ -4813,9 +4803,9 @@ const IssuePanel = () => {
                                 (isFormDisabled || selectedFolder) ? 
                                   (selectedFolder ? "Disabled (folder selected)" : "Form disabled...") :
                                 showRecordDropdown ? "Type to search records by title or UID..." : 
-                                (selectedRecord ? `${selectedRecord.title}${selectedRecord.record_uid ? ` (${selectedRecord.record_uid})` : ''}` : "Click to select record...")
+                                (selectedRecord ? formatWithUid(selectedRecord.title, selectedRecord.record_uid) : "Click to select record...")
                               }
-                              value={showRecordDropdown ? recordSearchTerm : (selectedRecord ? `${selectedRecord.title}${selectedRecord.record_uid ? ` (${selectedRecord.record_uid})` : ''}` : "")}
+                              value={showRecordDropdown ? recordSearchTerm : (selectedRecord ? formatWithUid(selectedRecord.title, selectedRecord.record_uid) : "")}
                               onChange={(e) => {
                                 if (!isFormDisabled && !selectedFolder) {
                                   setRecordSearchTerm(e.target.value);
@@ -5011,9 +5001,9 @@ const IssuePanel = () => {
                                 (isFormDisabled || selectedRecord || (formData.action === 'cancel' && !isAdmin)) ? 
                                   ((formData.action === 'cancel' && !isAdmin) ? "Folder selection available for admin users only" : "Disabled (record selected)") :
                                 showFolderDropdown ? "Type to search folders by name or UID..." : 
-                                (selectedFolder ? `${selectedFolder.name || selectedFolder.folderPath}${(selectedFolder.folder_uid || selectedFolder.folderUid) ? ` (${selectedFolder.folder_uid || selectedFolder.folderUid})` : ''}` : "Click to select folder...")
+                                (selectedFolder ? formatWithUid(selectedFolder.name || selectedFolder.folderPath, selectedFolder.folder_uid || selectedFolder.folderUid) : "Click to select folder...")
                               }
-                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? `${selectedFolder.name || selectedFolder.folderPath}${(selectedFolder.folder_uid || selectedFolder.folderUid) ? ` (${selectedFolder.folder_uid || selectedFolder.folderUid})` : ''}` : "")}
+                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? formatWithUid(selectedFolder.name || selectedFolder.folderPath, selectedFolder.folder_uid || selectedFolder.folderUid) : "")}
                               onChange={(e) => {
                                 if (!isFormDisabled && !selectedRecord && !(formData.action === 'cancel' && !isAdmin)) {
                                   setFolderSearchTerm(e.target.value);
@@ -5057,10 +5047,7 @@ const IssuePanel = () => {
                               const sharedFolders = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
                               
                               // Apply search filter (search by name/path or UID)
-                              const searchFiltered = sharedFolders.filter(folder =>
-                                (folder.name || folder.folderPath || '').toLowerCase().includes(folderSearchTerm.toLowerCase()) ||
-                                (folder.folder_uid || folder.folderUid || '').toLowerCase().includes(folderSearchTerm.toLowerCase())
-                              );
+                              const searchFiltered = filterByTitleOrUid(sharedFolders, folderSearchTerm, ['name', 'folderPath'], ['folder_uid', 'folderUid']);
                               
                               // Pagination
                               const totalPages = Math.ceil(searchFiltered.length / foldersPerPage);
@@ -5224,9 +5211,9 @@ const IssuePanel = () => {
                               placeholder={
                                 isFormDisabled ? "Form disabled..." :
                                 showFolderDropdown ? "Type to search folders by name or UID..." : 
-                                (selectedFolder ? `${selectedFolder.name || selectedFolder.title}${selectedFolder.folder_uid ? ` (${selectedFolder.folder_uid})` : ''}` : "Click to select folder...")
+                                (selectedFolder ? formatWithUid(selectedFolder.name || selectedFolder.title, selectedFolder.folder_uid) : "Click to select folder...")
                               }
-                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? `${selectedFolder.name || selectedFolder.title}${selectedFolder.folder_uid ? ` (${selectedFolder.folder_uid})` : ''}` : "")}
+                              value={showFolderDropdown ? folderSearchTerm : (selectedFolder ? formatWithUid(selectedFolder.name || selectedFolder.title, selectedFolder.folder_uid) : "")}
                               onChange={(e) => {
                                 if (!isFormDisabled) {
                                   setFolderSearchTerm(e.target.value);
