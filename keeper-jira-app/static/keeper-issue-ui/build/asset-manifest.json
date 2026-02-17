@@ -1,33 +1,21 @@
 {
   "files": {
-    "main.css": "./static/css/main.d03a5d4b.css",
-    "main.js": "./static/js/main.c43046c2.js",
-    "@atlaskit-internal_atlassian-custom-theme.js": "./static/js/@atlaskit-internal_atlassian-custom-theme.9c96b164.chunk.js",
-    "@atlaskit-internal_atlassian-light.js": "./static/js/@atlaskit-internal_atlassian-light.33de4736.chunk.js",
-    "@atlaskit-internal_atlassian-light-future.js": "./static/js/@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js",
-    "@atlaskit-internal_atlassian-light-increased-contrast.js": "./static/js/@atlaskit-internal_atlassian-light-increased-contrast.06755506.chunk.js",
-    "@atlaskit-internal_atlassian-dark.js": "./static/js/@atlaskit-internal_atlassian-dark.3b4f303b.chunk.js",
-    "@atlaskit-internal_atlassian-dark-future.js": "./static/js/@atlaskit-internal_atlassian-dark-future.783bde9a.chunk.js",
-    "@atlaskit-internal_atlassian-dark-increased-contrast.js": "./static/js/@atlaskit-internal_atlassian-dark-increased-contrast.a4ef38a7.chunk.js",
-    "@atlaskit-internal_atlassian-spacing.js": "./static/js/@atlaskit-internal_atlassian-spacing.3d178609.chunk.js",
-    "@atlaskit-internal_atlassian-typography.js": "./static/js/@atlaskit-internal_atlassian-typography.d38dbd79.chunk.js",
-    "@atlaskit-internal_atlassian-shape.js": "./static/js/@atlaskit-internal_atlassian-shape.39d91485.chunk.js",
-    "index.html": "./index.html",
-    "main.d03a5d4b.css.map": "./static/css/main.d03a5d4b.css.map",
-    "main.c43046c2.js.map": "./static/js/main.c43046c2.js.map",
-    "@atlaskit-internal_atlassian-custom-theme.9c96b164.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-custom-theme.9c96b164.chunk.js.map",
-    "@atlaskit-internal_atlassian-light.33de4736.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light.33de4736.chunk.js.map",
-    "@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light-future.47dd3e86.chunk.js.map",
-    "@atlaskit-internal_atlassian-light-increased-contrast.06755506.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-light-increased-contrast.06755506.chunk.js.map",
-    "@atlaskit-internal_atlassian-dark.3b4f303b.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-dark.3b4f303b.chunk.js.map",
-    "@atlaskit-internal_atlassian-dark-future.783bde9a.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-dark-future.783bde9a.chunk.js.map",
-    "@atlaskit-internal_atlassian-dark-increased-contrast.a4ef38a7.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-dark-increased-contrast.a4ef38a7.chunk.js.map",
-    "@atlaskit-internal_atlassian-spacing.3d178609.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-spacing.3d178609.chunk.js.map",
-    "@atlaskit-internal_atlassian-typography.d38dbd79.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-typography.d38dbd79.chunk.js.map",
-    "@atlaskit-internal_atlassian-shape.39d91485.chunk.js.map": "./static/js/@atlaskit-internal_atlassian-shape.39d91485.chunk.js.map"
+    "main.css": "./static/css/main.d3d08179.css",
+    "main.js": "./static/js/main.9fb71144.js",
+    "@atlaskit-internal_atlassian-custom-theme.js": "./static/js/@atlaskit-internal_atlassian-custom-theme.758145aa.chunk.js",
+    "@atlaskit-internal_atlassian-light.js": "./static/js/@atlaskit-internal_atlassian-light.e2c222c8.chunk.js",
+    "@atlaskit-internal_atlassian-light-future.js": "./static/js/@atlaskit-internal_atlassian-light-future.896b6928.chunk.js",
+    "@atlaskit-internal_atlassian-light-increased-contrast.js": "./static/js/@atlaskit-internal_atlassian-light-increased-contrast.6b1cf4e6.chunk.js",
+    "@atlaskit-internal_atlassian-dark.js": "./static/js/@atlaskit-internal_atlassian-dark.27c7e2a5.chunk.js",
+    "@atlaskit-internal_atlassian-dark-future.js": "./static/js/@atlaskit-internal_atlassian-dark-future.cb48e41a.chunk.js",
+    "@atlaskit-internal_atlassian-dark-increased-contrast.js": "./static/js/@atlaskit-internal_atlassian-dark-increased-contrast.788fd65d.chunk.js",
+    "@atlaskit-internal_atlassian-spacing.js": "./static/js/@atlaskit-internal_atlassian-spacing.bafcee7a.chunk.js",
+    "@atlaskit-internal_atlassian-typography.js": "./static/js/@atlaskit-internal_atlassian-typography.ffdf6d0e.chunk.js",
+    "@atlaskit-internal_atlassian-shape.js": "./static/js/@atlaskit-internal_atlassian-shape.5951eceb.chunk.js",
+    "index.html": "./index.html"
   },
   "entrypoints": [
-    "static/css/main.d03a5d4b.css",
-    "static/js/main.c43046c2.js"
+    "static/css/main.d3d08179.css",
+    "static/js/main.9fb71144.js"
   ]
 }
