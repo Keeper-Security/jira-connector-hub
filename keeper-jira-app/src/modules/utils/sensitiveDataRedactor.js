@@ -152,6 +152,44 @@ export function redactCommand(command) {
 }
 
 /**
+ * Extract displayable text from justification field
+ * Handles both string and object formats from EPM approval API
+ * - If object: returns justification.text
+ * - If string (including JSON string): parses if possible, returns .text or original string
+ * @param {string|Object} justification - Justification from API (string or object)
+ * @returns {string|null} - Displayable justification text
+ */
+export function extractJustificationDisplayText(justification) {
+  if (justification == null) return null;
+  if (typeof justification === 'object') {
+    return justification.text != null ? String(justification.text) : null;
+  }
+  if (typeof justification === 'string') {
+    try {
+      const parsed = JSON.parse(justification);
+      if (parsed && typeof parsed === 'object' && parsed.text != null) {
+        return String(parsed.text);
+      }
+    } catch {
+      // Not valid JSON, use string as-is
+    }
+    return justification;
+  }
+  return null;
+}
+
+/**
+ * Extract justification text and truncate for display
+ * @param {string|Object} justification - Justification from API
+ * @param {number} maxLength - Maximum length (default from config)
+ * @returns {string} - Extracted and truncated justification text
+ */
+export function extractAndTruncateJustification(justification, maxLength = REDACTION_CONFIG.maxJustificationLength) {
+  const displayText = extractJustificationDisplayText(justification);
+  return truncateJustification(displayText, maxLength) || 'N/A';
+}
+
+/**
  * Truncate justification text
  * @param {string} justification - Justification text
  * @param {number} maxLength - Maximum length (default from config)
@@ -235,9 +273,9 @@ export function redactSensitiveObject(obj) {
     'file_path': redactFilePath,
     'path': redactFilePath,
     
-    // Text fields to truncate
-    'justification': truncateJustification,
-    'Justification': truncateJustification,
+    // Text fields to truncate (justification can be string or object with .text)
+    'justification': extractAndTruncateJustification,
+    'Justification': extractAndTruncateJustification,
     'description': truncateJustification,
     'Description': truncateJustification,
     
@@ -260,7 +298,10 @@ export function redactSensitiveObject(obj) {
         const value = obj[key];
         
         // Check if this field should be redacted
-        if (fieldsToRedact[key] && typeof value === 'string') {
+        const isJustificationKey = key === 'justification' || key === 'Justification';
+        const shouldRedactValue = (typeof value === 'string') ||
+          (isJustificationKey && value !== null && typeof value === 'object');
+        if (fieldsToRedact[key] && shouldRedactValue) {
           obj[key] = fieldsToRedact[key](value);
         } else if (typeof value === 'object') {
           processObject(value);
@@ -285,9 +326,9 @@ export function redactApprovalDetails(approvalDetails) {
   // Create a redacted copy
   const redacted = { ...approvalDetails };
   
-  // Redact specific fields
-  if (redacted.justification) {
-    redacted.justification = truncateJustification(redacted.justification);
+  // Redact specific fields (justification can be string or object with .text)
+  if (redacted.justification != null) {
+    redacted.justification = extractAndTruncateJustification(redacted.justification);
   }
   
   // Redact account_info

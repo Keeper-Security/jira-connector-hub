@@ -11,6 +11,7 @@ import {
   redactCommand,
   redactFilePath,
   truncateJustification,
+  extractAndTruncateJustification,
   redactSensitiveObject
 } from './sensitiveDataRedactor.js';
 
@@ -24,7 +25,7 @@ export function buildEnrichedTicketDescription(approvalDetails, payload) {
   
   // Apply redaction to sensitive fields
   const redactedUsername = redactUsername(accountInfo.Username) || 'N/A';
-  const redactedJustification = truncateJustification(approvalDetails.justification) || 'N/A';
+  const redactedJustification = extractAndTruncateJustification(approvalDetails.justification);
   const redactedCommand = appInfo.CommandLine ? redactCommand(appInfo.CommandLine) : null;
   const redactedFilePath = appInfo.FilePath ? redactFilePath(appInfo.FilePath) : null;
   
