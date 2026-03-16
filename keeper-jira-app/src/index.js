@@ -2157,51 +2157,51 @@ resolver.define('executeKeeperAction', async (req) => {
         ]
       };
 
-      // For EPM commands, add appropriate label FIRST (before comment) to prevent race conditions
+      // For EPM commands, add appropriate label to ALL tickets with same request_uid
       if (isEpmCommand) {
         try {
-          // Get current labels (with rate limit retry)
-          const issueResponse = await requestJiraAsAppWithRetry(
-            route`/rest/api/3/issue/${issueKey}?fields=labels`,
-            {
-              method: 'GET',
-              headers: { 'Accept': 'application/json' }
-            },
-            'Get labels for EPM update'
-          );
-          
-          const issueData = await issueResponse.json();
-          const currentLabels = issueData.fields?.labels || [];
-          
-          // Determine which label to add
-          let newLabel = '';
-          if (command.includes('--approve')) {
-            newLabel = 'epm-approved';
-          } else if (command.includes('--deny')) {
-            newLabel = 'epm-denied';
-          }
-          
-          // Add new label if not already present (with rate limit retry)
-          if (newLabel && !currentLabels.includes(newLabel)) {
-            const updatedLabels = [...currentLabels, newLabel];
-            
-            await requestJiraAsAppWithRetry(
-              route`/rest/api/3/issue/${issueKey}`,
-              {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  fields: {
-                    labels: updatedLabels
-                  }
-                }),
-              },
-              'Update EPM label'
-            );
+          const newLabel = command.includes('--approve') ? 'epm-approved' : command.includes('--deny') ? 'epm-denied' : '';
+          if (newLabel) {
+            const requestUid = command.split(/\s+/).pop();
+            const sanitizedUid = (requestUid || '').replace(/[^a-zA-Z0-9_-]/g, '-');
+            const uidLabel = `request-${sanitizedUid}`;
+            if (sanitizedUid) {
+              const searchResponse = await requestJiraAsAppWithRetry(
+                route`/rest/api/3/search/jql`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    jql: `labels = "${uidLabel}"`,
+                    fields: ['labels', 'key']
+                  })
+                },
+                'Search for EPM tickets to update'
+              );
+              if (searchResponse.ok) {
+                const searchResults = await searchResponse.json();
+                const issuesToUpdate = (searchResults.issues || []).filter((issue) => {
+                  const labels = issue.fields?.labels || [];
+                  return !labels.includes('epm-approved') && !labels.includes('epm-denied') && !labels.includes('epm-expired');
+                });
+                for (const issue of issuesToUpdate) {
+                  const currentLabels = issue.fields?.labels || [];
+                  const updatedLabels = [...currentLabels, newLabel];
+                  await requestJiraAsAppWithRetry(
+                    route`/rest/api/3/issue/${issue.key}`,
+                    {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ fields: { labels: updatedLabels } })
+                    },
+                    'Update EPM label'
+                  );
+                }
+              }
+            }
           }
         } catch (labelErr) {
           logger.error('Failed to add EPM label', labelErr);
-          // Don't fail the entire operation if label update fails
         }
       }
       

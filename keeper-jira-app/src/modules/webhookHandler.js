@@ -544,58 +544,32 @@ export async function handleApprovalStatusChanged(payload, sourceId) {
       };
     }
     
-    const existingIssue = searchResults.issues[0];
-    const issueKey = existingIssue.key;
-    const currentLabels = existingIssue.fields?.labels || [];
+    // Filter to tickets that need updating (no action label yet)
+    // Multiple tickets may share the same request_uid; update all so each panel hides buttons
+    const issuesToUpdate = searchResults.issues.filter((issue) => {
+      const labels = issue.fields?.labels || [];
+      return !labels.includes('epm-approved') && !labels.includes('epm-denied') && !labels.includes('epm-expired');
+    });
     
-    // Check if action was already taken on this ticket
-    if (currentLabels.includes('epm-approved') || currentLabels.includes('epm-denied') || currentLabels.includes('epm-expired')) {
+    if (issuesToUpdate.length === 0) {
+      const firstIssue = searchResults.issues[0];
+      const issueKey = firstIssue.key;
       await logWebhookAttempt({
         source: sourceId,
         status: 'skipped',
         reason: 'action_already_taken',
         requestUid,
         issueKey,
-        existingAction: currentLabels.find(l => l.startsWith('epm-'))
+        existingAction: firstIssue.fields?.labels?.find(l => l.startsWith('epm-'))
       });
       
       return {
         statusCode: 200,
         body: JSON.stringify({
           success: true,
-          message: `Ticket ${issueKey} already has an action label`,
+          message: `All tickets for request_uid ${requestUid} already have an action label`,
           issueKey,
           duplicate: true
-        })
-      };
-    }
-    
-    // Add the action label to the ticket
-    const updatedLabels = [...currentLabels, actionLabel, 'epm-external-action'];
-    
-    const labelUpdateResponse = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue/${issueKey}`,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            labels: updatedLabels
-          }
-        })
-      },
-      'Add EPM action label'
-    );
-    
-    if (!labelUpdateResponse.ok) {
-      const errorText = await labelUpdateResponse.text();
-      logger.error('webTrigger: Failed to add label to ticket', { sourceId, requestUid, issueKey, error: errorText });
-      
-      return {
-        statusCode: 500,
-        body: JSON.stringify({
-          success: false,
-          error: `Failed to update ticket labels: ${errorText}`
         })
       };
     }
@@ -617,7 +591,7 @@ export async function handleApprovalStatusChanged(payload, sourceId) {
       formattedTimestamp = 'Unknown time';
     }
     
-    // Add comment to the ticket indicating external action
+    // Add comment to each ticket indicating external action
     const commentBody = {
       type: 'doc',
       version: 1,
@@ -666,26 +640,54 @@ export async function handleApprovalStatusChanged(payload, sourceId) {
       ]
     };
     
-    const commentResponse = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue/${issueKey}/comment`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: commentBody })
-      },
-      'Add EPM external action comment'
-    );
-    
-    if (!commentResponse.ok) {
-      // Log warning but don't fail - label was already added
-      const errorText = await commentResponse.text();
-      logger.warn('webTrigger: Failed to add comment to ticket', { sourceId, requestUid, issueKey, error: errorText });
+    const updatedIssueKeys = [];
+    for (const existingIssue of issuesToUpdate) {
+      const issueKey = existingIssue.key;
+      const currentLabels = existingIssue.fields?.labels || [];
+      const updatedLabels = [...currentLabels, actionLabel, 'epm-external-action'];
+      
+      const labelUpdateResponse = await requestJiraAsAppWithRetry(
+        route`/rest/api/3/issue/${issueKey}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fields: {
+              labels: updatedLabels
+            }
+          })
+        },
+        'Add EPM action label'
+      );
+      
+      if (!labelUpdateResponse.ok) {
+        const errorText = await labelUpdateResponse.text();
+        logger.error('webTrigger: Failed to add label to ticket', { sourceId, requestUid, issueKey, error: errorText });
+        continue;
+      }
+      
+      updatedIssueKeys.push(issueKey);
+      
+      const commentResponse = await requestJiraAsAppWithRetry(
+        route`/rest/api/3/issue/${issueKey}/comment`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: commentBody })
+        },
+        'Add EPM external action comment'
+      );
+      
+      if (!commentResponse.ok) {
+        const errorText = await commentResponse.text();
+        logger.warn('webTrigger: Failed to add comment to ticket', { sourceId, requestUid, issueKey, error: errorText });
+      }
     }
     
     logger.info('webTrigger: Successfully processed external EPM action', {
       sourceId,
       requestUid,
-      issueKey,
+      updatedIssueKeys,
       action: actionName,
       username
     });
@@ -695,7 +697,8 @@ export async function handleApprovalStatusChanged(payload, sourceId) {
       status: 'success',
       action: actionName,
       requestUid,
-      issueKey,
+      issueKey: updatedIssueKeys.length > 0 ? updatedIssueKeys[0] : undefined,
+      issueKeys: updatedIssueKeys,
       username,
       auditEvent: 'approval_request_status_changed'
     });
@@ -704,8 +707,9 @@ export async function handleApprovalStatusChanged(payload, sourceId) {
       statusCode: 200,
       body: JSON.stringify({
         success: true,
-        message: `Ticket ${issueKey} updated - request ${actionName} externally`,
-        issueKey,
+        message: `Ticket(s) ${updatedIssueKeys.join(', ')} updated - request ${actionName} externally`,
+        issueKey: updatedIssueKeys.length > 0 ? updatedIssueKeys[0] : undefined,
+        issueKeys: updatedIssueKeys,
         action: actionName,
         requestUid
       })
