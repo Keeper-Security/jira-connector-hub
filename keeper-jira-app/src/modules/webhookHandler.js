@@ -684,6 +684,24 @@ export async function handleApprovalStatusChanged(payload, sourceId) {
       }
     }
     
+    if (updatedIssueKeys.length === 0) {
+      logger.error('webTrigger: Failed to update labels on all tickets', { sourceId, requestUid, issuesToUpdateCount: issuesToUpdate.length });
+      await logWebhookAttempt({
+        source: sourceId,
+        status: 'error',
+        reason: 'label_update_failed',
+        requestUid,
+        auditEvent: 'approval_request_status_changed'
+      });
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          success: false,
+          error: `Failed to update labels on all ${issuesToUpdate.length} ticket(s) for request ${requestUid}`
+        })
+      };
+    }
+    
     logger.info('webTrigger: Successfully processed external EPM action', {
       sourceId,
       requestUid,
