@@ -5,6 +5,7 @@
   "license": "MIT",
   "private": true,
   "overrides": {
+    "undici": "^7.24.4",
     "brace-expansion": "^2.0.1",
     "cross-spawn": "^7.0.6",
     "js-yaml": "^4.1.1",
