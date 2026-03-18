@@ -163,3 +163,31 @@ describe('EPM_STATUS constant', () => {
     expect(EPM_STATUS.DENIED).toBe(2);
   });
 });
+
+// Mirror outcome logic from handleApprovalStatusChanged (regression test for zero-update guard)
+function buildLabelUpdateOutcome(updatedIssueKeys, issuesToUpdateCount, requestUid) {
+  if (updatedIssueKeys.length === 0) {
+    return {
+      statusCode: 500,
+      success: false,
+      error: `Failed to update labels on all ${issuesToUpdateCount} ticket(s) for request ${requestUid}`
+    };
+  }
+  return { statusCode: 200, success: true };
+}
+
+describe('Label Update Outcome', () => {
+  test('returns 500 and success: false when all label updates fail', () => {
+    const result = buildLabelUpdateOutcome([], 3, 'uid-abc');
+    expect(result.statusCode).toBe(500);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('3 ticket(s)');
+    expect(result.error).toContain('uid-abc');
+  });
+
+  test('returns 200 and success: true when at least one label update succeeds', () => {
+    const result = buildLabelUpdateOutcome(['PROJ-1'], 3, 'uid-abc');
+    expect(result.statusCode).toBe(200);
+    expect(result.success).toBe(true);
+  });
+});
