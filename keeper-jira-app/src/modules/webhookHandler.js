@@ -691,6 +691,7 @@ export async function handleApprovalStatusChanged(payload, sourceId) {
         status: 'error',
         reason: 'label_update_failed',
         requestUid,
+        username,
         auditEvent: 'approval_request_status_changed'
       });
       return {
@@ -721,6 +722,10 @@ export async function handleApprovalStatusChanged(payload, sourceId) {
       auditEvent: 'approval_request_status_changed'
     });
     
+    const failedKeys = issuesToUpdate
+      .map((issue) => issue.key)
+      .filter((key) => !updatedIssueKeys.includes(key));
+
     return {
       statusCode: 200,
       body: JSON.stringify({
@@ -728,6 +733,7 @@ export async function handleApprovalStatusChanged(payload, sourceId) {
         message: `Ticket(s) ${updatedIssueKeys.join(', ')} updated - request ${actionName} externally`,
         issueKey: updatedIssueKeys.length > 0 ? updatedIssueKeys[0] : undefined,
         issueKeys: updatedIssueKeys,
+        ...(failedKeys.length > 0 && { failedKeys }),
         action: actionName,
         requestUid
       })
