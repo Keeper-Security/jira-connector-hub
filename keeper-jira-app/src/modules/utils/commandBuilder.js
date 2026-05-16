@@ -302,6 +302,24 @@ function validateCommandParameters(action, parameters) {
       // Approval UID required (handled by cliCommand path)
       break;
     }
+
+    case 'device-approve': {
+      if (!parameters.action || (parameters.action !== 'approve' && parameters.action !== 'deny')) {
+        errors.push('Action must be "approve" or "deny" for device-approve');
+      }
+      const emailTrim = parameters.email ? String(parameters.email).trim() : '';
+      if (!emailTrim) {
+        errors.push('Email is required for device-approve');
+      } else {
+        const emailValidation = validateField('email', emailTrim, {
+          limitKey: 'email',
+          pattern: 'email',
+          required: true
+        });
+        if (!emailValidation.valid) errors.push(emailValidation.error);
+      }
+      break;
+    }
   }
   
   return {
@@ -509,7 +527,25 @@ function buildKeeperCommand(action, parameters, issueKey) {
       }
       break;
     }
-    
+
+    case 'device-approve': {
+      const rawEmail = parameters.email ? String(parameters.email).trim() : '';
+      if (!rawEmail) {
+        throw new Error('Email is required for device-approve command');
+      }
+      if (!parameters.action || (parameters.action !== 'approve' && parameters.action !== 'deny')) {
+        throw new Error('Action must be approve or deny for device-approve command');
+      }
+      const approveOrDeny = parameters.action === 'approve' ? '--approve' : '--deny';
+      const safeEmailToken = /^[a-zA-Z0-9._+\-@]+$/;
+      if (safeEmailToken.test(rawEmail)) {
+        command += ` ${rawEmail} ${approveOrDeny}`;
+      } else {
+        command += ` "${escapeForDoubleQuotes(rawEmail)}" ${approveOrDeny}`;
+      }
+      break;
+    }
+
     default:
       // For other actions, return as-is or with basic parameter handling
       break;

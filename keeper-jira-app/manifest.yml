@@ -20,12 +20,6 @@ modules:
       handler: index.handler
     - key: keeperIssueResolver
       handler: index.issuePanelHandler
-    - key: keeperWebTriggerHandler
-      handler: index.webTriggerHandler
-      
-  webtrigger:
-    - key: keeper-alert-trigger
-      function: keeperWebTriggerHandler
       
 resources:
   - key: keeper-ui
@@ -56,4 +50,4 @@ app:
     name: nodejs22.x
     memoryMB: 256
     architecture: arm64
-  id: ari:cloud:ecosystem::app/17f663b8-b04b-452d-8987-60baaa6d7ade
+  id: ari:cloud:ecosystem::app/9700d33c-ba4f-41a0-93b1-5250f0a9a976

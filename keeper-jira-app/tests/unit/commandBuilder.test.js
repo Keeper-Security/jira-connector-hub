@@ -411,6 +411,44 @@ describe('buildKeeperCommand', () => {
     });
   });
 
+  describe('device-approve', () => {
+    test('builds unquoted email then flag (matches interactive shell)', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: 'mnaqvi@keepersecurity.com', action: 'approve' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve mnaqvi@keepersecurity.com --approve');
+    });
+
+    test('builds deny variant', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: 'user@example.com', action: 'deny' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve user@example.com --deny');
+    });
+
+    test('trims email whitespace', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: '  user@example.com  ', action: 'approve' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve user@example.com --approve');
+    });
+
+    test('double-quotes email when token needs it', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: 'user!name@example.com', action: 'approve' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve "user\\!name@example.com" --approve');
+    });
+  });
+
   describe('pre-formatted commands', () => {
     test('returns cliCommand as-is', () => {
       const prebuilt = 'epm approval action --approve abc123';

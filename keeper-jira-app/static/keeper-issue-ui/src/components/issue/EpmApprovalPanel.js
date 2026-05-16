@@ -9,7 +9,7 @@ import * as api from "../../services/api";
 
 const EpmApprovalPanel = ({ issueContext }) => {
   const [loading, setLoading] = useState(true);
-  const [webhookPayload, setWebhookPayload] = useState(null);
+  const [itsmPayload, setItsmPayload] = useState(null);
   const [error, setError] = useState(null);
   const [actionInProgress, setActionInProgress] = useState(null); // 'approve', 'deny', or null
   const [actionResult, setActionResult] = useState(null);
@@ -17,17 +17,20 @@ const EpmApprovalPanel = ({ issueContext }) => {
   const [timeRemaining, setTimeRemaining] = useState(null);
   const [expiredCommentAdded, setExpiredCommentAdded] = useState(false);
   const expiredCommentInProgress = useRef(false); // Synchronous lock for preventing race conditions
+  // Set to true when the underlying Keeper EPM request was already actioned
+  // outside Jira (detected either via the persisted label or the
+  // EPM_ALREADY_PROCESSED_OUTSIDE_JIRA response from executeKeeperAction).
+  const [processedOutsideJira, setProcessedOutsideJira] = useState(false);
 
   useEffect(() => {
-    loadWebhookPayload();
+    loadItsmPayload();
   }, [issueContext]);
 
-  // Update timer every second
   useEffect(() => {
-    if (!webhookPayload || isExpired || actionResult) return;
+    if (!itsmPayload || isExpired || actionResult) return;
 
     const updateTimer = () => {
-      const timestamp = webhookPayload.created || webhookPayload.timestamp;
+      const timestamp = itsmPayload.created || itsmPayload.timestamp;
       if (!timestamp) return;
 
       const requestTime = new Date(timestamp);
@@ -38,7 +41,6 @@ const EpmApprovalPanel = ({ issueContext }) => {
       if (diffInMs <= 0) {
         setIsExpired(true);
         setTimeRemaining(null);
-        // Add expired comment if not already added
         if (!expiredCommentAdded) {
           addExpiredComment();
         }
@@ -49,11 +51,11 @@ const EpmApprovalPanel = ({ issueContext }) => {
       }
     };
 
-    updateTimer(); // Initial update
-    const interval = setInterval(updateTimer, 1000); // Update every second
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
 
     return () => clearInterval(interval);
-  }, [webhookPayload, isExpired, actionResult, expiredCommentAdded]);
+  }, [itsmPayload, isExpired, actionResult, expiredCommentAdded]);
 
   const addExpiredComment = async () => {
     // Synchronous check to prevent race conditions at frontend level
@@ -83,7 +85,7 @@ const EpmApprovalPanel = ({ issueContext }) => {
     }
   };
 
-  const loadWebhookPayload = async () => {
+  const loadItsmPayload = async () => {
     if (!issueContext?.issueKey) {
       setError("Issue context not available");
       setLoading(false);
@@ -92,60 +94,62 @@ const EpmApprovalPanel = ({ issueContext }) => {
 
     try {
       setLoading(true);
-      
+
       // First, check if any action was already taken (comment already exists)
       const actionCheck = await api.checkEpmActionTaken(issueContext.issueKey);
       if (actionCheck.success && actionCheck.actionTaken) {
-        // Action already taken - set appropriate state based on action type
         if (actionCheck.action === 'approved') {
-          setActionResult({ 
-            success: true, 
-            message: "Approval request has been approved successfully" 
+          setActionResult({
+            success: true,
+            message: "Approval request has been approved successfully"
           });
         } else if (actionCheck.action === 'denied') {
-          setActionResult({ 
-            success: true, 
-            message: "Approval request has been denied successfully" 
+          setActionResult({
+            success: true,
+            message: "Approval request has been denied successfully"
           });
         } else if (actionCheck.action === 'expired') {
           setIsExpired(true);
           setExpiredCommentAdded(true);
-          expiredCommentInProgress.current = true; // Set lock
+          expiredCommentInProgress.current = true;
+        } else if (actionCheck.action === 'processed_outside') {
+          setProcessedOutsideJira(true);
+          setActionResult({
+            success: true,
+            message: actionCheck.message
+          });
         }
-        
+
         // Still load payload for display, but don't show buttons
-        const result = await api.getWebhookPayload(issueContext.issueKey);
+        const result = await api.getItsmTicketData(issueContext.issueKey);
         if (result.success && result.payload) {
-          setWebhookPayload(result.payload);
+          setItsmPayload(result.payload);
         }
         setLoading(false);
         return;
       }
-      
-      // Check if the request is already marked as expired in backend
+
       const expiredCheck = await api.checkEpmExpired(issueContext.issueKey);
       if (expiredCheck.success && expiredCheck.isExpired) {
         setIsExpired(true);
         setExpiredCommentAdded(true);
-        expiredCommentInProgress.current = true; // Set lock
+        expiredCommentInProgress.current = true;
       }
-      
-      const result = await api.getWebhookPayload(issueContext.issueKey);
-      
+
+      const result = await api.getItsmTicketData(issueContext.issueKey);
+
       if (result.success && result.payload) {
-        setWebhookPayload(result.payload);
+        setItsmPayload(result.payload);
         setError(null);
-        
-        // If not already marked as expired, check timestamp
+
         if (!expiredCheck.isExpired) {
           if (result.payload.created || result.payload.timestamp) {
             const requestTime = new Date(result.payload.created || result.payload.timestamp);
             const currentTime = new Date();
             const diffInMinutes = (currentTime - requestTime) / (1000 * 60);
-            
+
             if (diffInMinutes > 30) {
               setIsExpired(true);
-              // Add expired comment if not already added
               if (!expiredCommentAdded) {
                 addExpiredComment();
               }
@@ -153,15 +157,14 @@ const EpmApprovalPanel = ({ issueContext }) => {
               setIsExpired(false);
             }
           } else {
-            // If no timestamp, assume not expired
             setIsExpired(false);
           }
         }
       } else {
-        setError("No webhook payload found in this ticket");
+        setError("No ITSM approval payload found in this ticket");
       }
     } catch (err) {
-      console.error("Failed to load webhook payload:", err);
+      console.error("Failed to load ITSM ticket data:", err);
       setError("Failed to load approval request data");
     } finally {
       setLoading(false);
@@ -169,10 +172,10 @@ const EpmApprovalPanel = ({ issueContext }) => {
   };
 
   const handleApprove = async () => {
-    // Check both fields because:
-    // - Tickets created with webhook payload fallback have: request_uid
-    // - Tickets created with Keeper API enriched data have: approval_uid
-    const requestUid = webhookPayload?.request_uid || webhookPayload?.approval_uid;
+    // The Keeper alert payload may surface the request id under either key
+    // depending on whether the ITSM app stored the raw webhook payload or
+    // the API-enriched approval data.
+    const requestUid = itsmPayload?.request_uid || itsmPayload?.approval_uid;
     
     if (!requestUid) {
       setActionResult({ success: false, message: "Request UID not found" });
@@ -200,12 +203,30 @@ const EpmApprovalPanel = ({ issueContext }) => {
         })
       );
 
-      setActionResult({
-        success: result.success,
-        message: result.success 
-          ? "Approval request has been approved successfully" 
-          : result.message || "Failed to approve request"
-      });
+      // Race handling: between load and click, the request may have been
+      // resolved outside Jira. The backend sync-down + approve attempt then
+      // surfaces the canonical "Approval request does not exist" error,
+      // which the resolver converts into this structured response and has
+      // already tagged the ticket. Reflect the resolved state in the UI.
+      if (
+        !result.success &&
+        result.code === 'EPM_ALREADY_PROCESSED_OUTSIDE_JIRA'
+      ) {
+        setProcessedOutsideJira(true);
+        setActionResult({
+          success: true,
+          message:
+            result.message ||
+            "This EPM approval request was already processed outside Jira."
+        });
+      } else {
+        setActionResult({
+          success: result.success,
+          message: result.success
+            ? "Approval request has been approved successfully"
+            : result.message || "Failed to approve request"
+        });
+      }
     } catch (err) {
       console.error("Failed to approve request:", err);
       setActionResult({
@@ -218,10 +239,7 @@ const EpmApprovalPanel = ({ issueContext }) => {
   };
 
   const handleDeny = async () => {
-    // Check both fields because:
-    // - Tickets created with webhook payload fallback have: request_uid
-    // - Tickets created with Keeper API enriched data have: approval_uid
-    const requestUid = webhookPayload?.request_uid || webhookPayload?.approval_uid;
+    const requestUid = itsmPayload?.request_uid || itsmPayload?.approval_uid;
     
     if (!requestUid) {
       setActionResult({ success: false, message: "Request UID not found" });
@@ -249,12 +267,25 @@ const EpmApprovalPanel = ({ issueContext }) => {
         })
       );
 
-      setActionResult({
-        success: result.success,
-        message: result.success 
-          ? "Approval request has been denied successfully" 
-          : result.message || "Failed to deny request"
-      });
+      if (
+        !result.success &&
+        result.code === 'EPM_ALREADY_PROCESSED_OUTSIDE_JIRA'
+      ) {
+        setProcessedOutsideJira(true);
+        setActionResult({
+          success: true,
+          message:
+            result.message ||
+            "This EPM approval request was already processed outside Jira."
+        });
+      } else {
+        setActionResult({
+          success: result.success,
+          message: result.success
+            ? "Approval request has been denied successfully"
+            : result.message || "Failed to deny request"
+        });
+      }
     } catch (err) {
       console.error("Failed to deny request:", err);
       setActionResult({
@@ -275,7 +306,7 @@ const EpmApprovalPanel = ({ issueContext }) => {
     );
   }
 
-  if (error || !webhookPayload) {
+  if (error || !itsmPayload) {
     return (
       <div className="app-root app-root-auto">
         <div className="app-card">
@@ -285,7 +316,7 @@ const EpmApprovalPanel = ({ issueContext }) => {
           </div>
           <div className="app-body">
             <SectionMessage appearance="error" title="Error">
-              <p>{error || "No webhook payload found in this ticket."}</p>
+              <p>{error || "No ITSM approval payload found in this ticket."}</p>
             </SectionMessage>
           </div>
         </div>
@@ -302,8 +333,18 @@ const EpmApprovalPanel = ({ issueContext }) => {
           <h3 className="app-title">Endpoint Privilege Management</h3>
         </div>
 
+        {/* Already-processed-outside-Jira message (warning style) */}
+        {actionResult && actionResult.success && processedOutsideJira && (
+          <div className="message-box-dynamic message-box-admin">
+            <div className="message-box-title-admin">
+              Already Processed Outside Jira
+            </div>
+            <div className="message-box-text">{actionResult.message}</div>
+          </div>
+        )}
+
         {/* Success Message - No close button for successful actions */}
-        {actionResult && actionResult.success && (
+        {actionResult && actionResult.success && !processedOutsideJira && (
           <div className="message-box-dynamic message-box-user">
             <div className="message-box-title-user">Success Message</div>
             <div className="message-box-text">{actionResult.message}</div>

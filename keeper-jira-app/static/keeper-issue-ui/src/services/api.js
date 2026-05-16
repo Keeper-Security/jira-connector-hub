@@ -86,9 +86,12 @@ export const rejectKeeperRequest = async (issueKey, rejectionReason) => {
   });
 };
 
-// Get webhook payload data from issue description
-export const getWebhookPayload = async (issueKey) => {
-  return await invoke("getWebhookPayload", { issueKey });
+// Fetch payload data + labels for an ITSM-created ticket. The companion
+// JIRA ITSM Forge app embeds the original Keeper alert as a JSON code block
+// inside the issue description; the panel uses this to render context for the
+// Approve/Deny workflow.
+export const getItsmTicketData = async (issueKey) => {
+  return await invoke("getItsmTicketData", { issueKey });
 };
 
 export const addEpmExpiredComment = async (issueKey, formattedTimestamp) => {
@@ -101,5 +104,20 @@ export const checkEpmExpired = async (issueKey) => {
 
 export const checkEpmActionTaken = async (issueKey) => {
   return await invoke("checkEpmActionTaken", { issueKey });
+};
+
+// Check if a device admin approval action has already been taken on this ticket.
+// Used by DeviceApprovalPanel to short-circuit and show the already-actioned state
+// without re-running the device-approve / device-deny Commander command.
+export const checkDeviceActionTaken = async (issueKey) => {
+  return await invoke("checkDeviceActionTaken", { issueKey });
+};
+
+// Pre-flight check: ask the backend to verify the user/device on this ticket
+// is still in Keeper's pending device-approval list (`device-approve --reload
+// `request-already-processed-outside-jira` label + audit comment, and the
+// panel hides the Approve/Deny buttons.
+export const checkDevicePendingStatus = async (issueKey) => {
+  return await invoke("checkDevicePendingStatus", { issueKey });
 };
 
