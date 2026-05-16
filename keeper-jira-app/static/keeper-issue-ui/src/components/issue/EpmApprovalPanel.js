@@ -7,6 +7,62 @@ import CrossIcon from "@atlaskit/icon/glyph/cross";
 
 import * as api from "../../services/api";
 
+const DetailRow = ({ label, value }) => {
+  if (value === undefined || value === null || value === "") return null;
+
+  return (
+    <li>
+      <strong>{label}:</strong> {String(value)}
+    </li>
+  );
+};
+
+const EpmApprovalDetailsBlock = ({ details, loading }) => {
+  if (loading) {
+    return (
+      <div className="message-box-dynamic message-box-admin">
+        <div className="message-box-title-admin">Approval Details</div>
+        <div className="message-box-text">
+          <Spinner size="small" /> Loading approval details from Keeper...
+        </div>
+      </div>
+    );
+  }
+
+  if (!details) return null;
+
+  const appInfo = details.application_info || {};
+  const accountInfo = details.account_info || {};
+
+  let justificationText = "Not provided";
+  if (details.justification) {
+    try {
+      const parsed = JSON.parse(details.justification);
+      justificationText = parsed.text || details.justification;
+    } catch {
+      justificationText = details.justification;
+    }
+  }
+
+  return (
+    <div className="message-box-dynamic message-box-admin">
+      <div className="message-box-title-admin">Approval Details</div>
+      <div className="message-box-text">
+
+        <ul>
+          <DetailRow label="File Name" value={appInfo.FileName || appInfo.file_name} />
+          <DetailRow label="File" value={appInfo.FilePath || appInfo.file_path} />
+          <DetailRow label="Command" value={appInfo.CommandLine || appInfo.command_line} />
+          <DetailRow label="Description" value={appInfo.Description || appInfo.description} />
+        </ul>
+
+        <p><strong>Account:</strong> {accountInfo.Username || accountInfo.username || "Not provided"}</p>
+        <p><strong>Justification:</strong> {justificationText}</p>
+      </div>
+    </div>
+  );
+};
+
 const EpmApprovalPanel = ({ issueContext }) => {
   const [loading, setLoading] = useState(true);
   const [itsmPayload, setItsmPayload] = useState(null);
@@ -21,6 +77,8 @@ const EpmApprovalPanel = ({ issueContext }) => {
   // outside Jira (detected either via the persisted label or the
   // EPM_ALREADY_PROCESSED_OUTSIDE_JIRA response from executeKeeperAction).
   const [processedOutsideJira, setProcessedOutsideJira] = useState(false);
+  const [approvalDetails, setApprovalDetails] = useState(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   useEffect(() => {
     loadItsmPayload();
@@ -85,6 +143,23 @@ const EpmApprovalPanel = ({ issueContext }) => {
     }
   };
 
+  const loadApprovalDetails = async (payload) => {
+    const requestUid = payload?.request_uid || payload?.approval_uid;
+    if (!requestUid) return;
+
+    setDetailsLoading(true);
+    try {
+      const result = await api.getEpmApprovalDetails(requestUid);
+      if (result.success && result.details) {
+        setApprovalDetails(result.details);
+      }
+    } catch (err) {
+      console.warn("Failed to load EPM approval details:", err);
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
   const loadItsmPayload = async () => {
     if (!issueContext?.issueKey) {
       setError("Issue context not available");
@@ -94,6 +169,8 @@ const EpmApprovalPanel = ({ issueContext }) => {
 
     try {
       setLoading(true);
+      setApprovalDetails(null);
+      setDetailsLoading(false);
 
       // First, check if any action was already taken (comment already exists)
       const actionCheck = await api.checkEpmActionTaken(issueContext.issueKey);
@@ -143,12 +220,14 @@ const EpmApprovalPanel = ({ issueContext }) => {
         setError(null);
 
         if (!expiredCheck.isExpired) {
+          let shouldLoadDetails = true;
           if (result.payload.created || result.payload.timestamp) {
             const requestTime = new Date(result.payload.created || result.payload.timestamp);
             const currentTime = new Date();
             const diffInMinutes = (currentTime - requestTime) / (1000 * 60);
 
             if (diffInMinutes > 30) {
+              shouldLoadDetails = false;
               setIsExpired(true);
               if (!expiredCommentAdded) {
                 addExpiredComment();
@@ -158,6 +237,10 @@ const EpmApprovalPanel = ({ issueContext }) => {
             }
           } else {
             setIsExpired(false);
+          }
+
+          if (shouldLoadDetails) {
+            loadApprovalDetails(result.payload);
           }
         }
       } else {
@@ -375,6 +458,11 @@ const EpmApprovalPanel = ({ issueContext }) => {
             </div>
           </div>
         )}
+
+        <EpmApprovalDetailsBlock
+          details={approvalDetails}
+          loading={detailsLoading}
+        />
 
         {/* Info Message */}
         {!actionResult && !isExpired && (

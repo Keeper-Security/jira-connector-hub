@@ -94,6 +94,10 @@ export const getItsmTicketData = async (issueKey) => {
   return await invoke("getItsmTicketData", { issueKey });
 };
 
+export const getEpmApprovalDetails = async (requestUid) => {
+  return await invoke("getEpmApprovalDetails", { requestUid });
+};
+
 export const addEpmExpiredComment = async (issueKey, formattedTimestamp) => {
   return await invoke("addEpmExpiredComment", { issueKey, formattedTimestamp });
 };

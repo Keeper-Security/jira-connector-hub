@@ -1,6 +1,6 @@
 import Resolver from '@forge/resolver';
 import { storage, webTrigger } from '@forge/api';
-import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus } from './modules/keeperApi.js';
+import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus, fetchEpmApprovalDetails } from './modules/keeperApi.js';
 import { requestJiraAsAppWithRetry, requestJiraAsUserWithRetry, route } from './modules/utils/jiraApiRetry.js';
 import { logger } from './modules/utils/logger.js';
 import { 
@@ -3117,6 +3117,64 @@ resolver.define('getItsmTicketData', async (req) => {
   } catch (error) {
     logger.error('Error fetching ITSM ticket data', error);
     throw new Error(`Failed to fetch ITSM ticket data: ${error.message}`);
+  }
+});
+
+function redactEpmApprovalDetails(value) {
+  if (Array.isArray(value)) {
+    return value.map(redactEpmApprovalDetails);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return Object.entries(value).reduce((acc, [key, entryValue]) => {
+    if (/filehash/i.test(key)) {
+      acc[key] = ['[REDACTED]'];
+      return acc;
+    }
+
+    if (/commandline/i.test(key) && typeof entryValue === 'string') {
+      acc[key] = entryValue.replace(/\s+.+$/, ' [ARGS REDACTED]');
+      return acc;
+    }
+
+    acc[key] = redactEpmApprovalDetails(entryValue);
+    return acc;
+  }, {});
+}
+
+resolver.define('getEpmApprovalDetails', async (req) => {
+  const requestUid = req.payload?.requestUid;
+
+  if (!requestUid) {
+    return { success: false, message: 'Request UID is required' };
+  }
+
+  try {
+    const details = await fetchEpmApprovalDetails(requestUid);
+    if (!details) {
+      return {
+        success: false,
+        message: 'EPM approval details were not available from Keeper Commander'
+      };
+    }
+
+    return {
+      success: true,
+      details,
+      redactedDetails: redactEpmApprovalDetails(details)
+    };
+  } catch (error) {
+    logger.warn('Failed to fetch EPM approval details', {
+      requestUid,
+      error: error.message
+    });
+    return {
+      success: false,
+      message: 'Failed to fetch EPM approval details'
+    };
   }
 });
 

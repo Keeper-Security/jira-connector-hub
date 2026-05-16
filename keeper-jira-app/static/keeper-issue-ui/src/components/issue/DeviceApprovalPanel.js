@@ -6,6 +6,50 @@ import CrossIcon from "@atlaskit/icon/glyph/cross";
 
 import * as api from "../../services/api";
 
+const DetailRow = ({ label, value }) => {
+  if (value === undefined || value === null || value === "") return null;
+
+  return (
+    <li>
+      <strong>{label}:</strong> {String(value)}
+    </li>
+  );
+};
+
+const DeviceRequestDetailsBlock = ({ payload }) => {
+  if (!payload) return null;
+
+  const requester =
+    payload.username ||
+    payload.email ||
+    payload.user?.email ||
+    payload.account_info?.Username ||
+    payload.account_info?.username;
+  const deviceIdentifier =
+    payload.device_id ||
+    payload.deviceId ||
+    payload.device_uid ||
+    payload.encrypted_device_token ||
+    payload.device_token;
+
+  return (
+    <div className="message-box-dynamic message-box-admin">
+      <div className="message-box-title-admin">Request Details</div>
+      <div className="message-box-text">
+        <ul>
+          <DetailRow label="Requester" value={requester} />
+          <DetailRow label="Client Version" value={payload.client_version} />
+          <DetailRow label="Remote Address" value={payload.remote_address} />
+          <DetailRow label="Timestamp" value={payload.timestamp || payload.created} />
+          <DetailRow label="Device Identifier" value={deviceIdentifier} />
+          <DetailRow label="Device Name" value={payload.device_name} />
+          <DetailRow label="Machine Name" value={payload.machine_name || payload.machineName || payload.hostname} />
+        </ul>
+      </div>
+    </div>
+  );
+};
+
 /**
  * Panel rendered for tickets that the JIRA ITSM Forge app has tagged with the
  * `ITSM_device_admin_approval_requested` label.
@@ -271,6 +315,8 @@ const DeviceApprovalPanel = ({ issueContext }) => {
             <div className="message-box-text">{actionResult.message}</div>
           </div>
         )}
+
+        <DeviceRequestDetailsBlock payload={itsmPayload} />
 
         {!actionResult && (
           <div className="message-box-dynamic message-box-admin">
