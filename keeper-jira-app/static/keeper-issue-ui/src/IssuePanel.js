@@ -123,7 +123,7 @@ const IssuePanel = () => {
     const isKd = source === 'kd';
     return (
       <span className={`source-badge ${isKd ? 'source-badge-kd' : 'source-badge-classic'}`}>
-        {isKd ? 'KD' : 'Classic'}
+        {isKd ? 'New' : 'Classic'}
       </span>
     );
   };
@@ -245,47 +245,83 @@ const IssuePanel = () => {
     setRecordForUpdateCurrentPage(1);
   }, [recordForUpdateSearchTerm]);
 
+  // Monotonic token for the vault refetch cycle. Only the latest call may
+  // write records/folders state or reset loading flags.
+  const vaultFetchTokenRef = useRef(0);
 
-  const fetchKeeperRecords = async (modeOverride) => {
-    const mode = modeOverride || activeVaultMode;
-    const token = ++fetchTokensRef.current.records;
-    setLoadingRecords(true);
-    try {
-      const result = await api.getKeeperRecords(mode);
-      if (token !== fetchTokensRef.current.records) return;
-      setKeeperRecords(result.records || []);
-    } catch (error) {
-      if (token !== fetchTokensRef.current.records) return;
-      const errorMessage = handleApiError(error, "Failed to fetch Keeper records");
-      setLastResult({
-        success: false,
-        message: errorMessage
-      });
-      setKeeperRecords([]);
-    } finally {
-      if (token === fetchTokensRef.current.records) setLoadingRecords(false);
-    }
+  // Pure fetchers: return data on success, throw structured errors so the
+  // coordinator can surface them instead of silently writing [].
+  const fetchRecordsForMode = async (mode) => {
+    const result = await api.getKeeperRecords(mode);
+    if (isStructuredError(result)) throw result;
+    return Array.isArray(result?.records) ? result.records : [];
   };
 
-  const fetchKeeperFolders = async (modeOverride) => {
-    const mode = modeOverride || activeVaultMode;
-    const token = ++fetchTokensRef.current.folders;
-    setLoadingFolders(true);
-    try {
-      const result = await api.getKeeperFolders(mode);
-      if (token !== fetchTokensRef.current.folders) return;
-      setKeeperFolders(result.folders || []);
-    } catch (error) {
-      if (token !== fetchTokensRef.current.folders) return;
-      const errorMessage = handleApiError(error, "Failed to fetch Keeper folders");
+  const fetchFoldersForMode = async (mode) => {
+    const result = await api.getKeeperFolders(mode);
+    if (isStructuredError(result)) throw result;
+    return Array.isArray(result?.folders) ? result.folders : [];
+  };
+
+  // Maps a Keeper action to which vault data the form actually needs.
+  const computeFetchPlan = (action) => ({
+    records: action === 'share-record' || action === 'record-update',
+    folders:
+      action === 'share-record' ||
+      action === 'share-folder' ||
+      action === 'record-permission' ||
+      action === 'record-add',
+  });
+
+  // Single coordinator for records+folders. Owns the token, runs fetches in
+  // parallel via Promise.allSettled so a single failure cannot wipe the other
+  // list. Race-safe for rapid mode/action changes via the token guard.
+  const refetchVaultData = async ({ mode, action }) => {
+    const plan = computeFetchPlan(action);
+    const shouldFetch = (issueContext?.hasConfig || isAdmin) && (plan.records || plan.folders);
+    if (!shouldFetch) return;
+
+    const token = ++vaultFetchTokenRef.current;
+    if (plan.records) setLoadingRecords(true);
+    if (plan.folders) setLoadingFolders(true);
+
+    const settled = await Promise.allSettled([
+      plan.records ? fetchRecordsForMode(mode) : Promise.resolve(null),
+      plan.folders ? fetchFoldersForMode(mode) : Promise.resolve(null),
+    ]);
+
+    if (token !== vaultFetchTokenRef.current) return;
+
+    const [recordsResult, foldersResult] = settled;
+    let firstError = null;
+
+    if (plan.records) {
+      if (recordsResult.status === 'fulfilled') {
+        setKeeperRecords(recordsResult.value || []);
+      } else {
+        setKeeperRecords([]);
+        firstError = firstError || recordsResult.reason;
+      }
+    }
+
+    if (plan.folders) {
+      if (foldersResult.status === 'fulfilled') {
+        setKeeperFolders(foldersResult.value || []);
+      } else {
+        setKeeperFolders([]);
+        firstError = firstError || foldersResult.reason;
+      }
+    }
+
+    if (firstError) {
       setLastResult({
         success: false,
-        message: errorMessage
+        message: handleApiError(firstError, 'Failed to load Keeper vault data'),
       });
-      setKeeperFolders([]);
-    } finally {
-      if (token === fetchTokensRef.current.folders) setLoadingFolders(false);
     }
+
+    if (plan.records) setLoadingRecords(false);
+    if (plan.folders) setLoadingFolders(false);
   };
 
   // Reset all selection state when switching vault mode.
@@ -320,28 +356,21 @@ const IssuePanel = () => {
   const handleKeeperDriveToggle = (next) => {
     setIsKeeperDriveMode(next);
     resetVaultSelectionState();
-    // Eagerly mark loading only for categories the data effect will actually
-    // refetch, so each flag has a fetch that will reset it. Mirrors the
-    // condition logic in the fetch effect below.
+    // Eagerly mark loading so the spinner/disable shows in the same render.
+    // The vault refetch itself is driven by the useEffect that watches
+    // isKeeperDriveMode + selectedAction, so this avoids a duplicate API call.
     const action = selectedAction?.value;
-    const shouldFetchData = issueContext?.hasConfig || isAdmin;
-    const willFetchRecords = shouldFetchData && (action === 'share-record' || action === 'record-update');
-    const willFetchFolders = shouldFetchData && (
-      action === 'share-record' ||
-      action === 'share-folder' ||
-      action === 'record-permission' ||
-      action === 'record-add'
-    );
-    if (willFetchRecords) setLoadingRecords(true);
-    if (willFetchFolders) setLoadingFolders(true);
+    const willFetch = action && !isLoadingStoredData && (issueContext?.hasConfig || isAdmin);
+    if (willFetch) {
+      const plan = computeFetchPlan(action);
+      if (plan.records) setLoadingRecords(true);
+      if (plan.folders) setLoadingFolders(true);
+    }
   };
   // Flag to track if we're preserving stored data
   const [isPreservingStoredData, setIsPreservingStoredData] = useState(false);
   const isPreservingStoredDataRef = useRef(false);
 
-  // Token guard: only the latest record/folder fetch may write state.
-  const fetchTokensRef = useRef({ records: 0, folders: 0 });
-  
   // Fetch Keeper record details when needed for record-update
   const fetchKeeperRecordDetails = async (recordUid, preserveStoredData = null) => {
     setLoadingRecordDetails(true);
@@ -955,12 +984,14 @@ const IssuePanel = () => {
     }
 
     setTimeout(() => {
-      if (data.selectedAction?.value === 'record-update' && data.selectedRecordForUpdate) {
+      const restoredMode = data.isKeeperDriveMode !== false ? 'kd' : 'classic';
+      const restoredAction = data.selectedAction?.value;
+      if (restoredAction === 'record-update' && data.selectedRecordForUpdate) {
         setSelectedRecordForUpdate(data.selectedRecordForUpdate);
-        fetchKeeperRecords();
+        refetchVaultData({ mode: restoredMode, action: restoredAction });
         fetchKeeperRecordDetails(data.selectedRecordForUpdate.record_uid, data);
         fetchRecordTypes();
-      } else if (data.selectedAction?.value === 'record-add' && data.formData?.recordType) {
+      } else if (restoredAction === 'record-add' && data.formData?.recordType) {
         fetchRecordTypeTemplateWithFormMapping(data.formData.recordType, data.formData);
         fetchRecordTypes();
       }
@@ -2452,35 +2483,16 @@ const IssuePanel = () => {
     
     // Skip API calls for non-admin users when config is missing (they only submit requests)
     const shouldFetchData = issueContext?.hasConfig || isAdmin;
-    
-    // Fetch records when share-record or record-update is selected (but not when loading stored data)
-    // Only fetch if config exists or user is admin
-    if (selectedAction && (selectedAction.value === 'share-record' || selectedAction.value === 'record-update') && !isLoadingStoredData && shouldFetchData) {
-      fetchKeeperRecords();
+
+    // Single coordinator handles records + folders for whichever action is active.
+    // Skipped while stored data is loading so restore can drive its own fetch.
+    if (selectedAction && !isLoadingStoredData) {
+      refetchVaultData({ mode: activeVaultMode, action: selectedAction.value });
     }
-    
-    // Fetch folders when share-record is selected (for the new folder dropdown)
-    // Only fetch if config exists or user is admin
-    if (selectedAction && selectedAction.value === 'share-record' && !isLoadingStoredData && shouldFetchData) {
-      fetchKeeperFolders();
-    }
-    
-    // Fetch record types when record-add or record-update is selected (but not when loading stored data)
-    // Only fetch if config exists or user is admin
+
+    // Record types are independent of vault data and stay on their own helper.
     if (selectedAction && (selectedAction.value === 'record-add' || selectedAction.value === 'record-update') && !isLoadingStoredData && shouldFetchData) {
       fetchRecordTypes();
-    }
-
-    // Fetch folders for record-add: KD requires a folder (`kd-record-add
-    // --folder=`); Classic folder is optional (root when omitted).
-    if (selectedAction && selectedAction.value === 'record-add' && !isLoadingStoredData && shouldFetchData) {
-      fetchKeeperFolders();
-    }
-
-    // Fetch folders when share-folder or record-permission is selected
-    // Only fetch if config exists or user is admin
-    if (selectedAction && (selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission') && shouldFetchData) {
-      fetchKeeperFolders();
     }
   }, [selectedAction, isLoadingStoredData, isAdmin, issueContext, isKeeperDriveMode]);
 
@@ -2810,8 +2822,11 @@ const IssuePanel = () => {
   };
 
   const renderClassicModeCheckbox = () => {
-    const isFetchingVault = loadingRecords || loadingFolders;
-    const isCheckboxDisabled = isFormDisabled || isExecuting || isModeLocked || isFetchingVault;
+    // Members never see record/folder lists, so vault loading must not lock
+    // the checkbox for them. Admins still get the lock to prevent rapid-toggle
+    // races while their lists are actively fetching.
+    const isFetchingVisibleLists = isAdmin && (loadingRecords || loadingFolders);
+    const isCheckboxDisabled = isFormDisabled || isExecuting || isModeLocked || isFetchingVisibleLists;
     return (
       <div className="classic-mode-toggle">
         <label className={`classic-mode-label ${isCheckboxDisabled ? 'classic-mode-label-disabled' : ''}`}>
@@ -2825,7 +2840,7 @@ const IssuePanel = () => {
           <span className="classic-mode-text">Use classic permission model</span>
         </label>
         <p className="classic-mode-description">
-          {isFetchingVault
+          {isFetchingVisibleLists
             ? 'Loading vault contents...'
             : isModeLocked
               ? `Locked to ${isKeeperDriveMode ? 'Keeper Drive' : 'Classic'} per the saved request.`

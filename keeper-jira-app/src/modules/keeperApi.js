@@ -49,10 +49,24 @@ const API_CONFIG = {
   // Rate limiting configuration
   // Keeper Commander queue capacity is 100 requests
   // These limits allow ~10 concurrent users before queue stress
+  //
+  // Split into two independent per-user buckets:
+  //   - `read`  : cheap idempotent list/get commands (vault browsers, dropdowns)
+  //   - `write` : mutations (share-*, record-*, kd-share-*, kd-record-*, rm, etc.)
+  // Bucket is auto-detected from the command verb inside executeKeeperCommand,
+  // so resolvers and other call sites don't need to opt in to a bucket.
   rateLimit: {
-    // Per-user limits
-    perMinute: 5,                    // Max commands per minute per user
-    perHour: 50,                     // Max commands per hour per user
+    // Read-only / list bucket. Generous so UI dropdowns and Classic-toggle
+    // refreshes never trip the limit.
+    read: {
+      perMinute: 30,
+      perHour: 300,
+    },
+    // Mutation bucket. Kept conservative to protect Commander queue capacity.
+    write: {
+      perMinute: 5,                  // Max write commands per minute per user
+      perHour: 50,                   // Max write commands per hour per user
+    },
     minuteWindowMs: 60 * 1000,       // 1 minute window
     hourWindowMs: 60 * 60 * 1000,    // 1 hour window
   },
@@ -197,24 +211,54 @@ async function fetchWithRetry(url, options = {}, operationName = 'Keeper API') {
 // Rate Limiting Functions
 // ============================================================================
 
+// Verbs considered read-only / idempotent. Anything else is treated as a
+// write. Match is case-insensitive on the first whitespace-delimited token.
+// Keep in sync with ALLOWED_COMMAND_PREFIXES in src/index.js.
+const READ_ONLY_COMMAND_VERBS = new Set([
+  'list', 'ls', 'get', 'search', 'tree', 'cd',
+  'kd-list', 'kd-get',
+  'record-type-info', 'rti',
+  'service-status',
+  'enterprise-info', 'ei', 'enterprise-role', 'enterprise-user',
+]);
+
+/**
+ * Classify a Keeper Commander command string into a rate-limit bucket.
+ * Used by executeKeeperCommand so resolvers don't need to know about buckets.
+ * @param {string} command - Full command, e.g. "kd-list --records --format=json"
+ * @returns {'read'|'write'}
+ */
+function getRateLimitBucketForCommand(command) {
+  if (typeof command !== 'string' || !command.trim()) return 'write';
+  const verb = command.trim().split(/\s+/)[0].toLowerCase();
+  return READ_ONLY_COMMAND_VERBS.has(verb) ? 'read' : 'write';
+}
+
 /**
  * Check and update rate limit for a user
  * Uses dual-window rate limiting: per-minute and per-hour
- * 
+ * Each bucket ('read' / 'write') has its own storage entry so they
+ * cannot starve each other.
+ *
  * @param {string} userId - Unique user identifier (accountId)
+ * @param {'read'|'write'} [bucket='write'] - Which rate-limit bucket to apply
  * @returns {Promise<Object>} - { allowed: boolean, error?: string, retryAfter?: number }
  */
-export async function checkCommandRateLimit(userId) {
+export async function checkCommandRateLimit(userId, bucket = 'write') {
   if (!userId) {
     // If no user ID available, use a global limit (more restrictive)
     userId = 'global';
   }
-  
+
+  // Fall back to the conservative write bucket if an unknown bucket is passed.
+  const limits = API_CONFIG.rateLimit[bucket] || API_CONFIG.rateLimit.write;
+
   const now = Date.now();
   const minuteWindowStart = now - API_CONFIG.rateLimit.minuteWindowMs;
   const hourWindowStart = now - API_CONFIG.rateLimit.hourWindowMs;
-  
-  const rateLimitKey = `keeper-cmd-ratelimit-${userId}`;
+
+  // Per-bucket storage key — keeps read/write counters fully independent.
+  const rateLimitKey = `keeper-cmd-ratelimit-${bucket}-${userId}`;
   
   // Get current rate limit data
   let rateLimitData = await storage.get(rateLimitKey);
@@ -235,43 +279,45 @@ export async function checkCommandRateLimit(userId) {
   const requestsInMinute = rateLimitData.requests.filter(t => t > minuteWindowStart).length;
   const requestsInHour = rateLimitData.requests.length;
   
-  // Check minute limit
-  if (requestsInMinute >= API_CONFIG.rateLimit.perMinute) {
+  // Check minute limit (per-bucket)
+  if (requestsInMinute >= limits.perMinute) {
     // Find when the oldest request in the minute window will expire
     const oldestInMinute = rateLimitData.requests
       .filter(t => t > minuteWindowStart)
       .sort((a, b) => a - b)[0];
     const retryAfter = Math.ceil((oldestInMinute + API_CONFIG.rateLimit.minuteWindowMs - now) / 1000);
-    
+
     // Save the data (to preserve request history)
     await storage.set(rateLimitKey, rateLimitData);
-    
+
     return {
       allowed: false,
-      error: `Rate limit exceeded: Maximum ${API_CONFIG.rateLimit.perMinute} commands per minute. Please wait ${retryAfter} seconds.`,
+      error: `Rate limit exceeded (${bucket}): Maximum ${limits.perMinute} commands per minute. Please wait ${retryAfter} seconds.`,
       retryAfter: retryAfter,
       limitType: 'minute',
+      bucket,
       remaining: {
         minute: 0,
-        hour: Math.max(0, API_CONFIG.rateLimit.perHour - requestsInHour)
+        hour: Math.max(0, limits.perHour - requestsInHour)
       }
     };
   }
-  
-  // Check hour limit
-  if (requestsInHour >= API_CONFIG.rateLimit.perHour) {
+
+  // Check hour limit (per-bucket)
+  if (requestsInHour >= limits.perHour) {
     // Find when the oldest request in the hour window will expire
     const oldestInHour = rateLimitData.requests.sort((a, b) => a - b)[0];
     const retryAfter = Math.ceil((oldestInHour + API_CONFIG.rateLimit.hourWindowMs - now) / 1000);
-    
+
     // Save the data
     await storage.set(rateLimitKey, rateLimitData);
-    
+
     return {
       allowed: false,
-      error: `Rate limit exceeded: Maximum ${API_CONFIG.rateLimit.perHour} commands per hour. Please wait ${Math.ceil(retryAfter / 60)} minutes.`,
+      error: `Rate limit exceeded (${bucket}): Maximum ${limits.perHour} commands per hour. Please wait ${Math.ceil(retryAfter / 60)} minutes.`,
       retryAfter: retryAfter,
       limitType: 'hour',
+      bucket,
       remaining: {
         minute: 0,
         hour: 0
@@ -288,46 +334,58 @@ export async function checkCommandRateLimit(userId) {
   
   return {
     allowed: true,
+    bucket,
     remaining: {
-      minute: API_CONFIG.rateLimit.perMinute - requestsInMinute - 1,
-      hour: API_CONFIG.rateLimit.perHour - requestsInHour - 1
+      minute: limits.perMinute - requestsInMinute - 1,
+      hour: limits.perHour - requestsInHour - 1
     }
   };
 }
 
 /**
- * Get current rate limit status for a user (without incrementing)
+ * Get current rate limit status for a user (without incrementing).
+ * Returns per-bucket detail under `read` / `write` plus legacy top-level
+ * fields that mirror the write bucket — keeps older UI status displays
+ * working without changes.
+ *
  * @param {string} userId - Unique user identifier
- * @returns {Promise<Object>} - Current rate limit status
+ * @returns {Promise<Object>} - { read, write, limits, usage, remaining }
  */
 export async function getRateLimitStatus(userId) {
   if (!userId) userId = 'global';
-  
+
   const now = Date.now();
   const minuteWindowStart = now - API_CONFIG.rateLimit.minuteWindowMs;
   const hourWindowStart = now - API_CONFIG.rateLimit.hourWindowMs;
-  
-  const rateLimitKey = `keeper-cmd-ratelimit-${userId}`;
-  const rateLimitData = await storage.get(rateLimitKey) || { requests: [] };
-  
-  // Filter to current windows
-  const validRequests = rateLimitData.requests.filter(t => t > hourWindowStart);
-  const requestsInMinute = validRequests.filter(t => t > minuteWindowStart).length;
-  const requestsInHour = validRequests.length;
-  
+
+  // Read each per-bucket storage entry and compute usage/remaining.
+  const snapshot = async (bucket) => {
+    const limits = API_CONFIG.rateLimit[bucket];
+    const data = (await storage.get(`keeper-cmd-ratelimit-${bucket}-${userId}`)) || { requests: [] };
+    // Filter to current windows
+    const validRequests = (data.requests || []).filter(t => t > hourWindowStart);
+    const requestsInMinute = validRequests.filter(t => t > minuteWindowStart).length;
+    const requestsInHour = validRequests.length;
+    return {
+      limits: { perMinute: limits.perMinute, perHour: limits.perHour },
+      usage: { minute: requestsInMinute, hour: requestsInHour },
+      remaining: {
+        minute: Math.max(0, limits.perMinute - requestsInMinute),
+        hour: Math.max(0, limits.perHour - requestsInHour)
+      }
+    };
+  };
+
+  const read = await snapshot('read');
+  const write = await snapshot('write');
+
   return {
-    limits: {
-      perMinute: API_CONFIG.rateLimit.perMinute,
-      perHour: API_CONFIG.rateLimit.perHour
-    },
-    usage: {
-      minute: requestsInMinute,
-      hour: requestsInHour
-    },
-    remaining: {
-      minute: Math.max(0, API_CONFIG.rateLimit.perMinute - requestsInMinute),
-      hour: Math.max(0, API_CONFIG.rateLimit.perHour - requestsInHour)
-    }
+    read,
+    write,
+    // Back-compat: legacy callers see the write bucket at the root.
+    limits: write.limits,
+    usage: write.usage,
+    remaining: write.remaining
   };
 }
 
@@ -820,26 +878,35 @@ export async function fetchEpmApprovalDetails(requestUid) {
 
 /**
  * Execute a Keeper Commander command using API v2 async queue
- * Includes per-user rate limiting to prevent queue overflow
- * 
+ * Includes per-user rate limiting to prevent queue overflow.
+ *
+ * Rate-limit bucket is auto-detected from the command verb (read vs write).
+ * Callers can pass `options.bucket` to override this, but it is usually not
+ * needed — resolvers remain bucket-agnostic.
+ *
  * @param {string} command - The command to execute
  * @param {Object} options - Optional configuration
  * @param {string} options.userId - User ID for rate limiting (accountId)
  * @param {boolean} options.skipRateLimit - Skip rate limiting (for internal/system calls)
  * @param {boolean} options.forgeSafe - Cap async polling for Forge 25s limit
+ * @param {'read'|'write'} [options.bucket] - Explicit rate-limit bucket override
  * @returns {Promise<Object>} - API response
  */
 export async function executeKeeperCommand(command, options = {}) {
-  const { userId, skipRateLimit = false, forgeSafe = false } = options;
-  
+  const { userId, skipRateLimit = false, forgeSafe = false, bucket } = options;
+
+  // Auto-detect read vs write so resolvers don't have to know about buckets.
+  const effectiveBucket = bucket || getRateLimitBucketForCommand(command);
+
   // Apply rate limiting unless explicitly skipped
   if (!skipRateLimit) {
-    const rateLimit = await checkCommandRateLimit(userId);
+    const rateLimit = await checkCommandRateLimit(userId, effectiveBucket);
     if (!rateLimit.allowed) {
       const error = new Error(rateLimit.error);
       error.rateLimited = true;
       error.retryAfter = rateLimit.retryAfter;
       error.limitType = rateLimit.limitType;
+      error.bucket = effectiveBucket;
       throw error;
     }
   }
