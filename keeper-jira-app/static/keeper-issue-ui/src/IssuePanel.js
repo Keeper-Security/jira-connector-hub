@@ -10,7 +10,7 @@ import ErrorIcon from "@atlaskit/icon/glyph/error";
 import LockIcon from "@atlaskit/icon/glyph/lock";
 import CrossIcon from "@atlaskit/icon/glyph/cross";
 
-import { KEEPER_ACTION_OPTIONS, PAGINATION_SETTINGS } from "./constants";
+import { KEEPER_ACTION_OPTIONS, KEEPER_ACTION_OPTIONS_KD, PAGINATION_SETTINGS } from "./constants";
 import * as api from "./services/api";
 import { handleApiError as handleApiErrorUtil, isStructuredError, getErrorCode } from "./utils/errorHandler";
 import { formatWithUid, filterByTitleOrUid } from "./utils/formatters";
@@ -97,14 +97,16 @@ const IssuePanel = () => {
   
   // Email validation state
   const [emailValidationError, setEmailValidationError] = useState(null);
-  
-  // Pagination settings - using imported constants
+
+  // Vault mode: KD by default; Classic when user opts in via checkbox.
+  const [isKeeperDriveMode, setIsKeeperDriveMode] = useState(true);
+
+  // Pagination settings
   const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
   const recordsPerPage = PAGINATION_SETTINGS.RECORDS_PER_PAGE;
   const foldersPerPage = PAGINATION_SETTINGS.FOLDERS_PER_PAGE;
 
-  // Centralized error handler for API calls
-  // Uses the utility function with isAdmin context for better messages
+  // Error handler wrapper for API calls
   const handleApiError = (error, defaultMessage = "An error occurred") => {
     return handleApiErrorUtil(error, defaultMessage);
   };
@@ -114,16 +116,51 @@ const IssuePanel = () => {
     return isStructuredError(result);
   };
 
-  // Get keeper action options with dynamic record types
+  // Classic / KD badge for picker items; defaults to Classic if source is missing.
+  const renderSourceBadge = (item) => {
+    if (!item) return null;
+    const source = item.source || 'classic';
+    const isKd = source === 'kd';
+    return (
+      <span className={`source-badge ${isKd ? 'source-badge-kd' : 'source-badge-classic'}`}>
+        {isKd ? 'KD' : 'Classic'}
+      </span>
+    );
+  };
+
+  // Lock mode checkbox when admin opens any stored request.
+  const isModeLocked = isAdmin && hasStoredData;
+
+  const activeVaultMode = isKeeperDriveMode ? 'kd' : 'classic';
+
+  const isSharableFolder = (folder) =>
+    folder.source === 'kd' || folder.shared || (folder.flags && folder.flags.includes('S'));
+
+  // Render nested KD folder path (hidden for Classic or when path equals folder name).
+  const renderFolderPath = (folder) => {
+    if (!folder || folder.source !== 'kd') return null;
+    const path = folder.path || folder.folderPath || '';
+    if (!path || path === folder.name || path === folder.title) return null;
+    return <div className="kd-folder-path">{path}</div>;
+  };
+
+  // Action options with dynamic record types. KD mode merges overrides from KEEPER_ACTION_OPTIONS_KD.
   const getKeeperActionOptions = () => {
     const dynamicRecordTypeOptions = recordTypes;
+    const kdOverridesByValue = isKeeperDriveMode
+      ? KEEPER_ACTION_OPTIONS_KD.reduce((acc, action) => {
+          acc[action.value] = action;
+          return acc;
+        }, {})
+      : {};
 
     return keeperActionOptions
       .map(action => {
-        if (action.value === 'record-update' || action.value === 'record-add') {
+        const merged = kdOverridesByValue[action.value] || action;
+        if (merged.value === 'record-update' || merged.value === 'record-add') {
           return {
-            ...action,
-            fields: action.fields.map(field => {
+            ...merged,
+            fields: merged.fields.map(field => {
               if (field.name === 'recordType') {
                 return {
                   ...field,
@@ -134,7 +171,7 @@ const IssuePanel = () => {
             })
           };
         }
-        return action;
+        return merged;
       })
       .filter(action => {
         // Hide "Create New Secret" (record-add) and "Update Record" (record-update) from non-admin users
@@ -156,22 +193,24 @@ const IssuePanel = () => {
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedOptions = filteredOptions.slice(startIndex, startIndex + itemsPerPage);
 
+  // Defense-in-depth: filter records/folders to match active vault mode.
+  const recordsForActiveMode = keeperRecords.filter(record => (record.source || 'classic') === activeVaultMode);
+  const foldersForActiveMode = keeperFolders.filter(folder => (folder.source || 'classic') === activeVaultMode);
+
   // Filter and paginate records (search by title or UID)
-  const filteredRecords = filterByTitleOrUid(keeperRecords, recordSearchTerm, 'title', 'record_uid');
+  const filteredRecords = filterByTitleOrUid(recordsForActiveMode, recordSearchTerm, 'title', 'record_uid');
   const totalRecordPages = Math.ceil(filteredRecords.length / recordsPerPage);
   const recordStartIndex = (recordCurrentPage - 1) * recordsPerPage;
   const paginatedRecords = filteredRecords.slice(recordStartIndex, recordStartIndex + recordsPerPage);
 
-  // Filter and paginate folders
   const getFilteredFolders = () => {
-    let foldersToFilter = keeperFolders;
-    
-    // For record-permission and share-folder, only show shared folders (flags contains "S")
+    let foldersToFilter = foldersForActiveMode;
+
+    // For share/permission actions, show only sharable folders.
     if (selectedAction?.value === 'record-permission' || selectedAction?.value === 'share-folder') {
-      foldersToFilter = keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')));
+      foldersToFilter = foldersToFilter.filter(isSharableFolder);
     }
-    
-    // Apply search filter (search by name/title or UID)
+
     return filterByTitleOrUid(foldersToFilter, folderSearchTerm, ['name', 'title'], ['folder_uid', 'folderUid']);
   };
   
@@ -180,8 +219,8 @@ const IssuePanel = () => {
   const folderStartIndex = (folderCurrentPage - 1) * foldersPerPage;
   const paginatedFolders = filteredFolders.slice(folderStartIndex, folderStartIndex + foldersPerPage);
 
-  // Filter and paginate records for record-update (search by title or UID)
-  const filteredRecordsForUpdate = filterByTitleOrUid(keeperRecords, recordForUpdateSearchTerm, 'title', 'record_uid');
+  // Records for record-update (filtered by active vault mode).
+  const filteredRecordsForUpdate = filterByTitleOrUid(recordsForActiveMode, recordForUpdateSearchTerm, 'title', 'record_uid');
   const totalRecordForUpdatePages = Math.ceil(filteredRecordsForUpdate.length / recordsPerPage);
   const recordForUpdateStartIndex = (recordForUpdateCurrentPage - 1) * recordsPerPage;
   const paginatedRecordsForUpdate = filteredRecordsForUpdate.slice(recordForUpdateStartIndex, recordForUpdateStartIndex + recordsPerPage);
@@ -206,50 +245,102 @@ const IssuePanel = () => {
     setRecordForUpdateCurrentPage(1);
   }, [recordForUpdateSearchTerm]);
 
-  // Fetch Keeper records when needed
-  const fetchKeeperRecords = async () => {
+
+  const fetchKeeperRecords = async (modeOverride) => {
+    const mode = modeOverride || activeVaultMode;
+    const token = ++fetchTokensRef.current.records;
     setLoadingRecords(true);
     try {
-      const result = await api.getKeeperRecords();
+      const result = await api.getKeeperRecords(mode);
+      if (token !== fetchTokensRef.current.records) return;
       setKeeperRecords(result.records || []);
     } catch (error) {
-      // Handle error
+      if (token !== fetchTokensRef.current.records) return;
       const errorMessage = handleApiError(error, "Failed to fetch Keeper records");
-      
-      setLastResult({ 
-        success: false, 
+      setLastResult({
+        success: false,
         message: errorMessage
       });
-      
       setKeeperRecords([]);
     } finally {
-      setLoadingRecords(false);
+      if (token === fetchTokensRef.current.records) setLoadingRecords(false);
     }
   };
 
-  // Fetch Keeper folders when needed
-  const fetchKeeperFolders = async () => {
+  const fetchKeeperFolders = async (modeOverride) => {
+    const mode = modeOverride || activeVaultMode;
+    const token = ++fetchTokensRef.current.folders;
     setLoadingFolders(true);
     try {
-      const result = await api.getKeeperFolders();
+      const result = await api.getKeeperFolders(mode);
+      if (token !== fetchTokensRef.current.folders) return;
       setKeeperFolders(result.folders || []);
     } catch (error) {
-      // Handle error
+      if (token !== fetchTokensRef.current.folders) return;
       const errorMessage = handleApiError(error, "Failed to fetch Keeper folders");
-      
-      setLastResult({ 
-        success: false, 
+      setLastResult({
+        success: false,
         message: errorMessage
       });
-      
       setKeeperFolders([]);
     } finally {
-      setLoadingFolders(false);
+      if (token === fetchTokensRef.current.folders) setLoadingFolders(false);
     }
+  };
+
+  // Reset all selection state when switching vault mode.
+  const resetVaultSelectionState = () => {
+    setSelectedRecord(null);
+    setSelectedFolder(null);
+    setSelectedRecordForUpdate(null);
+    setKeeperRecords([]);
+    setKeeperFolders([]);
+    setRecordSearchTerm('');
+    setFolderSearchTerm('');
+    setRecordForUpdateSearchTerm('');
+    setRecordCurrentPage(1);
+    setFolderCurrentPage(1);
+    setRecordForUpdateCurrentPage(1);
+    setShowRecordDropdown(false);
+    setShowFolderDropdown(false);
+    setShowRecordForUpdateDropdown(false);
+    setFormData(prev => {
+      const cleared = { ...prev };
+      delete cleared.can_share;
+      delete cleared.can_write;
+      delete cleared.manage_records;
+      delete cleared.manage_users;
+      delete cleared.can_edit;
+      delete cleared.role;
+      delete cleared.recursive;
+      return cleared;
+    });
+  };
+
+  const handleKeeperDriveToggle = (next) => {
+    setIsKeeperDriveMode(next);
+    resetVaultSelectionState();
+    // Eagerly mark loading only for categories the data effect will actually
+    // refetch, so each flag has a fetch that will reset it. Mirrors the
+    // condition logic in the fetch effect below.
+    const action = selectedAction?.value;
+    const shouldFetchData = issueContext?.hasConfig || isAdmin;
+    const willFetchRecords = shouldFetchData && (action === 'share-record' || action === 'record-update');
+    const willFetchFolders = shouldFetchData && (
+      action === 'share-record' ||
+      action === 'share-folder' ||
+      action === 'record-permission' ||
+      action === 'record-add'
+    );
+    if (willFetchRecords) setLoadingRecords(true);
+    if (willFetchFolders) setLoadingFolders(true);
   };
   // Flag to track if we're preserving stored data
   const [isPreservingStoredData, setIsPreservingStoredData] = useState(false);
   const isPreservingStoredDataRef = useRef(false);
+
+  // Token guard: only the latest record/folder fetch may write state.
+  const fetchTokensRef = useRef({ records: 0, folders: 0 });
   
   // Fetch Keeper record details when needed for record-update
   const fetchKeeperRecordDetails = async (recordUid, preserveStoredData = null) => {
@@ -846,120 +937,58 @@ const IssuePanel = () => {
     return templates[recordType] || { fields: [] };
   };
 
+  // Restore a stored request snapshot into component state (shared by admin and non-admin paths).
+  const restoreStoredData = (data) => {
+    setStoredRequestData(data);
+    setHasStoredData(true);
+    setSelectedAction(data.selectedAction);
+    setFormData(data.formData || {});
+
+    setIsKeeperDriveMode(data.isKeeperDriveMode !== false);
+
+    if (data.formData?.addressRef?.startsWith('temp_addr_')) {
+      const uid = data.formData.addressRef;
+      const addrData = data.tempAddressData?.[uid];
+      if (addrData) {
+        setResolvedAddresses(prev => ({ ...prev, [uid]: addrData }));
+      }
+    }
+
+    setTimeout(() => {
+      if (data.selectedAction?.value === 'record-update' && data.selectedRecordForUpdate) {
+        setSelectedRecordForUpdate(data.selectedRecordForUpdate);
+        fetchKeeperRecords();
+        fetchKeeperRecordDetails(data.selectedRecordForUpdate.record_uid, data);
+        fetchRecordTypes();
+      } else if (data.selectedAction?.value === 'record-add' && data.formData?.recordType) {
+        fetchRecordTypeTemplateWithFormMapping(data.formData.recordType, data.formData);
+        fetchRecordTypes();
+      }
+      if (data.selectedRecord) setSelectedRecord(data.selectedRecord);
+      if (data.selectedFolder) setSelectedFolder(data.selectedFolder);
+    }, 200);
+  };
+
   // Check user role and load stored data
   const checkUserRoleAndLoadData = async (context = issueContext) => {
     try {
-      // Ensure we have a valid context with issueKey
       if (!context || !context.issueKey) {
         setIsAdmin(false);
         return;
       }
       
-      // Set flag to prevent action change reset during data loading
       setIsLoadingStoredData(true);
       
-      // Check if current user is admin by calling the backend
       const userRole = await api.getUserRole(context.issueKey);
       setIsAdmin(userRole.isAdmin || false);
       
-      // If admin, try to load any stored request data
-      if (userRole.isAdmin) {
-        const storedData = await api.getStoredRequestData(context.issueKey);
-        if (storedData && storedData.data) {
-          setStoredRequestData(storedData.data);
-          setHasStoredData(true);
-          
-          // Pre-populate form with stored data for admin
-          setSelectedAction(storedData.data.selectedAction);
-          setFormData(storedData.data.formData || {});
-          
-          // Restore temporary address data if present
-          if (storedData.data.formData?.addressRef && storedData.data.formData.addressRef.startsWith('temp_addr_')) {
-            const tempAddressUid = storedData.data.formData.addressRef;
-            const tempAddressData = storedData.data.tempAddressData?.[tempAddressUid];
-            if (tempAddressData) {
-              setResolvedAddresses(prev => ({
-                ...prev,
-                [tempAddressUid]: tempAddressData
-              }));
-            }
-          }
-          
-          // Restore selected records for record-update actions
-          // Use setTimeout to ensure state updates complete before triggering any side effects
-          setTimeout(() => {
-            if (storedData.data.selectedAction?.value === 'record-update' && storedData.data.selectedRecordForUpdate) {
-              setSelectedRecordForUpdate(storedData.data.selectedRecordForUpdate);
-              // Fetch all necessary data to ensure form conditions are met
-              fetchKeeperRecords();
-              // Pass the stored data to preserve user's saved values
-              fetchKeeperRecordDetails(storedData.data.selectedRecordForUpdate.record_uid, storedData.data);
-              fetchRecordTypes();
-            } else if (storedData.data.selectedAction?.value === 'record-add' && storedData.data.formData?.recordType) {
-              // For record-add actions, fetch the template for the stored record type
-              fetchRecordTypeTemplateWithFormMapping(storedData.data.formData.recordType, storedData.data.formData);
-              fetchRecordTypes();
-            }
-            if (storedData.data.selectedRecord) {
-              setSelectedRecord(storedData.data.selectedRecord);
-            }
-            if (storedData.data.selectedFolder) {
-              setSelectedFolder(storedData.data.selectedFolder);
-            }
-          }, 200); // Delay to allow template processing to start
-        }
-      } else {
-        // For regular users, check if they have previously stored data
-        const storedData = await api.getStoredRequestData(context.issueKey);
-        if (storedData && storedData.data) {
-          setHasStoredData(true);
-          // Pre-populate their own stored data
-          setStoredRequestData(storedData.data);
-          setSelectedAction(storedData.data.selectedAction);
-          setFormData(storedData.data.formData || {});
-          
-          // Restore temporary address data if present
-          if (storedData.data.formData?.addressRef && storedData.data.formData.addressRef.startsWith('temp_addr_')) {
-            const tempAddressUid = storedData.data.formData.addressRef;
-            const tempAddressData = storedData.data.tempAddressData?.[tempAddressUid];
-            if (tempAddressData) {
-              setResolvedAddresses(prev => ({
-                ...prev,
-                [tempAddressUid]: tempAddressData
-              }));
-            }
-          }
-          
-          // Restore selected records for record-update actions
-          // Use setTimeout to ensure state updates complete before triggering any side effects
-          setTimeout(() => {
-            if (storedData.data.selectedAction?.value === 'record-update' && storedData.data.selectedRecordForUpdate) {
-              
-              setSelectedRecordForUpdate(storedData.data.selectedRecordForUpdate);
-              // Fetch all necessary data to ensure form conditions are met
-              fetchKeeperRecords();
-              // Pass the stored data to preserve user's saved values
-              fetchKeeperRecordDetails(storedData.data.selectedRecordForUpdate.record_uid, storedData.data);
-              fetchRecordTypes();
-            } else if (storedData.data.selectedAction?.value === 'record-add' && storedData.data.formData?.recordType) {
-              // For record-add actions, fetch the template for the stored record type
-              fetchRecordTypeTemplateWithFormMapping(storedData.data.formData.recordType, storedData.data.formData);
-              fetchRecordTypes();
-            }
-            if (storedData.data.selectedRecord) {
-              setSelectedRecord(storedData.data.selectedRecord);
-            }
-            if (storedData.data.selectedFolder) {
-              setSelectedFolder(storedData.data.selectedFolder);
-            }
-          }, 200); // Delay to allow template processing to start
-        }
+      const storedData = await api.getStoredRequestData(context.issueKey);
+      if (storedData && storedData.data) {
+        restoreStoredData(storedData.data);
       }
     } catch (error) {
-      // Default to non-admin if check fails
       setIsAdmin(false);
     } finally {
-      // Clear the loading flag after data is loaded (or failed to load)
       setTimeout(() => setIsLoadingStoredData(false), 200);
     }
   };
@@ -998,7 +1027,8 @@ const IssuePanel = () => {
         selectedRecord,
         selectedRecordForUpdate,
         selectedFolder,
-        tempAddressData, // Store temporary address data
+        tempAddressData,
+        isKeeperDriveMode,
         timestamp: now.toISOString()
       };
       
@@ -2440,13 +2470,19 @@ const IssuePanel = () => {
     if (selectedAction && (selectedAction.value === 'record-add' || selectedAction.value === 'record-update') && !isLoadingStoredData && shouldFetchData) {
       fetchRecordTypes();
     }
-    
+
+    // Fetch folders for record-add: KD requires a folder (`kd-record-add
+    // --folder=`); Classic folder is optional (root when omitted).
+    if (selectedAction && selectedAction.value === 'record-add' && !isLoadingStoredData && shouldFetchData) {
+      fetchKeeperFolders();
+    }
+
     // Fetch folders when share-folder or record-permission is selected
     // Only fetch if config exists or user is admin
     if (selectedAction && (selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission') && shouldFetchData) {
       fetchKeeperFolders();
     }
-  }, [selectedAction, isLoadingStoredData, isAdmin, issueContext]);
+  }, [selectedAction, isLoadingStoredData, isAdmin, issueContext, isKeeperDriveMode]);
 
   // Auto-dismiss workflow info dialog after 5 seconds
   useEffect(() => {
@@ -2709,8 +2745,9 @@ const IssuePanel = () => {
         return false;
       }
       
-      // For revoke action, at least one permission flag (can_share or can_edit) must be selected
-      if (formData.action === 'revoke') {
+      // Classic: require at least one of can_edit/can_share. KD uses --role instead.
+      if (!isKeeperDriveMode &&
+          (formData.action === 'grant' || formData.action === 'revoke')) {
         const hasPermissionFlags = formData.can_share || formData.can_edit;
         if (!hasPermissionFlags) {
           return false;
@@ -2725,8 +2762,18 @@ const IssuePanel = () => {
       // Get dynamic action with updated record type options
       const dynamicAction = getKeeperActionOptions().find(action => action.value === 'record-add');
       
+      if (isKeeperDriveMode) {
+        const folderUid = selectedFolder?.folder_uid || selectedFolder?.folderUid || selectedFolder?.uid || formData.folder;
+        if (!folderUid || String(folderUid).trim() === '') {
+          return false;
+        }
+      }
+
       // Validate standard fields (including recordType)
       for (let field of (dynamicAction?.fields || [])) {
+        if (field.type === 'folder-select') {
+          continue;
+        }
         if (field.required && (!formData[field.name] || formData[field.name].trim() === '')) {
           return false;
         }
@@ -2750,8 +2797,42 @@ const IssuePanel = () => {
         return false;
       }
     }
-    
+
+    // KD: role is required on grant for share/permission actions.
+    if (isKeeperDriveMode &&
+        ['share-record', 'share-folder', 'record-permission'].includes(selectedAction.value) &&
+        formData.action === 'grant' &&
+        (!formData.role || String(formData.role).trim() === '')) {
+      return false;
+    }
+
     return true;
+  };
+
+  const renderClassicModeCheckbox = () => {
+    const isFetchingVault = loadingRecords || loadingFolders;
+    const isCheckboxDisabled = isFormDisabled || isExecuting || isModeLocked || isFetchingVault;
+    return (
+      <div className="classic-mode-toggle">
+        <label className={`classic-mode-label ${isCheckboxDisabled ? 'classic-mode-label-disabled' : ''}`}>
+          <input
+            type="checkbox"
+            className="classic-mode-input"
+            checked={!isKeeperDriveMode}
+            disabled={isCheckboxDisabled}
+            onChange={(e) => handleKeeperDriveToggle(!e.target.checked)}
+          />
+          <span className="classic-mode-text">Use classic permission model</span>
+        </label>
+        <p className="classic-mode-description">
+          {isFetchingVault
+            ? 'Loading vault contents...'
+            : isModeLocked
+              ? `Locked to ${isKeeperDriveMode ? 'Keeper Drive' : 'Classic'} per the saved request.`
+              : 'Limit sharing to basic access levels. Recommended only for compatibility with older workflows.'}
+        </p>
+      </div>
+    );
   };
 
   // Render form input based on field type
@@ -2861,14 +2942,27 @@ const IssuePanel = () => {
         const isCancelSelectedForFolder = selectedAction?.value === 'share-record' && formData.action === 'cancel';
         // For cancel action, only enable folder dropdown for admin users
         // For other actions, disable if record is selected
-        const isFolderFieldDisabled = isFormDisabled || 
-          (formData.record || selectedRecord) || 
+        const isRecordAddFolderField = selectedAction?.value === 'record-add';
+        const isFolderFieldDisabled = isFormDisabled ||
+          (!isRecordAddFolderField && (formData.record || selectedRecord)) ||
           (isCancelSelectedForFolder && !isAdmin);
+        const usableFoldersForPicker = foldersForActiveMode.filter(
+          (folder) => folder.folder_uid || folder.folderUid || folder.uid
+        );
+        const showKdFolderEmptyMessage =
+          isKeeperDriveMode &&
+          selectedAction?.value === 'record-add' &&
+          !loadingFolders &&
+          usableFoldersForPicker.length === 0;
         return (
           <div className="relative">
             <input
               type="text"
-              value={selectedFolder ? (selectedFolder.name || selectedFolder.folderPath) : ''}
+              value={
+                selectedFolder
+                  ? (selectedFolder.path || selectedFolder.name || selectedFolder.folderPath)
+                  : ''
+              }
               placeholder={
                 isFolderFieldDisabled 
                   ? (isCancelSelectedForFolder && !isAdmin 
@@ -2894,11 +2988,21 @@ const IssuePanel = () => {
                 ▼
               </div>
             )}
-            {showFolderDropdown && !isFolderFieldDisabled && keeperFolders.length > 0 && (() => {
-              // Filter to show only shared folders for share-record action (same logic as share-folder/record-permission)
-              const sharedFolders = selectedAction?.value === 'share-record' 
-                ? keeperFolders.filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')))
-                : keeperFolders;
+            {loadingFolders && (
+              <div className="loading-indicator">
+                {isKeeperDriveMode ? 'Loading Keeper Drive folders...' : 'Loading folders...'}
+              </div>
+            )}
+            {showKdFolderEmptyMessage && (
+              <div className="error-text">
+                No Keeper Drive folders found. Create folders in Keeper Drive and ensure your account has access.
+              </div>
+            )}
+            {showFolderDropdown && !isFolderFieldDisabled && usableFoldersForPicker.length > 0 && (() => {
+              // For share-record, show only sharable folders.
+              const sharedFolders = selectedAction?.value === 'share-record'
+                ? usableFoldersForPicker.filter(isSharableFolder)
+                : usableFoldersForPicker;
               
               // Apply search filter (search by name/path or UID)
               const searchFiltered = filterByTitleOrUid(sharedFolders, folderSearchTerm, ['name', 'folderPath'], ['folder_uid', 'folderUid']);
@@ -2954,7 +3058,9 @@ const IssuePanel = () => {
                           >
                             <div className="font-medium text-md text-primary">
                               {folder.name || folder.folderPath}
+                              {renderSourceBadge(folder)}
                             </div>
+                            {renderFolderPath(folder)}
                           </div>
                         ))
                       )}
@@ -3122,6 +3228,29 @@ const IssuePanel = () => {
             })}
           </select>
         );
+      case 'role': {
+        // KD role select with description beneath the dropdown.
+        const roleOptions = field.options || [];
+        const selectedRole = roleOptions.find(r => r && r.value === value);
+        return (
+          <div>
+            <select
+              value={value || ''}
+              disabled={isFormDisabled}
+              onChange={(e) => handleInputChange(field.name, e.target.value)}
+              className={getInputClassName()}
+            >
+              <option value="">{field.placeholder || 'Select role'}</option>
+              {roleOptions.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            {selectedRole && selectedRole.description && (
+              <div className="form-description">{selectedRole.description}</div>
+            )}
+          </div>
+        );
+      }
       case 'textarea':
         return (
           <textarea
@@ -3307,7 +3436,8 @@ const IssuePanel = () => {
         );
       case 'checkbox':
         // Special handling for recursive checkbox in share-record action
-        const isRecursiveDisabled = selectedAction?.value === 'share-record' && 
+        const isRecursiveDisabled = !isKeeperDriveMode &&
+                                     selectedAction?.value === 'share-record' && 
                                      field.name === 'recursive' && 
                                      (formData.record || !formData.sharedFolder);
         
@@ -3916,6 +4046,20 @@ const IssuePanel = () => {
       return;
     }
 
+    // Reject if selected items don't match the active vault mode.
+    const expectedLabel = isKeeperDriveMode ? 'Keeper Drive' : 'Classic';
+    const sourceMismatch =
+      (selectedRecord && (selectedRecord.source || 'classic') !== activeVaultMode) ||
+      (selectedRecordForUpdate && (selectedRecordForUpdate.source || 'classic') !== activeVaultMode) ||
+      (selectedFolder && (selectedFolder.source || 'classic') !== activeVaultMode);
+    if (sourceMismatch) {
+      setLastResult({
+        success: false,
+        message: `Selected record or folder type does not match the current mode (${expectedLabel}). Please reselect from the picker.`
+      });
+      return;
+    }
+
     setIsExecuting(true);
     setLastResult(null);
 
@@ -3942,6 +4086,11 @@ const IssuePanel = () => {
           finalParameters.phoneEntries = validPhoneEntries;
         }
       }
+
+      if (selectedAction.value === 'record-add' && selectedFolder) {
+        finalParameters.folder =
+          selectedFolder.folder_uid || selectedFolder.folderUid || selectedFolder.uid;
+      }
       
       if (selectedAction.value === 'share-record' && selectedRecord) {
         // Ensure record field is populated with selected record UID
@@ -3950,6 +4099,20 @@ const IssuePanel = () => {
         finalParameters.recordTitle = selectedRecord.title;
         // User/email and action fields are already in formData from manual input
         
+      }
+
+      // KD: share all records in a folder via kd-share-record <folderUid>.
+      if (
+        selectedAction.value === 'share-record' &&
+        isKeeperDriveMode &&
+        !selectedRecord &&
+        selectedFolder
+      ) {
+        finalParameters.sharedFolder =
+          selectedFolder.folder_uid ||
+          selectedFolder.uid ||
+          selectedFolder.path ||
+          selectedFolder.name;
       }
       
       if (selectedAction.value === 'record-update' && selectedRecordForUpdate) {
@@ -4080,42 +4243,36 @@ const IssuePanel = () => {
       }
       
       if (selectedAction.value === 'record-permission' && selectedFolder) {
-        // For record-permission command, format follows CLI pattern:
-        // record-permission FOLDER_UID -a ACTION [-d] [-s] [-R] [--force]
-        // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R --force
-        // -a = action (grant/revoke)
-        // -d = edit permission flag (can_edit)
-        // -s = share permission flag (can_share)
-        // -R = recursive flag (apply to all sub folders)
-        // --force = force flag (for grant and revoke actions)
-        
-        // Build the CLI command format
-        let commandParts = [
-          'record-permission',
-          selectedFolder.folder_uid || selectedFolder.uid || selectedFolder.path || selectedFolder.name
-        ];
-        
-        // Add required action (-a)
-        if (finalParameters.action) {
-          commandParts.push('-a', finalParameters.action);
+        const folderUid =
+          selectedFolder.folder_uid ||
+          selectedFolder.uid ||
+          selectedFolder.path ||
+          selectedFolder.name;
+
+        if (isKeeperDriveMode) {
+          // KD: pass structured params; backend builds kd-record-permission.
+          finalParameters = {
+            ...finalParameters,
+            folder: folderUid
+          };
+        } else {
+          // Classic record-permission: build cliCommand with -d/-s/-R/--force flags.
+          let commandParts = ['record-permission', folderUid];
+
+          if (finalParameters.action) {
+            commandParts.push('-a', finalParameters.action);
+          }
+          if (finalParameters.can_edit) commandParts.push('-d');
+          if (finalParameters.can_share) commandParts.push('-s');
+          if (finalParameters.recursive) commandParts.push('-R');
+          if (finalParameters.action === 'grant' || finalParameters.action === 'revoke') {
+            commandParts.push('--force');
+          }
+
+          finalParameters = {
+            cliCommand: commandParts.join(' ')
+          };
         }
-        
-        // Add edit permission flag (-d) if can_edit is true
-        if (finalParameters.can_edit) commandParts.push('-d');
-        
-        // Add share permission flag (-s) if can_share is true
-        if (finalParameters.can_share) commandParts.push('-s');
-        
-        // Add recursive flag (-R) if recursive is true
-        if (finalParameters.recursive) commandParts.push('-R');
-        
-        // Add force flag (--force) for grant and revoke actions
-        if (finalParameters.action === 'grant' || finalParameters.action === 'revoke') commandParts.push('--force');
-        
-        // Replace parameters with the properly formatted CLI command
-        finalParameters = {
-          cliCommand: commandParts.join(' ')
-        };
       }
       
       // Handle address creation before executing the main action
@@ -4157,7 +4314,7 @@ const IssuePanel = () => {
               });
             }
 
-            // Create the address record in Keeper using executeKeeperAction
+            // Address records are always created as Classic (no KD folder in this sub-flow).
             const addressResult = await api.executeKeeperAction(
               issueContext.issueKey,
               "record-add",
@@ -4181,7 +4338,9 @@ const IssuePanel = () => {
                   return acc;
                 }, {}),
                 notes: tempAddressData.tempData.notes || ''
-              }
+              },
+              null,
+              'classic'
             );
 
             if (addressResult && addressResult.record_uid) {
@@ -4224,9 +4383,10 @@ const IssuePanel = () => {
         selectedAction.value,
         selectedAction.description,
         finalParameters,
-        formattedTimestamp
+        formattedTimestamp,
+        activeVaultMode
       );
-      
+
       // Check for structured error response (new pattern)
       if (checkResultError(result)) {
         const errorMessage = handleApiError(result, "An error occurred");
@@ -4441,7 +4601,6 @@ const IssuePanel = () => {
           </h3>
         </div>
 
-
         {/* Configuration Status - Only show warning for admins */}
         {!issueContext.hasConfig && isAdmin && (
           <SectionMessage appearance="warning" title="Configuration Required">
@@ -4451,7 +4610,7 @@ const IssuePanel = () => {
         )}
 
         {/* Action Selection and Approval - Allow non-admin users even without config since they only submit requests */}
-        {(issueContext.hasConfig || !isAdmin) && (
+        {(issueContext.hasConfig || !isAdmin) && !isLoadingStoredData && (
           <>
             {/* Action Dropdown */}
             <div className="mb-12">
@@ -4610,6 +4769,8 @@ const IssuePanel = () => {
                     Required Information:
                   </div>
 
+                  {selectedAction.value === 'record-update' && renderClassicModeCheckbox()}
+
                   {/* Records Selector for record-update action only */}
                   {selectedAction.value === 'record-update' && (
                     <div className="mb-16">
@@ -4716,6 +4877,7 @@ const IssuePanel = () => {
                                       >
                                         <div className="dropdown-option-title">
                                           {record.title}
+                                          {renderSourceBadge(record)}
                                         </div>
                                         {record.record_uid && (
                                           <div className="dropdown-option-uid">
@@ -4886,6 +5048,7 @@ const IssuePanel = () => {
                                       >
                                         <div className="dropdown-option-title">
                                           {record.title}
+                                          {renderSourceBadge(record)}
                                         </div>
                                         {record.record_uid && (
                                           <div className="dropdown-option-uid">
@@ -5100,7 +5263,9 @@ const IssuePanel = () => {
                                         >
                                           <div className="font-semibold text-base text-primary">
                                             {folder.name || folder.folderPath}
+                                            {renderSourceBadge(folder)}
                                           </div>
+                                          {renderFolderPath(folder)}
                                           {(folder.folder_uid || folder.folderUid) && (
                                             <div className="dropdown-option-uid">
                                               UID: {folder.folder_uid || folder.folderUid}
@@ -5290,7 +5455,9 @@ const IssuePanel = () => {
                                       >
                                         <div className="dropdown-option-title">
                                           {folder.name || folder.title}
+                                          {renderSourceBadge(folder)}
                                         </div>
+                                        {renderFolderPath(folder)}
                                         {folder.folder_uid && (
                                           <div className="dropdown-option-uid">
                                             UID: {folder.folder_uid}
@@ -5595,8 +5762,36 @@ const IssuePanel = () => {
                   {/* Record Add Section - Step by Step Flow */}
                   {selectedAction.value === 'record-add' && (
                     <div>
+                      {renderClassicModeCheckbox()}
+                      {(() => {
+                        const recordAddAction = getKeeperActionOptions().find((action) => action.value === 'record-add');
+                        const folderFields = (recordAddAction?.fields || []).filter((field) => field.type === 'folder-select');
+                        if (folderFields.length === 0) return null;
+                        return (
+                          <>
+                            <div className="section-header">
+                              Step 1: Select Folder{isKeeperDriveMode ? '' : ' (optional)'}
+                            </div>
+                            {folderFields.map((field) => (
+                              <div key={field.name} className="mb-16">
+                                <label className="label-md-8">
+                                  {field.label}
+                                  {field.required && <span className="text-error"> *</span>}
+                                </label>
+                                {renderFormInput(field)}
+                                {!isKeeperDriveMode && (
+                                  <div className="helper-text-muted">
+                                    Leave empty to create the record at the vault root.
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </>
+                        );
+                      })()}
+
                       <div className="section-header">
-                        Step 1: Select Record Type
+                        Step 2: Select Record Type
                       </div>
                       
                       <div className="mb-16">
@@ -5626,7 +5821,11 @@ const IssuePanel = () => {
                               setTemplateFields([]);
                             }
                           }}
-                          className={isFormDisabled ? 'select-disabled-state' : (formData.recordType ? 'select-with-value' : 'select-no-value')}
+                          className={[
+                            'input-field',
+                            isFormDisabled && 'disabled',
+                            formData.recordType && 'has-value'
+                          ].filter(Boolean).join(' ')}
                         >
                           <option value="">
                             {recordTypes.length === 0 ? "Loading record types..." : "Select Type"}
@@ -5651,7 +5850,7 @@ const IssuePanel = () => {
                       {formData.recordType && (
                         <div>
                           <div className="section-header-bordered">
-                            Step 2: Configure {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType} Fields
+                            Step 3: Configure {recordTypes.find(rt => rt.value === formData.recordType)?.label || formData.recordType} Fields
                           </div>
                           
                           {/* Loading indicator when template is being fetched */}
@@ -5756,50 +5955,50 @@ const IssuePanel = () => {
                       return !shouldRemoveRecordField && !shouldRemoveFolderField && !shouldRemoveSharedFolderField && field.type !== 'checkbox';
                     })
                     .map((field) => (
-                      <div
-                        key={field.name}
-                        className="mb-12"
-                      >
-                        {/* Don't show label for phoneEntries type - it has its own header */}
-                        {field.type !== 'phoneEntries' && (
-                          <label className="label-record-add">
-                            {field.label}
-                            {/* Don't show required asterisk for non-admin users in share-record, share-folder, record-permission */}
-                            {/* EXCEPT for the action field which is now required */}
-                            {field.required && selectedAction.value !== 'record-update' && 
-                             (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
-                              (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
-                              <span className="text-error ml-4">*</span>
-                            )}
-                          </label>
-                        )}
-                        {renderFormInput(field)}
-                        {selectedAction.value === 'record-update' && (
-                          <div className="field-hint-text">
-                          </div>
-                        )}
-                        {/* Show hint for email field for admin users */}
-                        {field.name === 'user' && isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') && (
-                          <div className="field-hint-text">
-                            Tip: You can enter multiple email addresses separated by commas (e.g., user1@example.com, user2@example.com)
-                          </div>
-                        )}
-                        {/* Show email validation error for admin users */}
-                        {field.name === 'user' && isAdmin && emailValidationError && (
-                          <div className="field-error-text">
-                            {emailValidationError}
-                          </div>
-                        )}
-                        {/* Don't show error message for non-admin users in share-record, share-folder, record-permission */}
-                        {/* EXCEPT for the action field which is now required */}
-                        {field.required && !formData[field.name] && selectedAction.value !== 'record-update' && 
-                         (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
-                          (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
-                          <div className="field-error-text">
-                            This field is required
-                          </div>
-                        )}
-                      </div>
+                      <React.Fragment key={field.name}>
+                        {field.name === 'action' && renderClassicModeCheckbox()}
+                        <div className="mb-12">
+                          {/* Don't show label for phoneEntries type - it has its own header */}
+                          {field.type !== 'phoneEntries' && (
+                            <label className="label-record-add">
+                              {field.label}
+                              {/* Don't show required asterisk for non-admin users in share-record, share-folder, record-permission */}
+                              {/* EXCEPT for the action field which is now required */}
+                              {field.required && selectedAction.value !== 'record-update' && 
+                               (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
+                                (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
+                                <span className="text-error ml-4">*</span>
+                              )}
+                            </label>
+                          )}
+                          {renderFormInput(field)}
+                          {selectedAction.value === 'record-update' && (
+                            <div className="field-hint-text">
+                            </div>
+                          )}
+                          {/* Show hint for email field for admin users */}
+                          {field.name === 'user' && isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') && (
+                            <div className="field-hint-text">
+                              Tip: You can enter multiple email addresses separated by commas (e.g., user1@example.com, user2@example.com)
+                            </div>
+                          )}
+                          {/* Show email validation error for admin users */}
+                          {field.name === 'user' && isAdmin && emailValidationError && (
+                            <div className="field-error-text">
+                              {emailValidationError}
+                            </div>
+                          )}
+                          {/* Don't show error message for non-admin users in share-record, share-folder, record-permission */}
+                          {/* EXCEPT for the action field which is now required */}
+                          {field.required && !formData[field.name] && selectedAction.value !== 'record-update' && 
+                           (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
+                            (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
+                            <div className="field-error-text">
+                              This field is required
+                            </div>
+                          )}
+                        </div>
+                      </React.Fragment>
                     ))}
 
                   {/* Checkbox fields for share-folder, share-record, and record-permission actions */}
@@ -5816,6 +6015,17 @@ const IssuePanel = () => {
                         {renderFormInput(field)}
                       </div>
                     ))}
+
+                  {/* Classic: require at least one of can_edit/can_share for record-permission. */}
+                  {selectedAction.value === 'record-permission' &&
+                   !isKeeperDriveMode &&
+                   isAdmin &&
+                   (formData.action === 'grant' || formData.action === 'revoke') &&
+                   !formData.can_share && !formData.can_edit && (
+                    <div className="field-error-text">
+                      Select at least one of Can Share Records or Can Edit Records.
+                    </div>
+                  )}
 
                   {/* Custom fields for record-update action handled on backend */}
                   

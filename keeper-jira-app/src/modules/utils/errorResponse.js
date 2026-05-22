@@ -51,6 +51,7 @@ const ERROR_CODES = {
   KEEPER_PERMISSION_DENIED: 'KEEPER_PERMISSION_DENIED',
   KEEPER_QUEUE_FULL: 'KEEPER_QUEUE_FULL',
   KEEPER_TIMEOUT: 'KEEPER_TIMEOUT',
+  KEEPER_DRIVE_NOT_AVAILABLE: 'KEEPER_DRIVE_NOT_AVAILABLE',
   
   // EPM-specific Errors (Endpoint Privilege Manager)
   EPM_ALREADY_APPROVED: 'EPM_ALREADY_APPROVED',
@@ -79,6 +80,10 @@ const ERROR_CODES = {
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   UNKNOWN_ERROR: 'UNKNOWN_ERROR'
 };
+
+/** Commander verbs required on the Keeper Service allowlist when KD mode is used. */
+const KEEPER_DRIVE_SERVICE_ALLOWLIST =
+  'kd-list,kd-get,kd-record-add,kd-record-update,kd-share-folder,kd-share-record,kd-record-permission';
 
 // ========================================================================
 // Troubleshooting Steps by Error Code
@@ -175,6 +180,13 @@ const TROUBLESHOOTING = {
     'The Keeper Commander queue is full (max 100 requests)',
     'Wait for pending requests to complete',
     'Try again in a few moments'
+  ],
+  [ERROR_CODES.KEEPER_DRIVE_NOT_AVAILABLE]: [
+    'On the Keeper Service host (not only your laptop), run `keeper version` — need 18.0.0+.',
+    'On that same host run `keeper kd-list --folders` and confirm it succeeds.',
+    `Restart the service with -c allowlist including: ${KEEPER_DRIVE_SERVICE_ALLOWLIST}`,
+    'Confirm Keeper Drive (Nested Share Subfolders) is enabled for the vault the service logs into.',
+    'Until fixed, leave "Use Keeper Drive" off — Classic mode still works.'
   ],
   
   // EPM (Endpoint Privilege Manager)
@@ -501,6 +513,72 @@ function errorFromException(error) {
   return errorResponse(ERROR_CODES.INTERNAL_ERROR, message);
 }
 
+/**
+ * Detect whether a Keeper Commander error indicates that Keeper Drive is not
+ * enabled on the customer's vault. Keeper Drive (Nested Share Subfolders) is
+ * invitation-only / feature-flagged on the vault. When the flag is off,
+ * Commander rejects `kd-*` commands with messages like "unknown command",
+ * "command not found", or "not enabled". This helper centralizes that
+ * heuristic so the resolvers can return a structured kd_not_available error
+ * for the UI to surface a friendly inline message and revert the toggle.
+ *
+ * @param {Error|string} errorOrMessage - Error object or raw message string.
+ * @returns {boolean}
+ */
+function isKeeperDriveUnavailableError(errorOrMessage) {
+  const raw = (errorOrMessage && (errorOrMessage.message || errorOrMessage)) || '';
+  const message = String(raw).toLowerCase();
+  if (!message) return false;
+  // Match common Commander unknown-command / feature-disabled / allowlist phrasings.
+  return (
+    message.includes('unknown command') ||
+    message.includes('command not found') ||
+    message.includes('no such command') ||
+    message.includes('invalid command') ||
+    message.includes('unrecognized command') ||
+    message.includes('not permitted') ||
+    message.includes('not allowed') ||
+    message.includes('disallowed') ||
+    message.includes('not authorized') ||
+    (message.includes('keeper drive') && (
+      message.includes('not enabled') ||
+      message.includes('not available') ||
+      message.includes('disabled') ||
+      message.includes('not supported')
+    )) ||
+    (message.includes('kd-list') && message.includes('not')) ||
+    message.includes('feature flag')
+  );
+}
+
+/**
+ * Create a structured "Keeper Drive not enabled" error response. Used by the
+ * `getKeeperRecords`, `getKeeperFolders`, and create/update resolvers when KD
+ * mode was requested but the customer's Commander does not have the feature
+ * flag enabled. The frontend reads `errorCode === 'kd_not_available'` and
+ * reverts the panel toggle to Classic with an inline message.
+ */
+function kdNotAvailableError(originalMessage = null) {
+  let message =
+    'Keeper Drive is not available on the Keeper Service that Jira connects to (not your local CLI). ' +
+    'The service host needs Commander 18.0.0+, Keeper Drive enabled on that vault, and these commands on the service allowlist: ' +
+    KEEPER_DRIVE_SERVICE_ALLOWLIST + '.';
+  if (originalMessage) {
+    const trimmed = String(originalMessage).trim();
+    if (trimmed && !message.includes(trimmed)) {
+      message += ` Commander reported: ${trimmed}`;
+    }
+  }
+  const response = errorResponse(ERROR_CODES.KEEPER_DRIVE_NOT_AVAILABLE, message, {
+    troubleshooting: TROUBLESHOOTING[ERROR_CODES.KEEPER_DRIVE_NOT_AVAILABLE],
+    details: originalMessage ? { originalMessage: String(originalMessage).trim() } : null
+  });
+  // Duplicate the code on a top-level `errorCode` field for easy detection
+  // by frontend code that does not unpack the structured `error` field.
+  response.errorCode = 'kd_not_available';
+  return response;
+}
+
 // ========================================================================
 // Module Exports
 // ========================================================================
@@ -517,5 +595,8 @@ module.exports = {
   epmError,
   deviceError,
   withErrorHandling,
-  errorFromException
+  errorFromException,
+  isKeeperDriveUnavailableError,
+  kdNotAvailableError,
+  KEEPER_DRIVE_SERVICE_ALLOWLIST
 };

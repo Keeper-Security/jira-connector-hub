@@ -12,8 +12,24 @@ import {
   connectionError, 
   keeperError, 
   epmError,
-  deviceError
+  deviceError,
+  isKeeperDriveUnavailableError,
+  kdNotAvailableError
 } from './modules/utils/errorResponse.js';
+import { parseKdFoldersFromRaw, parseKdRecordsFromRaw } from './modules/utils/kdParser.js';
+import {
+  KD_COMMAND_NAME_MAP,
+  KD_ROLES,
+  buildKdShareFolderArgs,
+  buildKdShareRecordArgs,
+  buildKdRecordPermissionArgs
+} from './modules/utils/kdShareCommands.js';
+import {
+  escapeForSingleQuotes,
+  escapeForDoubleQuotes,
+  sanitizeJsonObject,
+  capitalizeFieldName
+} from './modules/utils/commandBuilder.js';
 
 const resolver = new Resolver();
 
@@ -693,14 +709,33 @@ function validatePhoneEntry(phoneEntry) {
  * @param {Object} parameters - The parameters object
  * @returns {Object} - { valid: boolean, errors?: string[] }
  */
-function validateCommandParameters(action, parameters) {
+function validateCommandParameters(action, parameters, options = {}) {
   const errors = [];
-  
-  // Skip validation for pre-formatted CLI commands
-  if (parameters.cliCommand) {
+  const isKdMode = !!(options && options.mode === 'kd');
+
+  // Skip validation for pre-formatted Classic CLI commands; KD always rebuilds server-side.
+  if (parameters.cliCommand && !isKdMode) {
     return { valid: true };
   }
-  
+
+  // KD share/permission commands require -r <role> on grant per Commander docs.
+  // Classic uses permission flags instead and is unaffected.
+  if (
+    isKdMode &&
+    parameters &&
+    parameters.action === 'grant' &&
+    ['share-folder', 'share-record', 'record-permission'].includes(action)
+  ) {
+    const role = parameters.role ? String(parameters.role).trim() : '';
+    if (!role) {
+      errors.push('Role is required for Keeper Drive grant operations');
+    } else if (!KD_ROLES.includes(role)) {
+      errors.push(
+        `Invalid Keeper Drive role "${role}". Allowed: ${KD_ROLES.join(', ')}`
+      );
+    }
+  }
+
   // Common validations based on action type
   switch (action) {
     case 'record-add':
@@ -925,86 +960,30 @@ function validateCommandParameters(action, parameters) {
 /**
  * Build Keeper CLI command from action and parameters
  */
-// Helper function to capitalize first letter of a field name
-function capitalizeFieldName(fieldName) {
-  if (!fieldName || typeof fieldName !== 'string') return fieldName;
-  return fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
-}
 
-/**
- * Escape a value for use inside single-quoted shell arguments.
- * Single quotes in shell cannot contain escaped single quotes, so we use
- * the technique: replace ' with '\'' (end quote, escaped quote, start quote)
- * 
- * Example: "Test's Record" becomes "Test'\''s Record"
- * Which in shell becomes: 'Test'\''s Record' = Test's Record
- * 
- * @param {string} value - The user input value to escape
- * @returns {string} - The escaped value safe for single-quoted context
- */
-function escapeForSingleQuotes(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value !== 'string') value = String(value);
-  // Replace single quotes with the escape sequence '\''
-  return value.replace(/'/g, "'\\''");
-}
+function buildKeeperCommand(action, parameters, issueKey, options = {}) {
+  // KD mode reroutes actions via KD_COMMAND_NAME_MAP; Classic mode is unaffected.
+  const isKd = options?.mode === 'kd';
 
-/**
- * Escape a value for use inside double-quoted shell arguments.
- * Characters that need escaping in double quotes: " $ ` \ !
- * 
- * @param {string} value - The user input value to escape
- * @returns {string} - The escaped value safe for double-quoted context
- */
-function escapeForDoubleQuotes(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value !== 'string') value = String(value);
-  // Escape backslashes first, then other special characters
-  return value
-    .replace(/\\/g, '\\\\')   // Escape backslashes
-    .replace(/"/g, '\\"')     // Escape double quotes
-    .replace(/\$/g, '\\$')    // Escape dollar signs (variable expansion)
-    .replace(/`/g, '\\`')     // Escape backticks (command substitution)
-    .replace(/!/g, '\\!');    // Escape exclamation marks (history expansion)
-}
-
-/**
- * Sanitize JSON field values before JSON.stringify to prevent injection
- * through JSON string escaping edge cases.
- * 
- * @param {Object} obj - Object with string values to sanitize
- * @returns {Object} - Object with sanitized values
- */
-function sanitizeJsonObject(obj) {
-  const sanitized = {};
-  for (const key of Object.keys(obj)) {
-    const value = obj[key];
-    if (typeof value === 'string') {
-      // JSON.stringify handles most escaping, but we ensure no null bytes
-      // or other control characters that could cause parsing issues
-      sanitized[key] = value.replace(/[\x00-\x1f]/g, '');
-    } else {
-      sanitized[key] = value;
-    }
-  }
-  return sanitized;
-}
-
-function buildKeeperCommand(action, parameters, issueKey) {
-  // Check if we have a pre-formatted CLI command (used for record-permission)
-  if (parameters.cliCommand) {
+  // Honor pre-formatted CLI commands only in Classic mode.
+  if (parameters.cliCommand && !isKd) {
     return parameters.cliCommand;
   }
   
   // ========================================================================
   // Input Validation - validate all parameters before building command
   // ========================================================================
-  const validation = validateCommandParameters(action, parameters);
+  const validation = validateCommandParameters(action, parameters, { mode: isKd ? 'kd' : 'classic' });
   if (!validation.valid) {
     throw new Error(`Input validation failed: ${validation.errors.join('; ')}`);
   }
-  
-  let command = action;
+
+  let command;
+  if (isKd && KD_COMMAND_NAME_MAP[action]) {
+    command = KD_COMMAND_NAME_MAP[action];
+  } else {
+    command = action;
+  }
   
   // Build command based on action type
   switch (action) {
@@ -1012,7 +991,18 @@ function buildKeeperCommand(action, parameters, issueKey) {
       // Use the recordType parameter if provided, otherwise default to login
       const recordType = parameters.recordType || 'login';
       command += ` --record-type='${escapeForSingleQuotes(recordType)}'`;
-      
+
+      // KD records must live inside a KD folder; fail if folder UID is missing.
+      if (isKd) {
+        const kdFolder = parameters.folder;
+        if (!kdFolder || !String(kdFolder).trim()) {
+          throw new Error('Keeper Drive folder is required for kd-record-add. Pick a KD folder in the issue panel.');
+        }
+        command += ` --folder='${escapeForSingleQuotes(String(kdFolder).trim())}'`;
+      } else if (parameters.folder && String(parameters.folder).trim()) {
+        command += ` --folder='${escapeForSingleQuotes(String(parameters.folder).trim())}'`;
+      }
+
       // Title is required for all record types
       if (!parameters.title) {
         throw new Error(`Title is required for record-add command. Record type: ${recordType}`);
@@ -1023,9 +1013,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
         command += ` Notes="${escapeForDoubleQuotes(parameters.notes)}"`;
       }
       
-      // Dynamic field processing for any record type
-      // Process all parameters except metadata fields
-      const metadataFields = ['recordType', 'title', 'notes', 'skipComment', 'phoneEntries'];
+      // Skip metadata fields; folder is excluded (already emitted as --folder in KD mode).
+      const metadataFields = ['recordType', 'title', 'notes', 'skipComment', 'phoneEntries', 'folder'];
       
       // Special handling for login record type (password generation)
       if (recordType === 'login' && !parameters.password) {
@@ -1181,9 +1170,13 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'record-update':
-      // Required record parameter
+      // KD uses short -r <UID>; Classic uses --record=<UID>.
       if (parameters.record) {
-        command += ` --record='${escapeForSingleQuotes(parameters.record)}'`;
+        if (isKd) {
+          command += ` -r '${escapeForSingleQuotes(parameters.record)}'`;
+        } else {
+          command += ` --record='${escapeForSingleQuotes(parameters.record)}'`;
+        }
       }
       
       // Optional title update
@@ -1466,6 +1459,10 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'record-permission':
+      if (isKd) {
+        command += buildKdRecordPermissionArgs(parameters);
+        break;
+      }
       // Format: record-permission FOLDER_UID -a ACTION [-d] [-s] [-R] [--force]
       // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R --force
       // -a = action (grant/revoke)
@@ -1509,6 +1506,10 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'share-record':
+      if (isKd) {
+        command += buildKdShareRecordArgs(parameters);
+        break;
+      }
       // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R] [--expire-at|--expire-in] --force
       // For cancel action with record: share-record "RECORD_UID" -a cancel -e "EMAIL" [-e "EMAIL2" ...] -f
       // For cancel action with folder: share-record "FOLDER_UID" -a cancel -e "EMAIL" [-e "EMAIL2" ...] -f
@@ -1571,6 +1572,10 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'share-folder':
+      if (isKd) {
+        command += buildKdShareFolderArgs(parameters);
+        break;
+      }
       // Format: share-folder "FOLDER_UID" -e "EMAIL" -a "ACTION" [options] [--expire-at|--expire-in] --force
       if (parameters.folder) {
         command += ` '${escapeForSingleQuotes(parameters.folder)}'`;
@@ -1623,13 +1628,25 @@ function buildKeeperCommand(action, parameters, issueKey) {
 }
 
 /**
- * Get records list from Keeper API (called from issue panel)
+ * Normalize the `mode` payload field to one of 'classic' | 'kd'. Defaults to
+ * 'classic' so callers that haven't been updated keep their pre-toggle
+ * behavior.
  */
+function resolveVaultMode(payload) {
+  const raw = (payload && payload.mode ? String(payload.mode).toLowerCase() : '').trim();
+  return raw === 'kd' ? 'kd' : 'classic';
+}
+
+// Get records from Keeper API. KD mode uses kd-list; items are tagged with source.
 resolver.define('getKeeperRecords', async (req) => {
   const userId = req?.context?.accountId;
-  
+  const mode = resolveVaultMode(req?.payload);
+  const command = mode === 'kd'
+    ? 'kd-list --records --format=json'
+    : 'list --format=json';
+
   try {
-    const result = await executeKeeperApiCommand('list --format=json', { userId });
+    const result = await executeKeeperApiCommand(command, { userId, forgeSafe: true });
     const apiData = result.data;
 
     // Parse the JSON data from the response
@@ -1650,8 +1667,21 @@ resolver.define('getKeeperRecords', async (req) => {
       }
     }
 
-    return successResponse({ records: records || [] });
+    const parsedRecords = mode === 'kd' ? parseKdRecordsFromRaw(records) : (records || []);
+    const tagged = parsedRecords.map(record => ({
+      ...record,
+      source: mode
+    }));
+
+    return successResponse({ records: tagged, mode });
   } catch (err) {
+    // KD unavailable: return structured error so the UI can revert the toggle.
+    if (mode === 'kd' && isKeeperDriveUnavailableError(err)) {
+      logger.error('Keeper Drive not available on this vault for getKeeperRecords', {
+        message: err.message
+      });
+      return kdNotAvailableError(err.message);
+    }
     // Check for rate limit error
     if (err.rateLimited) {
       return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
@@ -1660,27 +1690,54 @@ resolver.define('getKeeperRecords', async (req) => {
   }
 });
 
-/**
- * Get folders list from Keeper API (called from issue panel)
- */
+// Get folders from Keeper API. KD mode uses kd-list; folders are tagged with source and nested path.
 resolver.define('getKeeperFolders', async (req) => {
   const userId = req?.context?.accountId;
-  
+  const mode = resolveVaultMode(req?.payload);
+  const command = mode === 'kd'
+    ? 'kd-list --folders --format=json'
+    : 'ls -f --format=json';
+
   try {
-    const result = await executeKeeperApiCommand('ls -f --format=json', { userId });
+    const result = await executeKeeperApiCommand(command, { userId, forgeSafe: true });
     const apiData = result.data;
 
     // Parse the JSON data from the response
-    let folders = [];
+    let rawFolders = [];
     if (apiData.data && Array.isArray(apiData.data)) {
+      rawFolders = apiData.data;
+    } else if (apiData.message && typeof apiData.message === 'string') {
       try {
-        // data.data is directly an array of folders for ls -f command
-        folders = apiData.data.map((folder, index) => {
-          // Clean ANSI color codes from folder name
+        rawFolders = JSON.parse(apiData.message);
+      } catch (parseError) {
+        return keeperError('Failed to parse folders data from Keeper API');
+      }
+    } else if (apiData.data && typeof apiData.data === 'string') {
+      try {
+        rawFolders = JSON.parse(apiData.data);
+      } catch (parseError) {
+        return keeperError('Failed to parse folders data from Keeper API');
+      }
+    }
+
+    let folders = [];
+    try {
+      if (mode === 'kd') {
+        // Commander 18.x returns display keys: UID, Title, Parent/Folder.
+        folders = parseKdFoldersFromRaw(rawFolders);
+      } else {
+        // Classic: exclude KD rows (they're surfaced via kd-list --folders).
+        // Rows without a source field are kept for backward compat.
+        const classicRawFolders = (rawFolders || []).filter((folder) => {
+          const rawSource = folder && folder.source != null ? String(folder.source).trim().toLowerCase() : '';
+          if (!rawSource) return true;
+          return rawSource === 'legacy';
+        });
+
+        folders = classicRawFolders.map((folder, index) => {
           let cleanName = folder.name || '';
-          cleanName = cleanName.replace(/\[?\d+m/g, ''); // Remove [31m, [39m etc.
-          
-          // Extract flags from details string (format: "Flags: S, Parent: /")
+          cleanName = cleanName.replace(/\[?\d+m/g, '');
+
           let flags = '';
           let parentUid = '';
           if (folder.details) {
@@ -1693,7 +1750,7 @@ resolver.define('getKeeperFolders', async (req) => {
               parentUid = parentMatch[1].trim();
             }
           }
-          
+
           return {
             number: index + 1,
             folder_uid: folder.uid,
@@ -1703,17 +1760,24 @@ resolver.define('getKeeperFolders', async (req) => {
             path: cleanName,
             flags: flags,
             parent_uid: parentUid,
-            shared: flags && flags.includes('S'),
+            shared: !!(flags && flags.includes('S')),
+            source: 'classic',
             raw_data: folder
           };
         });
-      } catch (parseError) {
-        return keeperError('Failed to parse folders data from Keeper API');
       }
+    } catch (parseError) {
+      return keeperError('Failed to parse folders data from Keeper API');
     }
 
-    return successResponse({ folders: folders || [] });
+    return successResponse({ folders: folders || [], mode });
   } catch (err) {
+    if (mode === 'kd' && isKeeperDriveUnavailableError(err)) {
+      logger.error('Keeper Drive not available on this vault for getKeeperFolders', {
+        message: err.message
+      });
+      return kdNotAvailableError(err.message);
+    }
     // Check for rate limit error
     if (err.rateLimited) {
       return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
@@ -1734,7 +1798,7 @@ resolver.define('getKeeperRecordDetails', async (req) => {
   }
 
   try {
-    const result = await executeKeeperApiCommand(`get "${recordUid}" --format=json`, { userId });
+    const result = await executeKeeperApiCommand(`get "${recordUid}" --format=json`, { userId, forgeSafe: true });
     const apiData = result.data;
 
     // Parse the JSON data from the response
@@ -1787,6 +1851,10 @@ resolver.define('executeKeeperCommand', async (req) => {
     'list', 'ls', 'get', 'search',
     'record-add', 'record-update', 'record-permission',
     'share-record', 'share-folder',
+    // KD sharing/permission variants (see KD_COMMAND_NAME_MAP).
+    'kd-list', 'kd-get',
+    'kd-record-add', 'kd-record-update', 'kd-record-permission',
+    'kd-share-record', 'kd-share-folder',
     'epm',
     'device-approve',
     'service-status',
@@ -2024,6 +2092,10 @@ async function markAlreadyProcessedOutsideJira(
 resolver.define('executeKeeperAction', async (req) => {
   const userId = req?.context?.accountId;
   const { issueKey, command, commandDescription, parameters, formattedTimestamp } = req.payload;
+  // `mode` toggles command-builder routing between Classic and Keeper Drive.
+  // Affects: record-add, record-update, share-folder, share-record, record-permission.
+  // Defaults to 'classic' so callers that don't pass it keep their pre-toggle behavior.
+  const mode = resolveVaultMode(req?.payload);
   
   logger.info('executeKeeperAction: Executing Keeper action', { 
     issueKey, 
@@ -2197,12 +2269,13 @@ resolver.define('executeKeeperAction', async (req) => {
     }
   }
   
-  // Validate share-record: prevent sharing with record owner
-  // Sharing with owner causes issues: revokes owner from record (moves to deleted items) and then share fails
-  if (command === 'share-record' && parameters.record && parameters.user && parameters.action !== 'cancel') {
+  // Validate share-record: prevent sharing with record owner (Classic only).
+  // In KD mode Commander already rejects share-to-owner, and the extra
+  // `get` round-trip would push us past Forge's 25s resolver timeout.
+  if (command === 'share-record' && mode !== 'kd' && parameters.record && parameters.user && parameters.action !== 'cancel') {
     try {
       // Fetch record details to get owner email (skip rate limit for internal validation)
-      const recordResult = await executeKeeperApiCommand(`get "${parameters.record}" --format=json`, { userId, skipRateLimit: true });
+      const recordResult = await executeKeeperApiCommand(`get "${parameters.record}" --format=json`, { userId, skipRateLimit: true, forgeSafe: true });
       const recordApiData = recordResult.data;
       
       let recordOwnerEmail = null;
@@ -2250,10 +2323,10 @@ resolver.define('executeKeeperAction', async (req) => {
   try {
     // Build dynamic command based on action and parameters
     // This is inside try block so validation errors are properly caught
-    const dynamicCommand = buildKeeperCommand(command, parameters || {}, issueKey);
+    const dynamicCommand = buildKeeperCommand(command, parameters || {}, issueKey, { mode });
 
     // Call Keeper API using v2 async queue (with rate limiting)
-    const result = await executeKeeperApiCommand(dynamicCommand, { userId });
+    const result = await executeKeeperApiCommand(dynamicCommand, { userId, forgeSafe: true });
     const data = result.data;
 
     // Extract record_uid if this is a record-add command
@@ -2694,13 +2767,22 @@ resolver.define('executeKeeperAction', async (req) => {
   } catch (err) {
     // Check for specific error types and provide user-friendly messages
     const errorMessage = err.message || String(err);
-    
+
     // Check if this is an input validation error
     if (errorMessage.startsWith('Input validation failed:')) {
       const validationDetails = errorMessage.replace('Input validation failed: ', '');
       return validationError('parameters', validationDetails);
     }
-    
+
+    // KD unavailable: surface structured error so the UI reverts the toggle.
+    if (mode === 'kd' && isKeeperDriveUnavailableError(err)) {
+      logger.error('Keeper Drive not available on this vault for executeKeeperAction', {
+        message: err.message,
+        command
+      });
+      return kdNotAvailableError(err.message);
+    }
+
     // Check if this is a rate limit error
     if (err.rateLimited) {
       return rateLimitError(

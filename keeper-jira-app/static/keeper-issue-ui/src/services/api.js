@@ -10,14 +10,19 @@ export const activateKeeperPanel = async (issueKey) => {
   return await invoke("activateKeeperPanel", { issueKey });
 };
 
-// Get keeper records
-export const getKeeperRecords = async () => {
-  return await invoke("getKeeperRecords");
+// Get keeper records.
+// `mode` selects the vault type: 'classic' uses Commander `list`, 'kd' uses
+// `kd-list --records` (Keeper Drive). Defaults to 'classic' for backward
+// compatibility with any caller that doesn't pass a mode.
+export const getKeeperRecords = async (mode = 'classic') => {
+  return await invoke("getKeeperRecords", { mode });
 };
 
-// Get keeper folders
-export const getKeeperFolders = async () => {
-  return await invoke("getKeeperFolders");
+// Get keeper folders.
+// `mode` selects the vault type: 'classic' uses Commander `ls -f`, 'kd' uses
+// `kd-list --folders` (Keeper Drive). Defaults to 'classic'.
+export const getKeeperFolders = async (mode = 'classic') => {
+  return await invoke("getKeeperFolders", { mode });
 };
 
 // Get keeper record details
@@ -62,13 +67,18 @@ export const getProjectAdmins = async (projectKey, issueKey) => {
   });
 };
 
-// Execute keeper action
-export const executeKeeperAction = async (issueKey, command, commandDescription, parameters, formattedTimestamp = null) => {
+// Execute keeper action.
+// `mode` ('classic' | 'kd') controls whether the resolver/commandBuilder routes
+// `record-add` and `record-update` to their Keeper Drive variants
+// (`kd-record-add`, `kd-record-update`). Defaults to 'classic' for backward
+// compatibility.
+export const executeKeeperAction = async (issueKey, command, commandDescription, parameters, formattedTimestamp = null, mode = 'classic') => {
   const payload = {
     issueKey,
     command,
     commandDescription,
-    parameters
+    parameters,
+    mode
   };
   
   if (formattedTimestamp) {

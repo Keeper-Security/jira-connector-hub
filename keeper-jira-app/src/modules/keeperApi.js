@@ -21,6 +21,10 @@ const API_CONFIG = {
     maxAttempts: 60,          // Maximum polling attempts (60 * 1s = 60s timeout)
     backoffMultiplier: 1.5,   // Exponential backoff multiplier
     maxIntervalMs: 5000,      // Maximum interval between polls
+    // Forge UI resolvers hard-kill at 25s. Cap polling below that so the user
+    // sees a clear error instead of the opaque "Task timed out" message.
+    forgeMaxAttempts: 18,
+    forgeMaxTotalWaitMs: 22000,
   },
   
   // Fetch retry configuration for Keeper API calls
@@ -624,14 +628,23 @@ async function getRequestResult(baseUrl, apiKey, requestId) {
  * @param {Object} options.filedata - File data for commands requiring file input
  * @param {number} options.maxAttempts - Override max polling attempts
  * @param {number} options.pollingIntervalMs - Override polling interval
+ * @param {boolean} options.forgeSafe - When true, cap total wait to ~22s so
+ *   Forge resolvers respond before the 25s hard-kill.
  * @returns {Promise<Object>} - Command result
  */
 async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
+  const forgeSafe = options.forgeSafe === true;
   const {
     filedata,
-    maxAttempts = API_CONFIG.polling.maxAttempts,
+    maxAttempts = forgeSafe
+      ? API_CONFIG.polling.forgeMaxAttempts
+      : API_CONFIG.polling.maxAttempts,
     pollingIntervalMs = API_CONFIG.polling.intervalMs,
   } = options;
+
+  const pollDeadline = forgeSafe
+    ? Date.now() + API_CONFIG.polling.forgeMaxTotalWaitMs
+    : null;
 
   // Step 1: Submit the command to the async queue
   const submitResponse = await submitAsyncCommand(baseUrl, apiKey, command, { filedata });
@@ -645,6 +658,14 @@ async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
   let attempts = 0;
 
   while (attempts < maxAttempts) {
+    if (pollDeadline && Date.now() >= pollDeadline) {
+      throw new Error(
+        `Keeper command did not complete within ${API_CONFIG.polling.forgeMaxTotalWaitMs}ms (Forge resolver limit). ` +
+        `Request ${requestId} may still be running on the service. ` +
+        `Common causes: ngrok/tunnel latency, service queue backlog, or slow kd-* commands.`
+      );
+    }
+
     attempts++;
 
     const statusResponse = await checkRequestStatus(baseUrl, apiKey, requestId);
@@ -665,8 +686,11 @@ async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
       throw new Error(`Keeper command request ${requestId} expired before processing`);
     }
 
-    // Still queued or processing - wait and retry
-    await sleep(currentInterval);
+    // Still queued or processing - wait and retry (capped by deadline)
+    const sleepMs = pollDeadline
+      ? Math.min(currentInterval, Math.max(pollDeadline - Date.now(), 0))
+      : currentInterval;
+    await sleep(sleepMs);
     currentInterval = calculateNextInterval(currentInterval);
   }
 
@@ -802,10 +826,11 @@ export async function fetchEpmApprovalDetails(requestUid) {
  * @param {Object} options - Optional configuration
  * @param {string} options.userId - User ID for rate limiting (accountId)
  * @param {boolean} options.skipRateLimit - Skip rate limiting (for internal/system calls)
+ * @param {boolean} options.forgeSafe - Cap async polling for Forge 25s limit
  * @returns {Promise<Object>} - API response
  */
 export async function executeKeeperCommand(command, options = {}) {
-  const { userId, skipRateLimit = false } = options;
+  const { userId, skipRateLimit = false, forgeSafe = false } = options;
   
   // Apply rate limiting unless explicitly skipped
   if (!skipRateLimit) {
@@ -827,7 +852,7 @@ export async function executeKeeperCommand(command, options = {}) {
   const { apiUrl, apiKey } = config;
   const baseUrl = normalizeApiUrl(apiUrl);
 
-  const data = await executeCommandAsync(baseUrl, apiKey, command);
+  const data = await executeCommandAsync(baseUrl, apiKey, command, { forgeSafe });
 
   // Check for API-level errors in response
   if (data.success === false || data.error) {
