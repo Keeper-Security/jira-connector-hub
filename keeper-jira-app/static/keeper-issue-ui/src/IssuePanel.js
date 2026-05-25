@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 
 import Button from "@atlaskit/button";
 import SectionMessage from "@atlaskit/section-message";
@@ -16,10 +16,34 @@ import { handleApiError as handleApiErrorUtil, isStructuredError, getErrorCode }
 import { formatWithUid, filterByTitleOrUid } from "./utils/formatters";
 import EpmApprovalPanel from "./components/issue/EpmApprovalPanel";
 import DeviceApprovalPanel from "./components/issue/DeviceApprovalPanel";
+import PaginationFooter from "./components/issue/PaginationFooter";
+import LoadingPlaceholder from "./components/issue/LoadingPlaceholder";
+import SelectedItemChip from "./components/issue/SelectedItemChip";
+import SearchHint from "./components/issue/SearchHint";
+import FormField from "./components/issue/FormField";
+import RequirementsBlock from "./components/issue/RequirementsBlock";
+import ActionSelector from "./components/issue/ActionSelector";
 import "./styles/IssuePanel.css";
 
 // Keeper action options - using imported constant
 const keeperActionOptions = KEEPER_ACTION_OPTIONS;
+
+// Page slice + totals. Pure helper.
+const paginate = (items, page, pageSize) => {
+  const totalPages = Math.ceil(items.length / pageSize);
+  const startIndex = (page - 1) * pageSize;
+  return {
+    items: items.slice(startIndex, startIndex + pageSize),
+    totalPages,
+  };
+};
+
+// Reset picker page to 1 when search text changes.
+function useResetPageOnSearch(searchTerm, setPage) {
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, setPage]);
+}
 
 const IssuePanel = () => {
   const [issueContext, setIssueContext] = useState(null);
@@ -144,9 +168,8 @@ const IssuePanel = () => {
     return <div className="kd-folder-path">{path}</div>;
   };
 
-  // Action options with dynamic record types. KD mode merges overrides from KEEPER_ACTION_OPTIONS_KD.
-  const getKeeperActionOptions = () => {
-    const dynamicRecordTypeOptions = recordTypes;
+  // Merged action options (Classic + KD overrides), memoized on mode/types/role.
+  const actionOptions = useMemo(() => {
     const kdOverridesByValue = isKeeperDriveMode
       ? KEEPER_ACTION_OPTIONS_KD.reduce((acc, action) => {
           acc[action.value] = action;
@@ -162,10 +185,7 @@ const IssuePanel = () => {
             ...merged,
             fields: merged.fields.map(field => {
               if (field.name === 'recordType') {
-                return {
-                  ...field,
-                  options: dynamicRecordTypeOptions
-                };
+                return { ...field, options: recordTypes };
               }
               return field;
             })
@@ -174,24 +194,21 @@ const IssuePanel = () => {
         return merged;
       })
       .filter(action => {
-        // Hide "Create New Secret" (record-add) and "Update Record" (record-update) from non-admin users
         if ((action.value === 'record-add' || action.value === 'record-update') && !isAdmin) {
           return false;
         }
         return true;
       });
-  };
+  }, [isKeeperDriveMode, recordTypes, isAdmin]);
 
   // Filter and paginate options
-  const filteredOptions = getKeeperActionOptions().filter(option =>
+  const filteredOptions = actionOptions.filter(option =>
     option.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
     option.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
     option.value.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const totalPages = Math.ceil(filteredOptions.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedOptions = filteredOptions.slice(startIndex, startIndex + itemsPerPage);
+  const { items: paginatedOptions, totalPages } = paginate(filteredOptions, currentPage, itemsPerPage);
 
   // Defense-in-depth: filter records/folders to match active vault mode.
   const recordsForActiveMode = keeperRecords.filter(record => (record.source || 'classic') === activeVaultMode);
@@ -199,9 +216,7 @@ const IssuePanel = () => {
 
   // Filter and paginate records (search by title or UID)
   const filteredRecords = filterByTitleOrUid(recordsForActiveMode, recordSearchTerm, 'title', 'record_uid');
-  const totalRecordPages = Math.ceil(filteredRecords.length / recordsPerPage);
-  const recordStartIndex = (recordCurrentPage - 1) * recordsPerPage;
-  const paginatedRecords = filteredRecords.slice(recordStartIndex, recordStartIndex + recordsPerPage);
+  const { items: paginatedRecords, totalPages: totalRecordPages } = paginate(filteredRecords, recordCurrentPage, recordsPerPage);
 
   const getFilteredFolders = () => {
     let foldersToFilter = foldersForActiveMode;
@@ -215,35 +230,20 @@ const IssuePanel = () => {
   };
   
   const filteredFolders = getFilteredFolders();
-  const totalFolderPages = Math.ceil(filteredFolders.length / foldersPerPage);
-  const folderStartIndex = (folderCurrentPage - 1) * foldersPerPage;
-  const paginatedFolders = filteredFolders.slice(folderStartIndex, folderStartIndex + foldersPerPage);
+  const { items: paginatedFolders, totalPages: totalFolderPages } = paginate(filteredFolders, folderCurrentPage, foldersPerPage);
 
   // Records for record-update (filtered by active vault mode).
   const filteredRecordsForUpdate = filterByTitleOrUid(recordsForActiveMode, recordForUpdateSearchTerm, 'title', 'record_uid');
-  const totalRecordForUpdatePages = Math.ceil(filteredRecordsForUpdate.length / recordsPerPage);
-  const recordForUpdateStartIndex = (recordForUpdateCurrentPage - 1) * recordsPerPage;
-  const paginatedRecordsForUpdate = filteredRecordsForUpdate.slice(recordForUpdateStartIndex, recordForUpdateStartIndex + recordsPerPage);
+  const { items: paginatedRecordsForUpdate, totalPages: totalRecordForUpdatePages } = paginate(
+    filteredRecordsForUpdate,
+    recordForUpdateCurrentPage,
+    recordsPerPage
+  );
 
-  // Reset pagination when search changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
-
-  // Reset record pagination when record search changes
-  useEffect(() => {
-    setRecordCurrentPage(1);
-  }, [recordSearchTerm]);
-
-  // Reset folder pagination when folder search changes
-  useEffect(() => {
-    setFolderCurrentPage(1);
-  }, [folderSearchTerm]);
-
-  // Reset record-update pagination when record-update search changes
-  useEffect(() => {
-    setRecordForUpdateCurrentPage(1);
-  }, [recordForUpdateSearchTerm]);
+  useResetPageOnSearch(searchTerm, setCurrentPage);
+  useResetPageOnSearch(recordSearchTerm, setRecordCurrentPage);
+  useResetPageOnSearch(folderSearchTerm, setFolderCurrentPage);
+  useResetPageOnSearch(recordForUpdateSearchTerm, setRecordForUpdateCurrentPage);
 
   // Monotonic token for the vault refetch cycle. Only the latest call may
   // write records/folders state or reset loading flags.
@@ -356,11 +356,10 @@ const IssuePanel = () => {
   const handleKeeperDriveToggle = (next) => {
     setIsKeeperDriveMode(next);
     resetVaultSelectionState();
-    // Eagerly mark loading so the spinner/disable shows in the same render.
-    // The vault refetch itself is driven by the useEffect that watches
-    // isKeeperDriveMode + selectedAction, so this avoids a duplicate API call.
+    // Eagerly mark loading so the spinner shows in the same render as the toggle.
+    // Effect B drives the actual refetch (admin only), so guard here matches.
     const action = selectedAction?.value;
-    const willFetch = action && !isLoadingStoredData && (issueContext?.hasConfig || isAdmin);
+    const willFetch = isAdmin && action && !isLoadingStoredData;
     if (willFetch) {
       const plan = computeFetchPlan(action);
       if (plan.records) setLoadingRecords(true);
@@ -2318,12 +2317,13 @@ const IssuePanel = () => {
             
             {/* Last Name Row */}
             {lastField && (
-              <div className="mb-12">
-                <label className="form-label">
-                  {lastField.label} {lastField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
-                </label>
+              <FormField
+                label={lastField.label}
+                required={lastField.required && selectedAction.value !== 'record-update'}
+                labelClass="form-label"
+              >
                 {renderFormInput(lastField)}
-              </div>
+              </FormField>
             )}
           </div>
         );
@@ -2339,12 +2339,13 @@ const IssuePanel = () => {
             
             {/* Phone Number */}
             {numberField && (
-              <div className="mb-12">
-                <label className="form-label">
-                  {numberField.label} {numberField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
-                </label>
+              <FormField
+                label={numberField.label}
+                required={numberField.required && selectedAction.value !== 'record-update'}
+                labelClass="form-label"
+              >
                 {renderFormInput(numberField)}
-              </div>
+              </FormField>
             )}
             
             {/* Extension and Type Row */}
@@ -2400,12 +2401,14 @@ const IssuePanel = () => {
         renderElements.push(
           <div key={`group-${groupType}`} className="field-group">
               {groupFields.map((gField) => (
-                <div key={gField.name} className="mb-12">
-                  <label className="form-label">
-                    {gField.label} {gField.required && selectedAction.value !== 'record-update' && <span className="text-required">*</span>}
-                  </label>
+                <FormField
+                  key={gField.name}
+                  label={gField.label}
+                  required={gField.required && selectedAction.value !== 'record-update'}
+                  labelClass="form-label"
+                >
                   {renderFormInput(gField)}
-              </div>
+                </FormField>
               ))}
           </div>
         );
@@ -2481,20 +2484,23 @@ const IssuePanel = () => {
       }));
     }
     
-    // Skip API calls for non-admin users when config is missing (they only submit requests)
+    // Effect A: fires when action/context changes (all users who need vault data).
+    if (!selectedAction || isLoadingStoredData) return;
+    refetchVaultData({ mode: activeVaultMode, action: selectedAction.value });
+    // Record types only needed for admin-only actions (record-add/record-update).
     const shouldFetchData = issueContext?.hasConfig || isAdmin;
-
-    // Single coordinator handles records + folders for whichever action is active.
-    // Skipped while stored data is loading so restore can drive its own fetch.
-    if (selectedAction && !isLoadingStoredData) {
-      refetchVaultData({ mode: activeVaultMode, action: selectedAction.value });
-    }
-
-    // Record types are independent of vault data and stay on their own helper.
-    if (selectedAction && (selectedAction.value === 'record-add' || selectedAction.value === 'record-update') && !isLoadingStoredData && shouldFetchData) {
+    if ((selectedAction.value === 'record-add' || selectedAction.value === 'record-update') && shouldFetchData) {
       fetchRecordTypes();
     }
-  }, [selectedAction, isLoadingStoredData, isAdmin, issueContext, isKeeperDriveMode]);
+  }, [selectedAction, isLoadingStoredData, isAdmin, issueContext]);
+
+  // Effect B: fires when vault mode toggles — admin only.
+  // Non-admins don't see inline vault pickers, so toggling Classic must not trigger API calls.
+  useEffect(() => {
+    if (!isAdmin || !selectedAction || isLoadingStoredData) return;
+    const mode = isKeeperDriveMode ? 'kd' : 'classic';
+    refetchVaultData({ mode, action: selectedAction.value });
+  }, [isKeeperDriveMode]);
 
   // Auto-dismiss workflow info dialog after 5 seconds
   useEffect(() => {
@@ -2772,15 +2778,8 @@ const IssuePanel = () => {
     // Special handling for record-add action
     if (selectedAction.value === 'record-add') {
       // Get dynamic action with updated record type options
-      const dynamicAction = getKeeperActionOptions().find(action => action.value === 'record-add');
+      const dynamicAction = actionOptions.find(action => action.value === 'record-add');
       
-      if (isKeeperDriveMode) {
-        const folderUid = selectedFolder?.folder_uid || selectedFolder?.folderUid || selectedFolder?.uid || formData.folder;
-        if (!folderUid || String(folderUid).trim() === '') {
-          return false;
-        }
-      }
-
       // Validate standard fields (including recordType)
       for (let field of (dynamicAction?.fields || [])) {
         if (field.type === 'folder-select') {
@@ -2903,6 +2902,7 @@ const IssuePanel = () => {
 
     switch (field.type) {
       case 'record-select':
+        // Possibly dead — share-record uses admin dropdowns. Kept for constants compatibility.
         // Render record dropdown for share-record action
         const isCancelSelected = selectedAction?.value === 'share-record' && formData.action === 'cancel';
         const isRecordFieldDisabled = isFormDisabled || formData.sharedFolder || selectedFolder || isCancelSelected;
@@ -3004,9 +3004,10 @@ const IssuePanel = () => {
               </div>
             )}
             {loadingFolders && (
-              <div className="loading-indicator">
-                {isKeeperDriveMode ? 'Loading Keeper Drive folders...' : 'Loading folders...'}
-              </div>
+              <LoadingPlaceholder
+                text={isKeeperDriveMode ? 'Loading Keeper Drive folders...' : 'Loading folders...'}
+                className="loading-indicator"
+              />
             )}
             {showKdFolderEmptyMessage && (
               <div className="error-text">
@@ -3081,34 +3082,14 @@ const IssuePanel = () => {
                       )}
                     </div>
                     
-                    {/* Pagination */}
-                    {totalPages > 1 && (
-                      <div className="pagination-container">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (folderCurrentPage > 1) setFolderCurrentPage(folderCurrentPage - 1);
-                          }}
-                          disabled={folderCurrentPage === 1}
-                          className="pagination-button"
-                        >
-                          Previous
-                        </button>
-                        <span className="pagination-info">
-                          Page {folderCurrentPage} of {totalPages}
-                        </span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (folderCurrentPage < totalPages) setFolderCurrentPage(folderCurrentPage + 1);
-                          }}
-                          disabled={folderCurrentPage === totalPages}
-                          className="pagination-button"
-                        >
-                          Next
-                        </button>
-                      </div>
-                    )}
+                    <PaginationFooter
+                      currentPage={folderCurrentPage}
+                      totalPages={totalPages}
+                      onPrev={() => setFolderCurrentPage(prev => prev - 1)}
+                      onNext={() => setFolderCurrentPage(prev => prev + 1)}
+                      variant="container"
+                      stopPropagation
+                    />
                   </div>
                 </>
               );
@@ -3752,50 +3733,6 @@ const IssuePanel = () => {
                 </button>
               </div>
             )}
-          </div>
-        );
-      case 'folder-select':
-        return (
-          <div className="relative">
-            <select
-              value={value}
-              disabled={isFormDisabled}
-              onChange={(e) => {
-                const selectedFolderId = e.target.value;
-                handleInputChange(field.name, selectedFolderId);
-                
-                // Find and set the selected folder object
-                const folder = keeperFolders.find(f => f.folder_uid === selectedFolderId);
-                if (folder) {
-                  setSelectedFolder(folder);
-                }
-              }}
-              className={getInputClassName()}
-            >
-              <option value="">{field.placeholder || 'Select shared folder'}</option>
-              {keeperFolders
-                .filter(folder => folder.shared || (folder.flags && folder.flags.includes('S')))
-                .map(folder => (
-                <option key={folder.folder_uid} value={folder.folder_uid}>
-                  {folder.name || folder.title || `Folder ${folder.folder_uid}`} (Shared)
-                </option>
-              ))}
-            </select>
-            
-            {loadingFolders && (
-              <div className="loading-indicator">
-                Loading...
-              </div>
-            )}
-            
-              {!loadingFolders && getFilteredFolders().length === 0 && (
-                <div className="error-text">
-                  {keeperFolders.length === 0 
-                    ? 'No folders found.' 
-                    : 'No shared folders found. Only folders with "S" flag (shared folders) are available for record-permission commands.'
-                  }
-                </div>
-              )}
           </div>
         );
       case 'password':
@@ -4627,158 +4564,42 @@ const IssuePanel = () => {
         {/* Action Selection and Approval - Allow non-admin users even without config since they only submit requests */}
         {(issueContext.hasConfig || !isAdmin) && !isLoadingStoredData && (
           <>
-            {/* Action Dropdown */}
-            <div className="mb-12">
-              <label className="label-block">
-                Select Keeper Action:
-              </label>
-              
-              {/* Dropdown Container */}
-              <div className="relative z-1001">
-                {/* Search Input */}
-                <input
-                id="keeper-action-input"
-                type="text"
-                disabled={isFormDisabled}
-                placeholder={
-                  isFormDisabled ? "Form disabled after successful execution..." :
-                  showDropdown ? "Type to search actions..." : 
-                  (selectedAction ? selectedAction.label : "Click to select action...")
-                }
-                value={showDropdown ? searchTerm : (selectedAction ? selectedAction.label : "")}
-                onChange={(e) => {
-                  if (!isFormDisabled) {
-                    setSearchTerm(e.target.value);
-                    setShowDropdown(true);
-                  }
-                }}
-                onClick={() => {
-                  if (!isFormDisabled) {
-                    setShowDropdown(!showDropdown);
-                  }
-                }}
-                onFocus={(e) => {
-                  if (!isFormDisabled) {
-                    setSearchTerm(""); // Clear search when focused to make searching obvious
-                    setShowDropdown(true);
-                  }
-                }}
-                className={`action-select-input ${isFormDisabled ? 'action-select-input-disabled' : (showDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
-              />
-              
-              {/* Dropdown Arrow */}
-              <div
-                onClick={() => {
-                  if (!isFormDisabled) {
-                    setShowDropdown(!showDropdown);
-                  }
-                }}
-                className={`dropdown-arrow-pos ${isFormDisabled ? 'dropdown-arrow-pos-disabled' : 'dropdown-arrow-pos-enabled'}`}
-              >
-                ▼
-              </div>
-
-              {/* Dropdown Menu */}
-              {showDropdown && !isFormDisabled && (
-                <div className="action-dropdown-menu">
-                  {/* Search Hint */}
-                  {!searchTerm && (
-                    <div className="search-hint">
-                      Tip: Type in the field above to search options
-                    </div>
-                  )}
-
-                  {/* Options */}
-                  {paginatedOptions.length > 0 ? (
-                    <>
-                      {paginatedOptions.map((option) => (
-                        <div
-                          key={option.value}
-                          onClick={() => {
-                            setSelectedAction(option);
-                            setShowDropdown(false);
-                            setSearchTerm("");
-                            // Clear all form data and state when switching actions
-                            setFormData({});
-                            setPhoneEntries([]);
-                            setRecordDetails({});
-                            setOriginalComplexFields({});
-                            setTemplateFields([]);
-                            setSelectedRecordForUpdate(null);
-                            setSelectedRecord(null);
-                            setSelectedFolder(null);
-                            setOriginalFormData({});
-                            setStoredRequestData(null);
-                            setHasStoredData(false);
-                            setCustomFields([]);
-                          }}
-                          className={`action-option-item ${selectedAction?.value === option.value ? 'selected' : ''}`}
-                        >
-                          <div className="dropdown-option-title">
-                            {option.label}
-                          </div>
-                          <div className="dropdown-option-description">
-                            {option.description}
-                          </div>
-                        </div>
-                      ))}
-                      
-                      {/* Pagination */}
-                      {totalPages > 1 && (
-                        <div className="dropdown-pagination">
-                          <button
-                            disabled={currentPage === 1}
-                            onClick={() => setCurrentPage(prev => prev - 1)}
-                            className={`pagination-btn ${currentPage === 1 ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
-                          >
-                            Previous
-                          </button>
-                          
-                          <span className="pagination-text">
-                            Page {currentPage} of {totalPages} ({filteredOptions.length} items)
-                          </span>
-                          
-                          <button
-                            disabled={currentPage === totalPages}
-                            onClick={() => setCurrentPage(prev => prev + 1)}
-                            className={`pagination-btn ${currentPage === totalPages ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
-                          >
-                            Next
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="no-results-message">
-                      No actions found matching "{searchTerm}"
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Click outside to close dropdown */}
-              {showDropdown && (
-                <div
-                  className="fixed-overlay"
-                  onClick={() => setShowDropdown(false)}
-                />
-              )}
-              </div>
-              
-              {/* Show description for selected action */}
-              {selectedAction && (
-                <div className="action-description-box">
-                  <strong>{selectedAction.label}:</strong> {selectedAction.description}
-                  {selectedAction.value === 'record-update' && (
-                    <div className="action-note">
-                      Note: Form fields will be blank. Only fill in the fields you want to update - empty fields will be ignored.
-                    </div>
-                  )}
-                </div>
-              )}
+            <ActionSelector
+              selectedAction={selectedAction}
+              onActionSelect={(option) => {
+                setSelectedAction(option);
+                setShowDropdown(false);
+                setSearchTerm("");
+                setFormData({});
+                setPhoneEntries([]);
+                setRecordDetails({});
+                setOriginalComplexFields({});
+                setTemplateFields([]);
+                setSelectedRecordForUpdate(null);
+                setSelectedRecord(null);
+                setSelectedFolder(null);
+                setOriginalFormData({});
+                setStoredRequestData(null);
+                setHasStoredData(false);
+                setCustomFields([]);
+              }}
+              disabled={isFormDisabled}
+              searchTerm={searchTerm}
+              onSearchChange={(val) => { setSearchTerm(val); setShowDropdown(true); }}
+              showDropdown={showDropdown}
+              onToggleDropdown={() => setShowDropdown(!showDropdown)}
+              onCloseDropdown={() => setShowDropdown(false)}
+              onFocusInput={() => { setSearchTerm(""); setShowDropdown(true); }}
+              paginatedOptions={paginatedOptions}
+              filteredCount={filteredOptions.length}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPrevPage={() => setCurrentPage(prev => prev - 1)}
+              onNextPage={() => setCurrentPage(prev => prev + 1)}
+            />
 
               {/* Dynamic Form Fields */}
-              {selectedAction && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields.length > 0 && (
+              {selectedAction && actionOptions.find(action => action.value === selectedAction.value)?.fields && actionOptions.find(action => action.value === selectedAction.value)?.fields.length > 0 && (
                 <div className="form-container">
                   <div className="form-section-heading">
                     Required Information:
@@ -4805,9 +4626,7 @@ const IssuePanel = () => {
                       {/* Records Dropdown Container for Update */}
                       <div className="relative z-1000">
                         {loadingRecords ? (
-                          <div className="loading-container">
-                            Loading records...
-                          </div>
+                          <LoadingPlaceholder text="Loading records..." />
                         ) : (
                           <>
                             {/* Records Search Input for Update */}
@@ -4858,9 +4677,7 @@ const IssuePanel = () => {
                               <div className="record-update-dropdown">
                                 {/* Records Search Hint for Update */}
                                 {!recordForUpdateSearchTerm && (
-                                  <div className="search-hint-sm">
-                                    Tip: Type in the field above to search records by title or UID
-                                  </div>
+                                  <SearchHint text="Tip: Type in the field above to search records by title or UID" />
                                 )}
 
                                 {/* Records Options for Update */}
@@ -4902,30 +4719,15 @@ const IssuePanel = () => {
                                       </div>
                                     ))}
                                     
-                                    {/* Records Pagination for Update */}
-                                    {totalRecordForUpdatePages > 1 && (
-                                      <div className="dropdown-pagination">
-                                        <button
-                                          disabled={recordForUpdateCurrentPage === 1}
-                                          onClick={() => setRecordForUpdateCurrentPage(prev => prev - 1)}
-                                          className={`pagination-btn ${recordForUpdateCurrentPage === 1 ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
-                                        >
-                                          Previous
-                                        </button>
-                                        
-                                        <span className="pagination-text">
-                                          Page {recordForUpdateCurrentPage} of {totalRecordForUpdatePages} ({filteredRecordsForUpdate.length} records)
-                                        </span>
-                                        
-                                        <button
-                                          disabled={recordForUpdateCurrentPage === totalRecordForUpdatePages}
-                                          onClick={() => setRecordForUpdateCurrentPage(prev => prev + 1)}
-                                          className={`pagination-btn ${recordForUpdateCurrentPage === totalRecordForUpdatePages ? 'pagination-btn-disabled' : 'pagination-btn-active'}`}
-                                        >
-                                          Next
-                                        </button>
-                                      </div>
-                                    )}
+                                    <PaginationFooter
+                                      currentPage={recordForUpdateCurrentPage}
+                                      totalPages={totalRecordForUpdatePages}
+                                      onPrev={() => setRecordForUpdateCurrentPage(prev => prev - 1)}
+                                      onNext={() => setRecordForUpdateCurrentPage(prev => prev + 1)}
+                                      itemCount={filteredRecordsForUpdate.length}
+                                      itemLabel="records"
+                                      variant="compact"
+                                    />
                                   </>
                                 ) : (
                                   <div className="no-results-msg">
@@ -4948,14 +4750,15 @@ const IssuePanel = () => {
                       
                       {/* Selected record for update info */}
                       {selectedRecordForUpdate && (
-                        <div className="selected-item-box mt-8">
-                          <div>Selected: <strong>{selectedRecordForUpdate.title}</strong>{selectedRecordForUpdate.record_uid && <span className="selected-item-uid"> (UID: {selectedRecordForUpdate.record_uid})</span>}</div>
+                        <SelectedItemChip
+                          variant="box"
+                          title={selectedRecordForUpdate.title}
+                          uid={selectedRecordForUpdate.record_uid}
+                        >
                           {loadingRecordDetails && (
-                            <div className="text-italic-sm">
-                              Loading...
-                            </div>
+                            <div className="text-italic-sm">Loading...</div>
                           )}
-                        </div>
+                        </SelectedItemChip>
                       )}
 
                           {keeperRecords.length > 0 && (
@@ -4979,9 +4782,7 @@ const IssuePanel = () => {
                       {/* Records Dropdown Container */}
                       <div className="relative z-1000">
                         {loadingRecords ? (
-                          <div className="loading-container">
-                            Loading records...
-                          </div>
+                          <LoadingPlaceholder text="Loading records..." />
                         ) : (
                           <>
                             {/* Records Search Input */}
@@ -5036,9 +4837,7 @@ const IssuePanel = () => {
 
                                 {/* Records Search Hint */}
                                 {!recordSearchTerm && (
-                                  <div className="search-hint-sm">
-                                    Tip: Type in the field above to search records by title or UID
-                                  </div>
+                                  <SearchHint text="Tip: Type in the field above to search records by title or UID" />
                                 )}
 
                                 {/* Records Options */}
@@ -5073,30 +4872,15 @@ const IssuePanel = () => {
                                       </div>
                                     ))}
                                     
-                                    {/* Records Pagination */}
-                                    {totalRecordPages > 1 && (
-                                      <div className="pagination-container">
-                                        <button
-                                          disabled={recordCurrentPage === 1}
-                                          onClick={() => setRecordCurrentPage(prev => prev - 1)}
-                                          className="pagination-button"
-                                        >
-                                          Previous
-                                        </button>
-                                        
-                                        <span className="pagination-info">
-                                          Page {recordCurrentPage} of {totalRecordPages} ({filteredRecords.length} records)
-                                        </span>
-                                        
-                                        <button
-                                          disabled={recordCurrentPage === totalRecordPages}
-                                          onClick={() => setRecordCurrentPage(prev => prev + 1)}
-                                          className="pagination-button"
-                                        >
-                                          Next
-                                        </button>
-                                      </div>
-                                    )}
+                                    <PaginationFooter
+                                      currentPage={recordCurrentPage}
+                                      totalPages={totalRecordPages}
+                                      onPrev={() => setRecordCurrentPage(prev => prev - 1)}
+                                      onNext={() => setRecordCurrentPage(prev => prev + 1)}
+                                      itemCount={filteredRecords.length}
+                                      itemLabel="records"
+                                      variant="container"
+                                    />
                                   </>
                                 ) : (
                                   <div className="dropdown-no-results">
@@ -5119,23 +4903,15 @@ const IssuePanel = () => {
                       
                       {/* Selected record info */}
                       {selectedRecord && (
-                        <div className="share-record-selected-box">
-                          <div className="share-record-selected-content">
-                            <span>Selected: <span className="share-record-selected-text">{selectedRecord.title}</span>{selectedRecord.record_uid && <span className="selected-item-uid"> (UID: {selectedRecord.record_uid})</span>}</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedRecord(null);
-                                setFormData(prev => ({ ...prev, record: '' }));
-                              }}
-                              disabled={isFormDisabled}
-                              className="share-record-clear-btn"
-                              title="Clear selection"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
+                        <SelectedItemChip
+                          title={selectedRecord.title}
+                          uid={selectedRecord.record_uid}
+                          disabled={isFormDisabled}
+                          onClear={() => {
+                            setSelectedRecord(null);
+                            setFormData(prev => ({ ...prev, record: '' }));
+                          }}
+                        />
                       )}
 
                       {keeperRecords.length > 0 && (
@@ -5157,31 +4933,21 @@ const IssuePanel = () => {
                           
                           {/* Info message when folder is selected */}
                           {selectedFolder && (
-                            <div className="share-record-selected-box">
-                              <div className="share-record-selected-content">
-                                <span>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.folderPath}</span>{(selectedFolder.folder_uid || selectedFolder.folderUid) && <span className="selected-item-uid"> (UID: {selectedFolder.folder_uid || selectedFolder.folderUid})</span>}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedFolder(null);
-                                    setFormData(prev => ({ ...prev, sharedFolder: '' }));
-                                  }}
-                                  disabled={isFormDisabled}
-                                  className="share-record-clear-btn"
-                                  title="Clear selection"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
+                            <SelectedItemChip
+                              title={selectedFolder.name || selectedFolder.folderPath}
+                              uid={selectedFolder.folder_uid || selectedFolder.folderUid}
+                              disabled={isFormDisabled}
+                              onClear={() => {
+                                setSelectedFolder(null);
+                                setFormData(prev => ({ ...prev, sharedFolder: '' }));
+                              }}
+                            />
                           )}
 
                           {/* Folders Dropdown Container with search and pagination */}
                           <div className="relative z-997">
                         {loadingFolders ? (
-                          <div className="loading-container">
-                            Loading folders...
-                          </div>
+                          <LoadingPlaceholder text="Loading folders..." />
                         ) : (
                           <>
                             {/* Folder Search Input */}
@@ -5290,34 +5056,14 @@ const IssuePanel = () => {
                                       ))
                                     )}
                                     
-                                    {/* Pagination controls */}
-                                    {totalPages > 1 && (
-                                      <div className="pagination-container">
-                                        <button
-                                          disabled={folderCurrentPage === 1}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setFolderCurrentPage(prev => prev - 1);
-                                          }}
-                                          className="pagination-button"
-                                        >
-                                          Previous
-                                        </button>
-                                        <span className="pagination-info">
-                                          Page {folderCurrentPage} of {totalPages}
-                                        </span>
-                                        <button
-                                          disabled={folderCurrentPage >= totalPages}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setFolderCurrentPage(prev => prev + 1);
-                                          }}
-                                          className="pagination-button"
-                                        >
-                                          Next
-                                        </button>
-                                      </div>
-                                    )}
+                                    <PaginationFooter
+                                      currentPage={folderCurrentPage}
+                                      totalPages={totalPages}
+                                      onPrev={() => setFolderCurrentPage(prev => prev - 1)}
+                                      onNext={() => setFolderCurrentPage(prev => prev + 1)}
+                                      variant="container"
+                                      stopPropagation
+                                    />
                                   </div>
                                 </>
                               );
@@ -5340,42 +5086,20 @@ const IssuePanel = () => {
                       {/* Info message and requirement text area */}
                       {/* Hide Requirements and Justification when admin selects cancel action */}
                       {!(isAdmin && formData.action === 'cancel') && (
-                        <div className="share-record-textarea-wrapper">
-                          {/* Only show info message if cancel is NOT selected */}
-                          {formData.action !== 'cancel' && (
-                            <div className="share-record-info-message">
-                              {isAdmin 
-                                ? 'Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.'
-                                : 'Provide your requirement and justification for this request. An admin will review and process it.'}
-                            </div>
-                          )}
-
-                          <div>
-                            <label className="share-record-label">
-                              Requirements {!isAdmin && <span className="text-error">*</span>}:
-                            </label>
-                            <textarea
-                              value={formData.requirements || ''}
-                              onChange={(e) => handleInputChange('requirements', e.target.value)}
-                              placeholder="Describe your requirements if you're not sure which record or folder to select..."
-                              disabled={isFormDisabled}
-                              className="share-record-textarea"
-                            />
-                          </div>
-
-                          <div className="share-record-textarea-wrapper">
-                            <label className="share-record-label">
-                              Justification for this Request:
-                            </label>
-                            <textarea
-                              value={formData.justification || ''}
-                              onChange={(e) => handleInputChange('justification', e.target.value)}
-                              placeholder="Explain why you need access to this record or folder..."
-                              disabled={isFormDisabled}
-                              className="share-record-textarea"
-                            />
-                          </div>
-                        </div>
+                        <RequirementsBlock
+                          showInfoMessage={formData.action !== 'cancel'}
+                          infoMessage={isAdmin
+                            ? 'Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.'
+                            : 'Provide your requirement and justification for this request. An admin will review and process it.'}
+                          requirementsRequired={!isAdmin}
+                          requirementsValue={formData.requirements}
+                          onRequirementsChange={(e) => handleInputChange('requirements', e.target.value)}
+                          requirementsPlaceholder="Describe your requirements if you're not sure which record or folder to select..."
+                          justificationValue={formData.justification}
+                          onJustificationChange={(e) => handleInputChange('justification', e.target.value)}
+                          justificationPlaceholder="Explain why you need access to this record or folder..."
+                          disabled={isFormDisabled}
+                        />
                       )}
                     </div>
                   )}
@@ -5392,9 +5116,7 @@ const IssuePanel = () => {
                           {/* Folders Dropdown Container */}
                           <div className="relative z-997">
                         {loadingFolders ? (
-                          <div className="loading-container">
-                            Loading folders...
-                          </div>
+                          <LoadingPlaceholder text="Loading folders..." />
                         ) : (
                           <>
                             {/* Folders Search Input */}
@@ -5447,9 +5169,7 @@ const IssuePanel = () => {
 
                                 {/* Folders Search Hint */}
                                 {!folderSearchTerm && (
-                                  <div className="search-hint-sm">
-                                    Tip: Type in the field above to search folders by name or UID
-                                  </div>
+                                  <SearchHint text="Tip: Type in the field above to search folders by name or UID" />
                                 )}
 
                                 {/* Folders Options */}
@@ -5481,30 +5201,15 @@ const IssuePanel = () => {
                                       </div>
                                     ))}
                                     
-                                    {/* Folders Pagination */}
-                                    {totalFolderPages > 1 && (
-                                      <div className="pagination-container">
-                                        <button
-                                          disabled={folderCurrentPage === 1}
-                                          onClick={() => setFolderCurrentPage(prev => prev - 1)}
-                                          className="pagination-button"
-                                        >
-                                          Previous
-                                        </button>
-                                        
-                                        <span className="pagination-info">
-                                          Page {folderCurrentPage} of {totalFolderPages} ({filteredFolders.length} folders)
-                                        </span>
-                                        
-                                        <button
-                                          disabled={folderCurrentPage === totalFolderPages}
-                                          onClick={() => setFolderCurrentPage(prev => prev + 1)}
-                                          className="pagination-button"
-                                        >
-                                          Next
-                                        </button>
-                                      </div>
-                                    )}
+                                    <PaginationFooter
+                                      currentPage={folderCurrentPage}
+                                      totalPages={totalFolderPages}
+                                      onPrev={() => setFolderCurrentPage(prev => prev - 1)}
+                                      onNext={() => setFolderCurrentPage(prev => prev + 1)}
+                                      itemCount={filteredFolders.length}
+                                      itemLabel="folders"
+                                      variant="container"
+                                    />
                                   </>
                                 ) : (
                                   <div className="dropdown-no-results">
@@ -5527,23 +5232,15 @@ const IssuePanel = () => {
                       
                       {/* Selected folder info */}
                       {selectedFolder && (
-                        <div className="share-record-selected-box">
-                          <div className="share-record-selected-content">
-                            <span>Selected: <span className="share-record-selected-text">{selectedFolder.name || selectedFolder.title}</span>{selectedFolder.folder_uid && <span className="selected-item-uid"> (UID: {selectedFolder.folder_uid})</span>}</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedFolder(null);
-                                setFormData(prev => ({ ...prev, folder: '' }));
-                              }}
-                              disabled={isFormDisabled}
-                              className="share-record-clear-btn"
-                              title="Clear selection"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </div>
+                        <SelectedItemChip
+                          title={selectedFolder.name || selectedFolder.title}
+                          uid={selectedFolder.folder_uid}
+                          disabled={isFormDisabled}
+                          onClear={() => {
+                            setSelectedFolder(null);
+                            setFormData(prev => ({ ...prev, folder: '' }));
+                          }}
+                        />
                       )}
 
                           {getFilteredFolders().length > 0 && (
@@ -5555,45 +5252,23 @@ const IssuePanel = () => {
                       )}
 
                       {/* Info message and requirement text area for share-folder and record-permission actions */}
-                      <div className="share-record-textarea-wrapper">
-                        <div className="share-record-info-message">
-                          {isAdmin 
-                            ? (selectedAction.value === 'record-permission' 
-                                ? 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'
-                                : 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.')
-                            : (selectedAction.value === 'record-permission' 
-                                ? 'Provide your requirement and justification for changing folder permissions. An admin will review and process it.'
-                                : 'Provide your requirement and justification for accessing a folder. An admin will review and process it.')}
-                        </div>
-
-                        <div>
-                          <label className="share-record-label">
-                            Requirements {!isAdmin && <span className="text-error">*</span>}:
-                          </label>
-                          <textarea
-                            value={formData.requirements || ''}
-                            onChange={(e) => handleInputChange('requirements', e.target.value)}
-                            placeholder="Describe your requirements if you're not sure which folder to select..."
-                            disabled={isFormDisabled}
-                            className="share-record-textarea"
-                          />
-                        </div>
-
-                        <div className="share-record-textarea-wrapper">
-                          <label className="share-record-label">
-                            Justification for this Request:
-                          </label>
-                          <textarea
-                            value={formData.justification || ''}
-                            onChange={(e) => handleInputChange('justification', e.target.value)}
-                            placeholder={selectedAction.value === 'record-permission' 
-                              ? "Explain why you need to change permissions for this folder..."
-                              : "Explain why you need access to this folder..."}
-                            disabled={isFormDisabled}
-                            className="share-record-textarea"
-                          />
-                        </div>
-                      </div>
+                      <RequirementsBlock
+                        infoMessage={isAdmin
+                          ? 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'
+                          : (selectedAction.value === 'record-permission'
+                            ? 'Provide your requirement and justification for changing folder permissions. An admin will review and process it.'
+                            : 'Provide your requirement and justification for accessing a folder. An admin will review and process it.')}
+                        requirementsRequired={!isAdmin}
+                        requirementsValue={formData.requirements}
+                        onRequirementsChange={(e) => handleInputChange('requirements', e.target.value)}
+                        requirementsPlaceholder="Describe your requirements if you're not sure which folder to select..."
+                        justificationValue={formData.justification}
+                        onJustificationChange={(e) => handleInputChange('justification', e.target.value)}
+                        justificationPlaceholder={selectedAction.value === 'record-permission'
+                          ? 'Explain why you need to change permissions for this folder...'
+                          : 'Explain why you need access to this folder...'}
+                        disabled={isFormDisabled}
+                      />
                     </div>
                   )}
 
@@ -5652,11 +5327,7 @@ const IssuePanel = () => {
                             Standard Fields:
                           </div>
                           
-                          {/* Title Field */}
-                          <div className="mb-12">
-                            <label className="label-sm">
-                              Title
-                            </label>
+                          <FormField label="Title" labelClass="label-sm">
                             <input
                               type="text"
                               value={formData.title || ''}
@@ -5665,13 +5336,9 @@ const IssuePanel = () => {
                               placeholder="Title"
                               className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.title ? 'has-value' : ''}`}
                             />
-                          </div>
-                          
-                          {/* Name Field */}
-                          <div className="mb-12">
-                            <label className="label-sm">
-                              Name (Full Name)
-                            </label>
+                          </FormField>
+
+                          <FormField label="Name (Full Name)" labelClass="label-sm">
                             <input
                               type="text"
                               value={formData.name || ''}
@@ -5680,13 +5347,9 @@ const IssuePanel = () => {
                               placeholder="Full Name"
                               className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.name ? 'has-value' : ''}`}
                             />
-                          </div>
+                          </FormField>
 
-                          {/* Login Field */}
-                          <div className="mb-12">
-                            <label className="label-sm">
-                              Login/Username
-                            </label>
+                          <FormField label="Login/Username" labelClass="label-sm">
                             <input
                               type="text"
                               value={formData.login || ''}
@@ -5695,13 +5358,9 @@ const IssuePanel = () => {
                               placeholder="Username"
                               className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.login ? 'has-value' : ''}`}
                             />
-                          </div>
+                          </FormField>
 
-                          {/* Password Field */}
-                          <div className="mb-12">
-                            <label className="label-sm">
-                              Password
-                            </label>
+                          <FormField label="Password" labelClass="label-sm">
                             <input
                               type="password"
                               value={formData.password || ''}
@@ -5710,13 +5369,9 @@ const IssuePanel = () => {
                               placeholder="Password or $GEN"
                               className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.password && formData.password !== '••••••••' ? 'has-value' : ''}`}
                             />
-                          </div>
+                          </FormField>
 
-                          {/* URL Field */}
-                          <div className="mb-12">
-                            <label className="label-sm">
-                              URL
-                            </label>
+                          <FormField label="URL" labelClass="label-sm">
                             <input
                               type="url"
                               value={formData.url || ''}
@@ -5725,13 +5380,9 @@ const IssuePanel = () => {
                               placeholder="URL"
                               className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.url ? 'has-value' : ''}`}
                             />
-                          </div>
+                          </FormField>
 
-                          {/* Email Field */}
-                          <div className="mb-12">
-                            <label className="label-sm">
-                              Email
-                            </label>
+                          <FormField label="Email" labelClass="label-sm">
                             <input
                               type="email"
                               value={formData.email || ''}
@@ -5740,13 +5391,9 @@ const IssuePanel = () => {
                               placeholder="Email"
                               className={`input-field ${isFormDisabled ? 'disabled' : ''} ${formData.email ? 'has-value' : ''}`}
                             />
-                          </div>
+                          </FormField>
 
-                          {/* Notes Field */}
-                          <div className="mb-12">
-                            <label className="label-sm">
-                              Notes
-                            </label>
+                          <FormField label="Notes" labelClass="label-sm">
                             <textarea
                               value={formData.notes || ''}
                               disabled={isFormDisabled}
@@ -5768,7 +5415,7 @@ const IssuePanel = () => {
                                 <strong>Append to existing notes</strong> (if checked, adds to current notes instead of replacing)
                               </label>
                             </div>
-                          </div>
+                          </FormField>
                         </div>
                       )}
                     </div>
@@ -5779,13 +5426,13 @@ const IssuePanel = () => {
                     <div>
                       {renderClassicModeCheckbox()}
                       {(() => {
-                        const recordAddAction = getKeeperActionOptions().find((action) => action.value === 'record-add');
+                        const recordAddAction = actionOptions.find((action) => action.value === 'record-add');
                         const folderFields = (recordAddAction?.fields || []).filter((field) => field.type === 'folder-select');
                         if (folderFields.length === 0) return null;
                         return (
                           <>
                             <div className="section-header">
-                              Step 1: Select Folder{isKeeperDriveMode ? '' : ' (optional)'}
+                              Step 1: Select Folder (optional)
                             </div>
                             {folderFields.map((field) => (
                               <div key={field.name} className="mb-16">
@@ -5794,11 +5441,9 @@ const IssuePanel = () => {
                                   {field.required && <span className="text-error"> *</span>}
                                 </label>
                                 {renderFormInput(field)}
-                                {!isKeeperDriveMode && (
-                                  <div className="helper-text-muted">
-                                    Leave empty to create the record at the vault root.
-                                  </div>
-                                )}
+                                <div className="helper-text-muted">
+                                  Leave empty to create the record at the vault root.
+                                </div>
                               </div>
                             ))}
                           </>
@@ -5949,7 +5594,7 @@ const IssuePanel = () => {
                   )}
 
                   {/* Regular fields for other actions (not record-update and not record-add) */}
-                  {selectedAction.value !== 'record-update' && selectedAction.value !== 'record-add' && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields
+                  {selectedAction.value !== 'record-update' && selectedAction.value !== 'record-add' && actionOptions.find(action => action.value === selectedAction.value)?.fields
                     .filter((field) => {
                       // Remove record field from UI when share-record is selected
                       // Remove folder field from UI when share-folder is selected  
@@ -5969,55 +5614,48 @@ const IssuePanel = () => {
                       
                       return !shouldRemoveRecordField && !shouldRemoveFolderField && !shouldRemoveSharedFolderField && field.type !== 'checkbox';
                     })
-                    .map((field) => (
-                      <React.Fragment key={field.name}>
-                        {field.name === 'action' && renderClassicModeCheckbox()}
-                        <div className="mb-12">
-                          {/* Don't show label for phoneEntries type - it has its own header */}
-                          {field.type !== 'phoneEntries' && (
-                            <label className="label-record-add">
-                              {field.label}
-                              {/* Don't show required asterisk for non-admin users in share-record, share-folder, record-permission */}
-                              {/* EXCEPT for the action field which is now required */}
-                              {field.required && selectedAction.value !== 'record-update' && 
-                               (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
-                                (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
-                                <span className="text-error ml-4">*</span>
-                              )}
-                            </label>
-                          )}
-                          {renderFormInput(field)}
-                          {selectedAction.value === 'record-update' && (
-                            <div className="field-hint-text">
-                            </div>
-                          )}
-                          {/* Show hint for email field for admin users */}
-                          {field.name === 'user' && isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') && (
-                            <div className="field-hint-text">
-                              Tip: You can enter multiple email addresses separated by commas (e.g., user1@example.com, user2@example.com)
-                            </div>
-                          )}
-                          {/* Show email validation error for admin users */}
-                          {field.name === 'user' && isAdmin && emailValidationError && (
-                            <div className="field-error-text">
-                              {emailValidationError}
-                            </div>
-                          )}
-                          {/* Don't show error message for non-admin users in share-record, share-folder, record-permission */}
-                          {/* EXCEPT for the action field which is now required */}
-                          {field.required && !formData[field.name] && selectedAction.value !== 'record-update' && 
-                           (!((!isAdmin) && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder' || selectedAction.value === 'record-permission')) || 
-                            (field.name === 'action' && !isAdmin && (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'))) && (
-                            <div className="field-error-text">
-                              This field is required
-                            </div>
-                          )}
-                        </div>
-                      </React.Fragment>
-                    ))}
+                    .map((field) => {
+                      const exemptNonAdminRequired = (!isAdmin) && (
+                        selectedAction.value === 'share-record'
+                        || selectedAction.value === 'share-folder'
+                        || selectedAction.value === 'record-permission'
+                      );
+                      // Role is contextually required for KD grant; field.required stays false for revoke.
+                      const isRoleRequired = field.name === 'role' && isKeeperDriveMode && formData.action === 'grant';
+                      const showRequiredMarker = (field.required || isRoleRequired)
+                        && selectedAction.value !== 'record-update'
+                        && (!exemptNonAdminRequired || (field.name === 'action' && !isAdmin && (
+                          selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'
+                        )));
+                      const showRequiredError = showRequiredMarker && !formData[field.name];
+                      const emailHint = field.name === 'user' && isAdmin && (
+                        selectedAction.value === 'share-record' || selectedAction.value === 'share-folder'
+                      )
+                        ? 'Tip: You can enter multiple email addresses separated by commas (e.g., user1@example.com, user2@example.com)'
+                        : null;
+                      const fieldError = field.name === 'user' && isAdmin && emailValidationError
+                        ? emailValidationError
+                        : (showRequiredError ? 'This field is required' : null);
+
+                      return (
+                        <React.Fragment key={field.name}>
+                          {field.name === 'action' && renderClassicModeCheckbox()}
+                          <FormField
+                            hideLabel={field.type === 'phoneEntries'}
+                            label={field.label}
+                            labelClass="label-record-add"
+                            required={showRequiredMarker}
+                            hint={emailHint}
+                            error={fieldError}
+                          >
+                            {renderFormInput(field)}
+                          </FormField>
+                        </React.Fragment>
+                      );
+                    })}
 
                   {/* Checkbox fields for share-folder, share-record, and record-permission actions */}
-                  {(selectedAction.value === 'share-folder' || selectedAction.value === 'share-record' || selectedAction.value === 'record-permission') && getKeeperActionOptions().find(action => action.value === selectedAction.value)?.fields
+                  {(selectedAction.value === 'share-folder' || selectedAction.value === 'share-record' || selectedAction.value === 'record-permission') && actionOptions.find(action => action.value === selectedAction.value)?.fields
                     .filter((field) => {
                       // Only render checkbox fields
                       return field.type === 'checkbox';
@@ -6051,7 +5689,6 @@ const IssuePanel = () => {
                   )}
                 </div>
               )}
-            </div>
 
             {/* Action Buttons - Different for Admin vs Regular Users */}
             <div className="mb-16">
@@ -6201,10 +5838,7 @@ const IssuePanel = () => {
                       </p>
                     </div>
                     
-                    <div className="mb-12">
-                      <label className="label-sm-6">
-                        Rejection Reason <span className="text-error">*</span>
-                      </label>
+                    <FormField label="Rejection Reason" required labelClass="label-sm-6">
                       <textarea
                         value={rejectionReason}
                         onChange={(e) => setRejectionReason(e.target.value)}
@@ -6213,7 +5847,7 @@ const IssuePanel = () => {
                         disabled={isRejecting}
                         className={`input-field textarea-border-override ${isRejecting ? 'disabled' : ''}`}
                       />
-                    </div>
+                    </FormField>
                     
                     <div className="button-group">
                       <Button

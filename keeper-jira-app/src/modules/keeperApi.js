@@ -235,6 +235,37 @@ function getRateLimitBucketForCommand(command) {
 }
 
 /**
+ * Load per-bucket rate-limit window counts from Forge storage.
+ * @param {'read'|'write'} bucket
+ * @param {string} userId
+ * @param {number} now
+ */
+async function loadBucketWindowCounts(bucket, userId, now) {
+  const minuteWindowStart = now - API_CONFIG.rateLimit.minuteWindowMs;
+  const hourWindowStart = now - API_CONFIG.rateLimit.hourWindowMs;
+  const rateLimitKey = `keeper-cmd-ratelimit-${bucket}-${userId}`;
+  let rateLimitData = await storage.get(rateLimitKey);
+
+  if (!rateLimitData) {
+    rateLimitData = { requests: [], lastCleanup: now };
+  }
+
+  const validRequests = (rateLimitData.requests || []).filter(timestamp => timestamp > hourWindowStart);
+  const requestsInMinute = validRequests.filter(t => t > minuteWindowStart).length;
+  const requestsInHour = validRequests.length;
+
+  return {
+    rateLimitKey,
+    rateLimitData,
+    validRequests,
+    requestsInMinute,
+    requestsInHour,
+    minuteWindowStart,
+    hourWindowStart,
+  };
+}
+
+/**
  * Check and update rate limit for a user
  * Uses dual-window rate limiting: per-minute and per-hour
  * Each bucket ('read' / 'write') has its own storage entry so they
@@ -254,30 +285,17 @@ export async function checkCommandRateLimit(userId, bucket = 'write') {
   const limits = API_CONFIG.rateLimit[bucket] || API_CONFIG.rateLimit.write;
 
   const now = Date.now();
-  const minuteWindowStart = now - API_CONFIG.rateLimit.minuteWindowMs;
-  const hourWindowStart = now - API_CONFIG.rateLimit.hourWindowMs;
+  const {
+    rateLimitKey,
+    rateLimitData,
+    validRequests,
+    requestsInMinute,
+    requestsInHour,
+    minuteWindowStart,
+    hourWindowStart,
+  } = await loadBucketWindowCounts(bucket, userId, now);
 
-  // Per-bucket storage key — keeps read/write counters fully independent.
-  const rateLimitKey = `keeper-cmd-ratelimit-${bucket}-${userId}`;
-  
-  // Get current rate limit data
-  let rateLimitData = await storage.get(rateLimitKey);
-  
-  if (!rateLimitData) {
-    rateLimitData = {
-      requests: [],
-      lastCleanup: now
-    };
-  }
-  
-  // Clean old requests outside the hour window
-  rateLimitData.requests = (rateLimitData.requests || []).filter(
-    timestamp => timestamp > hourWindowStart
-  );
-  
-  // Count requests in each window
-  const requestsInMinute = rateLimitData.requests.filter(t => t > minuteWindowStart).length;
-  const requestsInHour = rateLimitData.requests.length;
+  rateLimitData.requests = validRequests;
   
   // Check minute limit (per-bucket)
   if (requestsInMinute >= limits.perMinute) {
@@ -355,17 +373,11 @@ export async function getRateLimitStatus(userId) {
   if (!userId) userId = 'global';
 
   const now = Date.now();
-  const minuteWindowStart = now - API_CONFIG.rateLimit.minuteWindowMs;
-  const hourWindowStart = now - API_CONFIG.rateLimit.hourWindowMs;
 
   // Read each per-bucket storage entry and compute usage/remaining.
   const snapshot = async (bucket) => {
     const limits = API_CONFIG.rateLimit[bucket];
-    const data = (await storage.get(`keeper-cmd-ratelimit-${bucket}-${userId}`)) || { requests: [] };
-    // Filter to current windows
-    const validRequests = (data.requests || []).filter(t => t > hourWindowStart);
-    const requestsInMinute = validRequests.filter(t => t > minuteWindowStart).length;
-    const requestsInHour = validRequests.length;
+    const { requestsInMinute, requestsInHour } = await loadBucketWindowCounts(bucket, userId, now);
     return {
       limits: { perMinute: limits.perMinute, perHour: limits.perHour },
       usage: { minute: requestsInMinute, hour: requestsInHour },

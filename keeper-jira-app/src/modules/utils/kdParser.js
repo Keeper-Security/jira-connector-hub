@@ -4,9 +4,6 @@
  *   UID, Title, Parent/Folder, Item Type
  */
 
-/** Vault root parent UID seen on top-level KD folders (Commander). */
-const KD_VAULT_ROOT_PARENT = 'AAAAAAAAAAAAAAAAAUOiQA';
-
 /**
  * @param {unknown} raw
  * @returns {string}
@@ -20,16 +17,6 @@ function pickString(raw, ...keys) {
     }
   }
   return '';
-}
-
-/**
- * @param {unknown} raw
- * @returns {boolean}
- */
-function isKdVaultRootParent(parentUid) {
-  if (!parentUid) return true;
-  const p = String(parentUid).trim();
-  return p === KD_VAULT_ROOT_PARENT || /^A{16,}$/i.test(p);
 }
 
 /**
@@ -102,7 +89,7 @@ function buildKdFolderPaths(folders) {
     const parentUid = folder.parent_uid || '';
 
     let path = name;
-    if (parentUid && !isKdVaultRootParent(parentUid) && byUid.has(parentUid)) {
+    if (parentUid && byUid.has(parentUid)) {
       const parentPath = resolvePath(parentUid, visiting);
       path = parentPath ? `${parentPath} / ${name}` : name;
     }
@@ -194,7 +181,6 @@ function parseKdRecordsFromRaw(rawRecords) {
 }
 
 module.exports = {
-  isKdVaultRootParent,
   normalizeKdFolderRow,
   buildKdFolderPaths,
   parseKdFoldersFromRaw,

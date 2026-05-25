@@ -5,8 +5,7 @@
 const {
   normalizeKdFolderRow,
   buildKdFolderPaths,
-  parseKdFoldersFromRaw,
-  isKdVaultRootParent
+  parseKdFoldersFromRaw
 } = require('../../src/modules/utils/kdParser');
 
 const SAMPLE_COMMANDER_FOLDERS = [
@@ -25,14 +24,6 @@ const SAMPLE_COMMANDER_FOLDERS = [
 ];
 
 describe('kdParser', () => {
-  describe('isKdVaultRootParent', () => {
-    test('recognizes vault root sentinel', () => {
-      expect(isKdVaultRootParent('AAAAAAAAAAAAAAAAAUOiQA')).toBe(true);
-      expect(isKdVaultRootParent('')).toBe(true);
-      expect(isKdVaultRootParent('i-fQiSv_d9mRigR5jQJULw')).toBe(false);
-    });
-  });
-
   describe('normalizeKdFolderRow', () => {
     test('maps Commander display keys to internal fields', () => {
       const row = normalizeKdFolderRow(SAMPLE_COMMANDER_FOLDERS[0]);

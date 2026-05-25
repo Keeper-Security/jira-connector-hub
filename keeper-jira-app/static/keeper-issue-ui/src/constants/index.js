@@ -15,7 +15,7 @@ export const KEEPER_ACTION_OPTIONS = [
     label: 'Create New Secret', 
     description: 'Create a new secret record in Keeper.',
     fields: [
-      { name: 'folder', label: 'Shared Folder', type: 'folder-select', required: false, placeholder: 'Select folder (optional — root if empty)' },
+      { name: 'folder', label: 'Select Folder', type: 'folder-select', required: false, placeholder: 'Select folder (optional — root if empty)' },
       { name: 'recordType', label: 'Record Type', type: 'select', required: true, options: [], placeholder: 'Select record type' }
     ]
   },
@@ -86,12 +86,12 @@ export const KEEPER_ACTION_OPTIONS = [
 // Merged via getKeeperActionOptions() in IssuePanel.js.
 export const KEEPER_ACTION_OPTIONS_KD = [
   {
-    // KD: folder is required for kd-record-add.
+    // KD: folder is optional for kd-record-add (record is created at root if omitted).
     value: 'record-add',
     label: 'Create New Secret',
-    description: 'Create a new Keeper Drive record in the selected KD folder.',
+    description: 'Create a new secret record in Keeper.',
     fields: [
-      { name: 'folder', label: 'Keeper Drive Folder', type: 'folder-select', required: true, placeholder: 'Select Keeper Drive folder' },
+      { name: 'folder', label: 'Select Folder', type: 'folder-select', required: false, placeholder: 'Select folder (optional — root if empty)' },
       { name: 'recordType', label: 'Record Type', type: 'select', required: true, options: [], placeholder: 'Select record type' }
     ]
   },
@@ -99,7 +99,7 @@ export const KEEPER_ACTION_OPTIONS_KD = [
     // Same shape as Classic; KD routing handled in commandBuilder.
     value: 'record-update',
     label: 'Update Record',
-    description: 'Update an existing Keeper Drive record. Only fill in the fields you want to change.',
+    description: 'Update existing record fields. Only fill in the fields you want to change.',
     fields: [
       { name: 'record', label: 'Record ID/Title', type: 'text', required: true, placeholder: 'Record ID or title to update' },
       { name: 'title', label: 'Title', type: 'text', required: false, placeholder: 'Title' },
