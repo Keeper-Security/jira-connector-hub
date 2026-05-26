@@ -12,7 +12,7 @@ export const activateKeeperPanel = async (issueKey) => {
 
 // Get keeper records.
 // `mode` selects the vault type: 'classic' uses Commander `list`, 'kd' uses
-// `kd-list --records` (Keeper Drive). Defaults to 'classic' for backward
+// `nsf-list --records` (Nested Shared Folder). Defaults to 'classic' for backward
 // compatibility with any caller that doesn't pass a mode.
 export const getKeeperRecords = async (mode = 'classic') => {
   return await invoke("getKeeperRecords", { mode });
@@ -20,7 +20,7 @@ export const getKeeperRecords = async (mode = 'classic') => {
 
 // Get keeper folders.
 // `mode` selects the vault type: 'classic' uses Commander `ls -f`, 'kd' uses
-// `kd-list --folders` (Keeper Drive). Defaults to 'classic'.
+// `nsf-list --folders` (Nested Shared Folder). Defaults to 'classic'.
 export const getKeeperFolders = async (mode = 'classic') => {
   return await invoke("getKeeperFolders", { mode });
 };
@@ -70,7 +70,7 @@ export const getProjectAdmins = async (projectKey, issueKey) => {
 // Execute keeper action.
 // `mode` ('classic' | 'kd') controls whether the resolver/commandBuilder routes
 // `record-add` and `record-update` to their Keeper Drive variants
-// (`kd-record-add`, `kd-record-update`). Defaults to 'classic' for backward
+// (`nsf-record-add`, `nsf-record-update`). Defaults to 'classic' for backward
 // compatibility.
 export const executeKeeperAction = async (issueKey, command, commandDescription, parameters, formattedTimestamp = null, mode = 'classic') => {
   const payload = {

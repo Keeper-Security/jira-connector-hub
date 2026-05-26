@@ -13,17 +13,17 @@ import {
   keeperError, 
   epmError,
   deviceError,
-  isKeeperDriveUnavailableError,
-  kdNotAvailableError
+  isKeeperNsfUnavailableError,
+  nsfNotAvailableError
 } from './modules/utils/errorResponse.js';
-import { parseKdFoldersFromRaw, parseKdRecordsFromRaw } from './modules/utils/kdParser.js';
+import { parseNsfFoldersFromRaw, parseNsfRecordsFromRaw } from './modules/utils/nsfParser.js';
 import {
-  KD_COMMAND_NAME_MAP,
-  KD_ROLES,
-  buildKdShareFolderArgs,
-  buildKdShareRecordArgs,
-  buildKdRecordPermissionArgs
-} from './modules/utils/kdShareCommands.js';
+  NSF_COMMAND_NAME_MAP,
+  NSF_ROLES,
+  buildNsfShareFolderArgs,
+  buildNsfShareRecordArgs,
+  buildNsfRecordPermissionArgs
+} from './modules/utils/nsfShareCommands.js';
 import {
   escapeForSingleQuotes,
   escapeForDoubleQuotes,
@@ -711,27 +711,27 @@ function validatePhoneEntry(phoneEntry) {
  */
 function validateCommandParameters(action, parameters, options = {}) {
   const errors = [];
-  const isKdMode = !!(options && options.mode === 'kd');
+  const isNsfMode = !!(options && options.mode === 'nsf');
 
   // Skip validation for pre-formatted Classic CLI commands; KD always rebuilds server-side.
-  if (parameters.cliCommand && !isKdMode) {
+  if (parameters.cliCommand && !isNsfMode) {
     return { valid: true };
   }
 
   // KD share/permission commands require -r <role> on grant per Commander docs.
   // Classic uses permission flags instead and is unaffected.
   if (
-    isKdMode &&
+    isNsfMode &&
     parameters &&
     parameters.action === 'grant' &&
     ['share-folder', 'share-record', 'record-permission'].includes(action)
   ) {
     const role = parameters.role ? String(parameters.role).trim() : '';
     if (!role) {
-      errors.push('Role is required for Keeper Drive grant operations');
-    } else if (!KD_ROLES.includes(role)) {
+      errors.push('Role is required for Nested Share Subfolders (NSF) grant operations');
+    } else if (!NSF_ROLES.includes(role)) {
       errors.push(
-        `Invalid Keeper Drive role "${role}". Allowed: ${KD_ROLES.join(', ')}`
+        `Invalid Nested Share Subfolders (NSF) role "${role}". Allowed: ${NSF_ROLES.join(', ')}`
       );
     }
   }
@@ -742,7 +742,7 @@ function validateCommandParameters(action, parameters, options = {}) {
     case 'record-update': {
       // Title validation
       if (action === 'record-add' && !parameters.title) {
-        errors.push('Title is required for record-add');
+        errors.push('Title is required for Nested Share Subfolders (NSF) record-add');
       } else if (parameters.title) {
         const titleValidation = validateField('title', parameters.title, { 
           limitKey: 'title',
@@ -962,25 +962,25 @@ function validateCommandParameters(action, parameters, options = {}) {
  */
 
 function buildKeeperCommand(action, parameters, issueKey, options = {}) {
-  // KD mode reroutes actions via KD_COMMAND_NAME_MAP; Classic mode is unaffected.
-  const isKd = options?.mode === 'kd';
+  // NSF mode reroutes actions via NSF_COMMAND_NAME_MAP; Classic mode is unaffected.
+  const isNsf = options?.mode === 'nsf';
 
   // Honor pre-formatted CLI commands only in Classic mode.
-  if (parameters.cliCommand && !isKd) {
+  if (parameters.cliCommand && !isNsf) {
     return parameters.cliCommand;
   }
   
   // ========================================================================
   // Input Validation - validate all parameters before building command
   // ========================================================================
-  const validation = validateCommandParameters(action, parameters, { mode: isKd ? 'kd' : 'classic' });
+  const validation = validateCommandParameters(action, parameters, { mode: isNsf ? 'nsf' : 'classic' });
   if (!validation.valid) {
     throw new Error(`Input validation failed: ${validation.errors.join('; ')}`);
   }
 
   let command;
-  if (isKd && KD_COMMAND_NAME_MAP[action]) {
-    command = KD_COMMAND_NAME_MAP[action];
+  if (isNsf && NSF_COMMAND_NAME_MAP[action]) {
+    command = NSF_COMMAND_NAME_MAP[action];
   } else {
     command = action;
   }
@@ -992,13 +992,13 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
       const recordType = parameters.recordType || 'login';
       command += ` --record-type='${escapeForSingleQuotes(recordType)}'`;
 
-      // KD records must live inside a KD folder; fail if folder UID is missing.
-      if (isKd) {
-        const kdFolder = parameters.folder;
-        if (!kdFolder || !String(kdFolder).trim()) {
-          throw new Error('Keeper Drive folder is required for kd-record-add. Pick a KD folder in the issue panel.');
+      // NSF records must live inside an NSF folder; fail if folder UID is missing.
+      if (isNsf) {
+        const nsfFolder = parameters.folder;
+        if (!nsfFolder || !String(nsfFolder).trim()) {
+          throw new Error('Folder is required for nsf-record-add. Pick a folder in the issue panel.');
         }
-        command += ` --folder='${escapeForSingleQuotes(String(kdFolder).trim())}'`;
+        command += ` --folder='${escapeForSingleQuotes(String(nsfFolder).trim())}'`;
       } else if (parameters.folder && String(parameters.folder).trim()) {
         command += ` --folder='${escapeForSingleQuotes(String(parameters.folder).trim())}'`;
       }
@@ -1172,7 +1172,7 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
     case 'record-update':
       // KD uses short -r <UID>; Classic uses --record=<UID>.
       if (parameters.record) {
-        if (isKd) {
+        if (isNsf) {
           command += ` -r '${escapeForSingleQuotes(parameters.record)}'`;
         } else {
           command += ` --record='${escapeForSingleQuotes(parameters.record)}'`;
@@ -1459,8 +1459,8 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
       break;
       
     case 'record-permission':
-      if (isKd) {
-        command += buildKdRecordPermissionArgs(parameters);
+      if (isNsf) {
+        command += buildNsfRecordPermissionArgs(parameters);
         break;
       }
       // Format: record-permission FOLDER_UID -a ACTION [-d] [-s] [-R] [--force]
@@ -1506,8 +1506,8 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
       break;
       
     case 'share-record':
-      if (isKd) {
-        command += buildKdShareRecordArgs(parameters);
+      if (isNsf) {
+        command += buildNsfShareRecordArgs(parameters);
         break;
       }
       // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R] [--expire-at|--expire-in] --force
@@ -1572,8 +1572,8 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
       break;
       
     case 'share-folder':
-      if (isKd) {
-        command += buildKdShareFolderArgs(parameters);
+      if (isNsf) {
+        command += buildNsfShareFolderArgs(parameters);
         break;
       }
       // Format: share-folder "FOLDER_UID" -e "EMAIL" -a "ACTION" [options] [--expire-at|--expire-in] --force
@@ -1628,21 +1628,21 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
 }
 
 /**
- * Normalize the `mode` payload field to one of 'classic' | 'kd'. Defaults to
+ * Normalize the `mode` payload field to one of 'classic' | 'nsf'. Defaults to
  * 'classic' so callers that haven't been updated keep their pre-toggle
  * behavior.
  */
 function resolveVaultMode(payload) {
   const raw = (payload && payload.mode ? String(payload.mode).toLowerCase() : '').trim();
-  return raw === 'kd' ? 'kd' : 'classic';
+  return raw === 'nsf' ? 'nsf' : 'classic';
 }
 
-// Get records from Keeper API. KD mode uses kd-list; items are tagged with source.
+// Get records from Keeper API. NSF mode uses nsf-list; items are tagged with source.
 resolver.define('getKeeperRecords', async (req) => {
   const userId = req?.context?.accountId;
   const mode = resolveVaultMode(req?.payload);
-  const command = mode === 'kd'
-    ? 'kd-list --records --format=json'
+  const command = mode === 'nsf'
+    ? 'nsf-list --records --format=json'
     : 'list --format=json';
 
   try {
@@ -1667,7 +1667,7 @@ resolver.define('getKeeperRecords', async (req) => {
       }
     }
 
-    const parsedRecords = mode === 'kd' ? parseKdRecordsFromRaw(records) : (records || []);
+    const parsedRecords = mode === 'nsf' ? parseNsfRecordsFromRaw(records) : (records || []);
     const tagged = parsedRecords.map(record => ({
       ...record,
       source: mode
@@ -1675,12 +1675,12 @@ resolver.define('getKeeperRecords', async (req) => {
 
     return successResponse({ records: tagged, mode });
   } catch (err) {
-    // KD unavailable: return structured error so the UI can revert the toggle.
-    if (mode === 'kd' && isKeeperDriveUnavailableError(err)) {
-      logger.error('Keeper Drive not available on this vault for getKeeperRecords', {
+      // NSF unavailable: return structured error so the UI can revert the toggle.
+    if (mode === 'nsf' && isKeeperNsfUnavailableError(err)) {
+      logger.error('Nested Share Subfolders (NSF) not available on this vault for getKeeperRecords', {
         message: err.message
       });
-      return kdNotAvailableError(err.message);
+      return nsfNotAvailableError(err.message);
     }
     // Check for rate limit error
     if (err.rateLimited) {
@@ -1690,12 +1690,12 @@ resolver.define('getKeeperRecords', async (req) => {
   }
 });
 
-// Get folders from Keeper API. KD mode uses kd-list; folders are tagged with source and nested path.
+// Get folders from Keeper API. NSF mode uses nsf-list; folders are tagged with source and nested path.
 resolver.define('getKeeperFolders', async (req) => {
   const userId = req?.context?.accountId;
   const mode = resolveVaultMode(req?.payload);
-  const command = mode === 'kd'
-    ? 'kd-list --folders --format=json'
+  const command = mode === 'nsf'
+    ? 'nsf-list --folders --format=json'
     : 'ls -f --format=json';
 
   try {
@@ -1722,11 +1722,11 @@ resolver.define('getKeeperFolders', async (req) => {
 
     let folders = [];
     try {
-      if (mode === 'kd') {
+      if (mode === 'nsf') {
         // Commander 18.x returns display keys: UID, Title, Parent/Folder.
-        folders = parseKdFoldersFromRaw(rawFolders);
+        folders = parseNsfFoldersFromRaw(rawFolders);
       } else {
-        // Classic: exclude KD rows (they're surfaced via kd-list --folders).
+        // Classic: exclude NSF rows (they're surfaced via nsf-list --folders).
         // Rows without a source field are kept for backward compat.
         const classicRawFolders = (rawFolders || []).filter((folder) => {
           const rawSource = folder && folder.source != null ? String(folder.source).trim().toLowerCase() : '';
@@ -1772,11 +1772,11 @@ resolver.define('getKeeperFolders', async (req) => {
 
     return successResponse({ folders: folders || [], mode });
   } catch (err) {
-    if (mode === 'kd' && isKeeperDriveUnavailableError(err)) {
-      logger.error('Keeper Drive not available on this vault for getKeeperFolders', {
+    if (mode === 'nsf' && isKeeperNsfUnavailableError(err)) {
+      logger.error('Nested Share Subfolders (NSF) not available on this vault for getKeeperFolders', {
         message: err.message
       });
-      return kdNotAvailableError(err.message);
+      return nsfNotAvailableError(err.message);
     }
     // Check for rate limit error
     if (err.rateLimited) {
@@ -1851,10 +1851,10 @@ resolver.define('executeKeeperCommand', async (req) => {
     'list', 'ls', 'get', 'search',
     'record-add', 'record-update', 'record-permission',
     'share-record', 'share-folder',
-    // KD sharing/permission variants (see KD_COMMAND_NAME_MAP).
-    'kd-list', 'kd-get',
-    'kd-record-add', 'kd-record-update', 'kd-record-permission',
-    'kd-share-record', 'kd-share-folder',
+    // NSF sharing/permission variants (see NSF_COMMAND_NAME_MAP).
+    'nsf-list', 'nsf-get',
+    'nsf-record-add', 'nsf-record-update', 'nsf-record-permission',
+    'nsf-share-record', 'nsf-share-folder',
     'epm',
     'device-approve',
     'service-status',
@@ -2092,7 +2092,7 @@ async function markAlreadyProcessedOutsideJira(
 resolver.define('executeKeeperAction', async (req) => {
   const userId = req?.context?.accountId;
   const { issueKey, command, commandDescription, parameters, formattedTimestamp } = req.payload;
-  // `mode` toggles command-builder routing between Classic and Keeper Drive.
+  // `mode` toggles command-builder routing between Classic and Nested Share Subfolders (NSF).
   // Affects: record-add, record-update, share-folder, share-record, record-permission.
   // Defaults to 'classic' so callers that don't pass it keep their pre-toggle behavior.
   const mode = resolveVaultMode(req?.payload);
@@ -2270,9 +2270,9 @@ resolver.define('executeKeeperAction', async (req) => {
   }
   
   // Validate share-record: prevent sharing with record owner (Classic only).
-  // In KD mode Commander already rejects share-to-owner, and the extra
+  // In NSF mode Commander already rejects share-to-owner, and the extra
   // `get` round-trip would push us past Forge's 25s resolver timeout.
-  if (command === 'share-record' && mode !== 'kd' && parameters.record && parameters.user && parameters.action !== 'cancel') {
+  if (command === 'share-record' && mode !== 'nsf' && parameters.record && parameters.user && parameters.action !== 'cancel') {
     try {
       // Fetch record details to get owner email (skip rate limit for internal validation)
       const recordResult = await executeKeeperApiCommand(`get "${parameters.record}" --format=json`, { userId, skipRateLimit: true, forgeSafe: true });
@@ -2774,13 +2774,13 @@ resolver.define('executeKeeperAction', async (req) => {
       return validationError('parameters', validationDetails);
     }
 
-    // KD unavailable: surface structured error so the UI reverts the toggle.
-    if (mode === 'kd' && isKeeperDriveUnavailableError(err)) {
-      logger.error('Keeper Drive not available on this vault for executeKeeperAction', {
+    // NSF unavailable: surface structured error so the UI reverts the toggle.
+    if (mode === 'nsf' && isKeeperNsfUnavailableError(err)) {
+      logger.error('Nested Shared Folder mode not available on this vault for executeKeeperAction', {
         message: err.message,
         command
       });
-      return kdNotAvailableError(err.message);
+      return nsfNotAvailableError(err.message);
     }
 
     // Check if this is a rate limit error

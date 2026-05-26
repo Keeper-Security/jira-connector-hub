@@ -10,7 +10,7 @@ import ErrorIcon from "@atlaskit/icon/glyph/error";
 import LockIcon from "@atlaskit/icon/glyph/lock";
 import CrossIcon from "@atlaskit/icon/glyph/cross";
 
-import { KEEPER_ACTION_OPTIONS, KEEPER_ACTION_OPTIONS_KD, PAGINATION_SETTINGS } from "./constants";
+import { KEEPER_ACTION_OPTIONS, KEEPER_ACTION_OPTIONS_NSF, PAGINATION_SETTINGS } from "./constants";
 import * as api from "./services/api";
 import { handleApiError as handleApiErrorUtil, isStructuredError, getErrorCode } from "./utils/errorHandler";
 import { formatWithUid, filterByTitleOrUid } from "./utils/formatters";
@@ -123,7 +123,7 @@ const IssuePanel = () => {
   const [emailValidationError, setEmailValidationError] = useState(null);
 
   // Vault mode: KD by default; Classic when user opts in via checkbox.
-  const [isKeeperDriveMode, setIsKeeperDriveMode] = useState(true);
+  const [isNsfMode, setIsNsfMode] = useState(true);
 
   // Pagination settings
   const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
@@ -144,10 +144,10 @@ const IssuePanel = () => {
   const renderSourceBadge = (item) => {
     if (!item) return null;
     const source = item.source || 'classic';
-    const isKd = source === 'kd';
+    const isNsf = source === 'nsf';
     return (
-      <span className={`source-badge ${isKd ? 'source-badge-kd' : 'source-badge-classic'}`}>
-        {isKd ? 'New' : 'Classic'}
+      <span className={`source-badge ${isNsf ? 'source-badge-nsf' : 'source-badge-classic'}`}>
+        {isNsf ? 'New' : 'Classic'}
       </span>
     );
   };
@@ -155,23 +155,23 @@ const IssuePanel = () => {
   // Lock mode checkbox when admin opens any stored request.
   const isModeLocked = isAdmin && hasStoredData;
 
-  const activeVaultMode = isKeeperDriveMode ? 'kd' : 'classic';
+  const activeVaultMode = isNsfMode ? 'nsf' : 'classic';
 
   const isSharableFolder = (folder) =>
-    folder.source === 'kd' || folder.shared || (folder.flags && folder.flags.includes('S'));
+    folder.source === 'nsf' || folder.shared || (folder.flags && folder.flags.includes('S'));
 
   // Render nested KD folder path (hidden for Classic or when path equals folder name).
   const renderFolderPath = (folder) => {
-    if (!folder || folder.source !== 'kd') return null;
+    if (!folder || folder.source !== 'nsf') return null;
     const path = folder.path || folder.folderPath || '';
     if (!path || path === folder.name || path === folder.title) return null;
-    return <div className="kd-folder-path">{path}</div>;
+    return <div className="nsf-folder-path">{path}</div>;
   };
 
   // Merged action options (Classic + KD overrides), memoized on mode/types/role.
   const actionOptions = useMemo(() => {
-    const kdOverridesByValue = isKeeperDriveMode
-      ? KEEPER_ACTION_OPTIONS_KD.reduce((acc, action) => {
+    const nsfOverridesByValue = isNsfMode
+      ? KEEPER_ACTION_OPTIONS_NSF.reduce((acc, action) => {
           acc[action.value] = action;
           return acc;
         }, {})
@@ -179,7 +179,7 @@ const IssuePanel = () => {
 
     return keeperActionOptions
       .map(action => {
-        const merged = kdOverridesByValue[action.value] || action;
+        const merged = nsfOverridesByValue[action.value] || action;
         if (merged.value === 'record-update' || merged.value === 'record-add') {
           return {
             ...merged,
@@ -199,7 +199,7 @@ const IssuePanel = () => {
         }
         return true;
       });
-  }, [isKeeperDriveMode, recordTypes, isAdmin]);
+  }, [isNsfMode, recordTypes, isAdmin]);
 
   // Filter and paginate options
   const filteredOptions = actionOptions.filter(option =>
@@ -353,8 +353,8 @@ const IssuePanel = () => {
     });
   };
 
-  const handleKeeperDriveToggle = (next) => {
-    setIsKeeperDriveMode(next);
+  const handleNsfToggle = (next) => {
+    setIsNsfMode(next);
     resetVaultSelectionState();
     // Eagerly mark loading so the spinner shows in the same render as the toggle.
     // Effect B drives the actual refetch (admin only), so guard here matches.
@@ -972,7 +972,9 @@ const IssuePanel = () => {
     setSelectedAction(data.selectedAction);
     setFormData(data.formData || {});
 
-    setIsKeeperDriveMode(data.isKeeperDriveMode !== false);
+    // Backward compat: older saved requests stored isKeeperDriveMode instead of isNsfMode.
+    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : data.isKeeperDriveMode !== false;
+    setIsNsfMode(nsfEnabled);
 
     if (data.formData?.addressRef?.startsWith('temp_addr_')) {
       const uid = data.formData.addressRef;
@@ -983,7 +985,7 @@ const IssuePanel = () => {
     }
 
     setTimeout(() => {
-      const restoredMode = data.isKeeperDriveMode !== false ? 'kd' : 'classic';
+      const restoredMode = nsfEnabled ? 'nsf' : 'classic';
       const restoredAction = data.selectedAction?.value;
       if (restoredAction === 'record-update' && data.selectedRecordForUpdate) {
         setSelectedRecordForUpdate(data.selectedRecordForUpdate);
@@ -1058,7 +1060,7 @@ const IssuePanel = () => {
         selectedRecordForUpdate,
         selectedFolder,
         tempAddressData,
-        isKeeperDriveMode,
+        isNsfMode,
         timestamp: now.toISOString()
       };
       
@@ -2498,9 +2500,9 @@ const IssuePanel = () => {
   // Non-admins don't see inline vault pickers, so toggling Classic must not trigger API calls.
   useEffect(() => {
     if (!isAdmin || !selectedAction || isLoadingStoredData) return;
-    const mode = isKeeperDriveMode ? 'kd' : 'classic';
+    const mode = isNsfMode ? 'nsf' : 'classic';
     refetchVaultData({ mode, action: selectedAction.value });
-  }, [isKeeperDriveMode]);
+  }, [isNsfMode]);
 
   // Auto-dismiss workflow info dialog after 5 seconds
   useEffect(() => {
@@ -2764,7 +2766,7 @@ const IssuePanel = () => {
       }
       
       // Classic: require at least one of can_edit/can_share. KD uses --role instead.
-      if (!isKeeperDriveMode &&
+      if (!isNsfMode &&
           (formData.action === 'grant' || formData.action === 'revoke')) {
         const hasPermissionFlags = formData.can_share || formData.can_edit;
         if (!hasPermissionFlags) {
@@ -2810,7 +2812,7 @@ const IssuePanel = () => {
     }
 
     // KD: role is required on grant for share/permission actions.
-    if (isKeeperDriveMode &&
+    if (isNsfMode &&
         ['share-record', 'share-folder', 'record-permission'].includes(selectedAction.value) &&
         formData.action === 'grant' &&
         (!formData.role || String(formData.role).trim() === '')) {
@@ -2832,9 +2834,9 @@ const IssuePanel = () => {
           <input
             type="checkbox"
             className="classic-mode-input"
-            checked={!isKeeperDriveMode}
+            checked={!isNsfMode}
             disabled={isCheckboxDisabled}
-            onChange={(e) => handleKeeperDriveToggle(!e.target.checked)}
+            onChange={(e) => handleNsfToggle(!e.target.checked)}
           />
           <span className="classic-mode-text">Use classic permission model</span>
         </label>
@@ -2842,7 +2844,7 @@ const IssuePanel = () => {
           {isFetchingVisibleLists
             ? 'Loading vault contents...'
             : isModeLocked
-              ? `Locked to ${isKeeperDriveMode ? 'Keeper Drive' : 'Classic'} per the saved request.`
+              ? `Locked to ${isNsfMode ? 'New Shared Folder' : 'Classic'} per the saved request.`
               : 'Limit sharing to basic access levels. Recommended only for compatibility with older workflows.'}
         </p>
       </div>
@@ -2964,8 +2966,8 @@ const IssuePanel = () => {
         const usableFoldersForPicker = foldersForActiveMode.filter(
           (folder) => folder.folder_uid || folder.folderUid || folder.uid
         );
-        const showKdFolderEmptyMessage =
-          isKeeperDriveMode &&
+        const showNsfFolderEmptyMessage =
+          isNsfMode &&
           selectedAction?.value === 'record-add' &&
           !loadingFolders &&
           usableFoldersForPicker.length === 0;
@@ -3005,13 +3007,13 @@ const IssuePanel = () => {
             )}
             {loadingFolders && (
               <LoadingPlaceholder
-                text={isKeeperDriveMode ? 'Loading Keeper Drive folders...' : 'Loading folders...'}
+                text={isNsfMode ? 'Loading shared folders...' : 'Loading folders...'}
                 className="loading-indicator"
               />
             )}
-            {showKdFolderEmptyMessage && (
+            {showNsfFolderEmptyMessage && (
               <div className="error-text">
-                No Keeper Drive folders found. Create folders in Keeper Drive and ensure your account has access.
+                No shared folders found. Create folders and ensure your account has access.
               </div>
             )}
             {showFolderDropdown && !isFolderFieldDisabled && usableFoldersForPicker.length > 0 && (() => {
@@ -3432,7 +3434,7 @@ const IssuePanel = () => {
         );
       case 'checkbox':
         // Special handling for recursive checkbox in share-record action
-        const isRecursiveDisabled = !isKeeperDriveMode &&
+        const isRecursiveDisabled = !isNsfMode &&
                                      selectedAction?.value === 'share-record' && 
                                      field.name === 'recursive' && 
                                      (formData.record || !formData.sharedFolder);
@@ -3999,7 +4001,7 @@ const IssuePanel = () => {
     }
 
     // Reject if selected items don't match the active vault mode.
-    const expectedLabel = isKeeperDriveMode ? 'Keeper Drive' : 'Classic';
+    const expectedLabel = isNsfMode ? 'New Shared Folder' : 'Classic';
     const sourceMismatch =
       (selectedRecord && (selectedRecord.source || 'classic') !== activeVaultMode) ||
       (selectedRecordForUpdate && (selectedRecordForUpdate.source || 'classic') !== activeVaultMode) ||
@@ -4053,10 +4055,10 @@ const IssuePanel = () => {
         
       }
 
-      // KD: share all records in a folder via kd-share-record <folderUid>.
+      // NSF: share all records in a folder via nsf-share-record <folderUid>.
       if (
         selectedAction.value === 'share-record' &&
-        isKeeperDriveMode &&
+        isNsfMode &&
         !selectedRecord &&
         selectedFolder
       ) {
@@ -4201,8 +4203,8 @@ const IssuePanel = () => {
           selectedFolder.path ||
           selectedFolder.name;
 
-        if (isKeeperDriveMode) {
-          // KD: pass structured params; backend builds kd-record-permission.
+        if (isNsfMode) {
+          // NSF: pass structured params; backend builds nsf-record-permission.
           finalParameters = {
             ...finalParameters,
             folder: folderUid
@@ -5621,7 +5623,7 @@ const IssuePanel = () => {
                         || selectedAction.value === 'record-permission'
                       );
                       // Role is contextually required for KD grant; field.required stays false for revoke.
-                      const isRoleRequired = field.name === 'role' && isKeeperDriveMode && formData.action === 'grant';
+                      const isRoleRequired = field.name === 'role' && isNsfMode && formData.action === 'grant';
                       const showRequiredMarker = (field.required || isRoleRequired)
                         && selectedAction.value !== 'record-update'
                         && (!exemptNonAdminRequired || (field.name === 'action' && !isAdmin && (
@@ -5671,7 +5673,7 @@ const IssuePanel = () => {
 
                   {/* Classic: require at least one of can_edit/can_share for record-permission. */}
                   {selectedAction.value === 'record-permission' &&
-                   !isKeeperDriveMode &&
+                   !isNsfMode &&
                    isAdmin &&
                    (formData.action === 'grant' || formData.action === 'revoke') &&
                    !formData.can_share && !formData.can_edit && (

@@ -119,7 +119,7 @@ this-device timeout 30d
 ```bash
 keeper service-create \
   -p=9009 \
-  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,device-approve,enterprise-info,ei,service-status,one-time-share,rm,sync-down,search,tree,cd,kd-list,kd-get,kd-record-add,kd-record-update,kd-share-folder,kd-share-record,kd-record-permission" \
+  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,device-approve,enterprise-info,ei,service-status,one-time-share,rm,sync-down,search,tree,cd,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission" \
   -rm="foreground" \
   -q=y \
   -f=json
@@ -130,7 +130,7 @@ keeper service-create \
 ```bash
 keeper service-create \
   -p=9009 \
-  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,device-approve,enterprise-info,ei,service-status,one-time-share,rm,sync-down,search,tree,cd,kd-list,kd-get,kd-record-add,kd-record-update,kd-share-folder,kd-share-record,kd-record-permission" \
+  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,device-approve,enterprise-info,ei,service-status,one-time-share,rm,sync-down,search,tree,cd,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission" \
   -rm="foreground" \
   -q=y \
   -ng="<ngrok-auth-token>" \
@@ -145,7 +145,7 @@ keeper service-create \
 ```bash
 keeper service-create \
   -p=9009 \
-  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,device-approve,enterprise-info,ei,service-status,one-time-share,rm,sync-down,search,tree,cd,kd-list,kd-get,kd-record-add,kd-record-update,kd-share-folder,kd-share-record,kd-record-permission" \
+  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,device-approve,enterprise-info,ei,service-status,one-time-share,rm,sync-down,search,tree,cd,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission" \
   -rm="foreground" \
   -q=y \
   -cf="<cloudflare-tunnel-token>" \
@@ -225,10 +225,10 @@ keeper-jira-app/
 │           ├── errorResponse.js  # Structured error responses
 │           ├── jiraApiRetry.js   # Jira API retry with exponential backoff
 │           ├── commandBuilder.js # Keeper CLI command construction
-│           ├── kdParser.js       # Shared folder list parsing (folders + records)
-│           └── kdShareCommands.js # Shared folder share/permission command builders
+│           ├── nsfParser.js       # Shared folder list parsing (folders + records)
+│           └── nsfShareCommands.js # Shared folder share/permission command builders
 ├── tests/
-│   ├── unit/                     # commandBuilder, kdParser, kdShareCommands, errorResponse
+│   ├── unit/                     # commandBuilder, nsfParser, nsfShareCommands, errorResponse
 │   ├── integration/              # webhookStatusChange
 │   └── security/                 # injectionPayloads
 └── static/
@@ -302,7 +302,7 @@ forge logs -f
 | `Rate limit exceeded`               | Too many commands in time window                                | Wait for rate limit to reset (shown in error message)                                                     |
 | `Queue is full`                     | Commander queue capacity reached                                | Wait for pending requests to complete                                                                     |
 | `Request expired`                   | EPM approval request timed out                                  | User must submit a new access request                                                                     |
-| `Shared folder not available (403)` | Missing `kd-*` verbs on service allowlist or Commander < 18.0.0 | Add all `kd-*` commands to the `-c` allowlist (see service-create examples), upgrade Commander to 18.0.0+ |
+| `Shared folder not available (403)` | Missing `nsf-*` verbs on service allowlist or Commander < 18.0.0 | Add all `nsf-*` commands to the `-c` allowlist (see service-create examples), upgrade Commander to 18.0.0+ |
 
 
 ### Tunnel Troubleshooting

@@ -52,7 +52,7 @@ const API_CONFIG = {
   //
   // Split into two independent per-user buckets:
   //   - `read`  : cheap idempotent list/get commands (vault browsers, dropdowns)
-  //   - `write` : mutations (share-*, record-*, kd-share-*, kd-record-*, rm, etc.)
+  //   - `write` : mutations (share-*, record-*, nsf-share-*, nsf-record-*, rm, etc.)
   // Bucket is auto-detected from the command verb inside executeKeeperCommand,
   // so resolvers and other call sites don't need to opt in to a bucket.
   rateLimit: {
@@ -216,7 +216,7 @@ async function fetchWithRetry(url, options = {}, operationName = 'Keeper API') {
 // Keep in sync with ALLOWED_COMMAND_PREFIXES in src/index.js.
 const READ_ONLY_COMMAND_VERBS = new Set([
   'list', 'ls', 'get', 'search', 'tree', 'cd',
-  'kd-list', 'kd-get',
+  'nsf-list', 'nsf-get',
   'record-type-info', 'rti',
   'service-status',
   'enterprise-info', 'ei', 'enterprise-role', 'enterprise-user',
@@ -225,7 +225,7 @@ const READ_ONLY_COMMAND_VERBS = new Set([
 /**
  * Classify a Keeper Commander command string into a rate-limit bucket.
  * Used by executeKeeperCommand so resolvers don't need to know about buckets.
- * @param {string} command - Full command, e.g. "kd-list --records --format=json"
+ * @param {string} command - Full command, e.g. "nsf-list --records --format=json"
  * @returns {'read'|'write'}
  */
 function getRateLimitBucketForCommand(command) {
@@ -732,7 +732,7 @@ async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
       throw new Error(
         `Keeper command did not complete within ${API_CONFIG.polling.forgeMaxTotalWaitMs}ms (Forge resolver limit). ` +
         `Request ${requestId} may still be running on the service. ` +
-        `Common causes: ngrok/tunnel latency, service queue backlog, or slow kd-* commands.`
+        `Common causes: ngrok/tunnel latency, service queue backlog, or slow nsf-* commands.`
       );
     }
 

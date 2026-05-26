@@ -1,50 +1,50 @@
 /**
- * Unit tests for Keeper Drive share-command builders.
+ * Unit tests for Nested Shared Folder share-command builders.
  *
  * Covers:
- *   - KD positives: kd-share-folder, kd-share-record, kd-record-permission
+ *   - NSF positives: nsf-share-folder, nsf-share-record, nsf-record-permission
  *   - Sanity around emails / role / expiration / recursive flags
  *   - Lookup map shared between command-name resolution and the allowlist
  *
  * Classic command-string regressions are guarded indirectly: this module is
- * additive (only invoked when `mode === 'kd'`), so Classic emitted strings
+ * additive (only invoked when `mode === 'nsf'`), so Classic emitted strings
  * are unaffected by anything tested here.
  */
 
 const {
-  KD_COMMAND_NAME_MAP,
-  KD_ROLES,
+  NSF_COMMAND_NAME_MAP,
+  NSF_ROLES,
   appendEmails,
   appendAction,
   appendRole,
   appendRecursive,
-  appendKdExpiration,
-  toKdExpireAt,
-  buildKdShareFolderArgs,
-  buildKdShareRecordArgs,
-  buildKdRecordPermissionArgs
-} = require('../../src/modules/utils/kdShareCommands');
+  appendNsfExpiration,
+  toNsfExpireAt,
+  buildNsfShareFolderArgs,
+  buildNsfShareRecordArgs,
+  buildNsfRecordPermissionArgs
+} = require('../../src/modules/utils/nsfShareCommands');
 
-describe('KD_COMMAND_NAME_MAP', () => {
-  test('maps share/permission UI actions to kd-* commands', () => {
-    expect(KD_COMMAND_NAME_MAP['share-folder']).toBe('kd-share-folder');
-    expect(KD_COMMAND_NAME_MAP['share-record']).toBe('kd-share-record');
-    expect(KD_COMMAND_NAME_MAP['record-permission']).toBe('kd-record-permission');
+describe('NSF_COMMAND_NAME_MAP', () => {
+  test('maps share/permission UI actions to nsf-* commands', () => {
+    expect(NSF_COMMAND_NAME_MAP['share-folder']).toBe('nsf-share-folder');
+    expect(NSF_COMMAND_NAME_MAP['share-record']).toBe('nsf-share-record');
+    expect(NSF_COMMAND_NAME_MAP['record-permission']).toBe('nsf-record-permission');
   });
 
   test('still includes record-add / record-update mappings', () => {
-    expect(KD_COMMAND_NAME_MAP['record-add']).toBe('kd-record-add');
-    expect(KD_COMMAND_NAME_MAP['record-update']).toBe('kd-record-update');
+    expect(NSF_COMMAND_NAME_MAP['record-add']).toBe('nsf-record-add');
+    expect(NSF_COMMAND_NAME_MAP['record-update']).toBe('nsf-record-update');
   });
 
   test('is frozen (single source of truth)', () => {
-    expect(Object.isFrozen(KD_COMMAND_NAME_MAP)).toBe(true);
+    expect(Object.isFrozen(NSF_COMMAND_NAME_MAP)).toBe(true);
   });
 });
 
-describe('KD_ROLES', () => {
+describe('NSF_ROLES', () => {
   test('matches Commander allowed values', () => {
-    expect(KD_ROLES).toEqual([
+    expect(NSF_ROLES).toEqual([
       'viewer',
       'share-manager',
       'content-manager',
@@ -96,11 +96,11 @@ describe('appendRole', () => {
     expect(appendRole('', { role: 'viewer' }, 'revoke')).toBe(' -r viewer');
   });
 
-  test('skips role for remove (kd-share-folder)', () => {
+  test('skips role for remove (nsf-share-folder)', () => {
     expect(appendRole('', { role: 'viewer' }, 'remove')).toBe('');
   });
 
-  test('skips role for owner (kd-share-record)', () => {
+  test('skips role for owner (nsf-share-record)', () => {
     expect(appendRole('', { role: 'viewer' }, 'owner')).toBe('');
   });
 
@@ -121,30 +121,30 @@ describe('appendRecursive', () => {
   });
 });
 
-describe('toKdExpireAt', () => {
+describe('toNsfExpireAt', () => {
   test('returns input unchanged when it already has Z suffix', () => {
-    expect(toKdExpireAt('2027-01-01T00:00:00Z')).toBe('2027-01-01T00:00:00Z');
+    expect(toNsfExpireAt('2027-01-01T00:00:00Z')).toBe('2027-01-01T00:00:00Z');
   });
 
   test('returns input unchanged when it has explicit offset', () => {
-    expect(toKdExpireAt('2027-01-01T00:00:00+05:30')).toBe('2027-01-01T00:00:00+05:30');
+    expect(toNsfExpireAt('2027-01-01T00:00:00+05:30')).toBe('2027-01-01T00:00:00+05:30');
   });
 
   test('converts a datetime-local string to an ISO UTC string', () => {
-    const result = toKdExpireAt('2027-01-01T00:00');
+    const result = toNsfExpireAt('2027-01-01T00:00');
     expect(result).toMatch(/Z$/);
     expect(new Date(result).toISOString()).toBe(result);
   });
 
   test('returns empty string for empty input', () => {
-    expect(toKdExpireAt('')).toBe('');
-    expect(toKdExpireAt(undefined)).toBe('');
+    expect(toNsfExpireAt('')).toBe('');
+    expect(toNsfExpireAt(undefined)).toBe('');
   });
 });
 
-describe('appendKdExpiration', () => {
+describe('appendNsfExpiration', () => {
   test('emits ISO --expire-at when expiration_type is expire-at', () => {
-    const out = appendKdExpiration('', {
+    const out = appendNsfExpiration('', {
       expiration_type: 'expire-at',
       expire_at: '2027-01-01T00:00:00Z'
     });
@@ -153,43 +153,43 @@ describe('appendKdExpiration', () => {
 
   test('emits --expire-in <duration> when expiration_type is expire-in', () => {
     expect(
-      appendKdExpiration('', { expiration_type: 'expire-in', expire_in: '30d' })
+      appendNsfExpiration('', { expiration_type: 'expire-in', expire_in: '30d' })
     ).toBe(' --expire-in 30d');
   });
 
   test('drops malformed expire_in entirely (no shell injection surface)', () => {
     expect(
-      appendKdExpiration('', { expiration_type: 'expire-in', expire_in: '30d; rm -rf /' })
+      appendNsfExpiration('', { expiration_type: 'expire-in', expire_in: '30d; rm -rf /' })
     ).toBe('');
   });
 
   test('accepts mi / mo / y units documented by Commander', () => {
     expect(
-      appendKdExpiration('', { expiration_type: 'expire-in', expire_in: '30mi' })
+      appendNsfExpiration('', { expiration_type: 'expire-in', expire_in: '30mi' })
     ).toBe(' --expire-in 30mi');
     expect(
-      appendKdExpiration('', { expiration_type: 'expire-in', expire_in: '6mo' })
+      appendNsfExpiration('', { expiration_type: 'expire-in', expire_in: '6mo' })
     ).toBe(' --expire-in 6mo');
     expect(
-      appendKdExpiration('', { expiration_type: 'expire-in', expire_in: '1y' })
+      appendNsfExpiration('', { expiration_type: 'expire-in', expire_in: '1y' })
     ).toBe(' --expire-in 1y');
   });
 
   test('accepts literal `never`', () => {
     expect(
-      appendKdExpiration('', { expiration_type: 'expire-in', expire_in: 'never' })
+      appendNsfExpiration('', { expiration_type: 'expire-in', expire_in: 'never' })
     ).toBe(' --expire-in never');
   });
 
   test('no-ops when expiration is none / missing', () => {
-    expect(appendKdExpiration('cmd', {})).toBe('cmd');
-    expect(appendKdExpiration('cmd', { expiration_type: 'none' })).toBe('cmd');
+    expect(appendNsfExpiration('cmd', {})).toBe('cmd');
+    expect(appendNsfExpiration('cmd', { expiration_type: 'none' })).toBe('cmd');
   });
 });
 
-describe('buildKdShareFolderArgs', () => {
+describe('buildNsfShareFolderArgs', () => {
   test('matches the known-good CLI form (grant + role + email)', () => {
-    const args = buildKdShareFolderArgs({
+    const args = buildNsfShareFolderArgs({
       folder: 'A9c07imejy27JD34Wl1bcQ',
       user: 'abdul.deshmukh@metronlabs.com',
       action: 'grant',
@@ -201,7 +201,7 @@ describe('buildKdShareFolderArgs', () => {
   });
 
   test('supports multiple -e emails and --expire-in', () => {
-    const args = buildKdShareFolderArgs({
+    const args = buildNsfShareFolderArgs({
       folder: 'FOLDER_UID',
       user: 'alice@example.com, bob@example.com',
       action: 'grant',
@@ -215,7 +215,7 @@ describe('buildKdShareFolderArgs', () => {
   });
 
   test('does NOT emit role on remove action', () => {
-    const args = buildKdShareFolderArgs({
+    const args = buildNsfShareFolderArgs({
       folder: 'FOLDER_UID',
       user: 'alice@example.com',
       action: 'remove',
@@ -225,7 +225,7 @@ describe('buildKdShareFolderArgs', () => {
   });
 
   test('does NOT emit Classic -p/-o/-s/-d/--force flags', () => {
-    const args = buildKdShareFolderArgs({
+    const args = buildNsfShareFolderArgs({
       folder: 'FOLDER_UID',
       user: 'alice@example.com',
       action: 'grant',
@@ -243,9 +243,9 @@ describe('buildKdShareFolderArgs', () => {
   });
 });
 
-describe('buildKdShareRecordArgs', () => {
+describe('buildNsfShareRecordArgs', () => {
   test('grant on a record UID emits role', () => {
-    const args = buildKdShareRecordArgs({
+    const args = buildNsfShareRecordArgs({
       record: 'REC_UID',
       user: 'alice@example.com',
       action: 'grant',
@@ -256,7 +256,7 @@ describe('buildKdShareRecordArgs', () => {
 
   test('revoke does not require role; passes role through as filter when set', () => {
     expect(
-      buildKdShareRecordArgs({
+      buildNsfShareRecordArgs({
         record: 'REC_UID',
         user: 'alice@example.com',
         action: 'revoke'
@@ -264,7 +264,7 @@ describe('buildKdShareRecordArgs', () => {
     ).toBe(" 'REC_UID' -e 'alice@example.com' -a revoke");
 
     expect(
-      buildKdShareRecordArgs({
+      buildNsfShareRecordArgs({
         record: 'REC_UID',
         user: 'alice@example.com',
         action: 'revoke',
@@ -275,7 +275,7 @@ describe('buildKdShareRecordArgs', () => {
 
   test('owner action never emits -r', () => {
     expect(
-      buildKdShareRecordArgs({
+      buildNsfShareRecordArgs({
         record: 'REC_UID',
         user: 'bob@example.com',
         action: 'owner',
@@ -285,7 +285,7 @@ describe('buildKdShareRecordArgs', () => {
   });
 
   test('folder positional + recursive grant', () => {
-    const args = buildKdShareRecordArgs({
+    const args = buildNsfShareRecordArgs({
       sharedFolder: 'FOLDER_UID',
       user: 'alice@example.com',
       action: 'grant',
@@ -298,7 +298,7 @@ describe('buildKdShareRecordArgs', () => {
   });
 
   test('does NOT emit Classic -s / -w / -f flags', () => {
-    const args = buildKdShareRecordArgs({
+    const args = buildNsfShareRecordArgs({
       record: 'REC_UID',
       user: 'alice@example.com',
       action: 'grant',
@@ -312,10 +312,10 @@ describe('buildKdShareRecordArgs', () => {
   });
 });
 
-describe('buildKdRecordPermissionArgs', () => {
+describe('buildNsfRecordPermissionArgs', () => {
   test('grant with role and -f', () => {
     expect(
-      buildKdRecordPermissionArgs({
+      buildNsfRecordPermissionArgs({
         folder: 'FOLDER_UID',
         action: 'grant',
         role: 'viewer'
@@ -325,7 +325,7 @@ describe('buildKdRecordPermissionArgs', () => {
 
   test('revoke recursive with -f', () => {
     expect(
-      buildKdRecordPermissionArgs({
+      buildNsfRecordPermissionArgs({
         folder: 'FOLDER_UID',
         action: 'revoke',
         recursive: true
@@ -335,7 +335,7 @@ describe('buildKdRecordPermissionArgs', () => {
 
   test('falls back to sharedFolder when folder is absent', () => {
     expect(
-      buildKdRecordPermissionArgs({
+      buildNsfRecordPermissionArgs({
         sharedFolder: 'FOLDER_UID',
         action: 'grant',
         role: 'content-manager'
@@ -344,7 +344,7 @@ describe('buildKdRecordPermissionArgs', () => {
   });
 
   test('does NOT emit Classic -d / -s flags', () => {
-    const args = buildKdRecordPermissionArgs({
+    const args = buildNsfRecordPermissionArgs({
       folder: 'FOLDER_UID',
       action: 'grant',
       role: 'viewer',
