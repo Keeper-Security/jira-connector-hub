@@ -191,6 +191,9 @@ function buildKdShareFolderArgs(parameters) {
   args = appendAction(args, parameters && parameters.action);
   args = appendRole(args, parameters || {}, parameters && parameters.action);
   args = appendKdExpiration(args, parameters || {});
+  if (parameters && parameters.rotate_on_expiration === true) {
+    args += ' --rotate-on-expiration';
+  }
   return args;
 }
 
@@ -217,6 +220,9 @@ function buildKdShareRecordArgs(parameters) {
     args = appendRecursive(args, parameters);
   }
   args = appendKdExpiration(args, parameters || {});
+  if (parameters && parameters.rotate_on_expiration === true) {
+    args += ' --rotate-on-expiration';
+  }
   return args;
 }
 
