@@ -1,6 +1,6 @@
 /**
- * Normalize Keeper Drive (KD) list output from Commander 18.x CLI.
- * `kd-list --folders` / `--records` return display-key JSON:
+ * Normalize Nested Shared Folders (NSF) list output from Commander 18.x CLI.
+ * `nsf-list --folders` / `--records` return display-key JSON:
  *   UID, Title, Parent/Folder, Item Type
  */
 
@@ -20,13 +20,13 @@ function pickString(raw, ...keys) {
 }
 
 /**
- * Map one raw `kd-list --folders` row to normalized fields.
+ * Map one raw `nsf-list --folders` row to normalized fields.
  * Returns null if the row is not a folder.
  *
  * @param {object} raw
  * @returns {object|null}
  */
-function normalizeKdFolderRow(raw) {
+function normalizeNsfFolderRow(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
   const itemType = pickString(raw, 'Item Type', 'item_type', 'itemType', 'type');
@@ -65,7 +65,7 @@ function normalizeKdFolderRow(raw) {
  * @param {Array<{ uid: string, name: string, parent_uid?: string }>} folders
  * @returns {Array<object>}
  */
-function buildKdFolderPaths(folders) {
+function buildNsfFolderPaths(folders) {
   const byUid = new Map();
   for (const folder of folders) {
     if (folder && folder.uid) {
@@ -112,7 +112,7 @@ function buildKdFolderPaths(folders) {
       flags: '',
       parent_uid: folder.parent_uid || '',
       shared: true,
-      source: 'kd',
+      source: 'nsf',
       raw_data: folder.raw_data
     };
   });
@@ -124,20 +124,20 @@ function buildKdFolderPaths(folders) {
  * @param {Array<object>} rawFolders
  * @returns {Array<object>}
  */
-function parseKdFoldersFromRaw(rawFolders) {
+function parseNsfFoldersFromRaw(rawFolders) {
   const normalized = (rawFolders || [])
-    .map(normalizeKdFolderRow)
+    .map(normalizeNsfFolderRow)
     .filter(Boolean);
-  return buildKdFolderPaths(normalized);
+  return buildNsfFolderPaths(normalized);
 }
 
 /**
- * Map one raw `kd-list --records` row to normalized fields.
+ * Map one raw `nsf-list --records` row to normalized fields.
  *
  * @param {object} raw
  * @returns {object|null}
  */
-function normalizeKdRecordRow(raw) {
+function normalizeNsfRecordRow(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
   const itemType = pickString(raw, 'Item Type', 'item_type', 'itemType', 'type');
@@ -174,16 +174,16 @@ function normalizeKdRecordRow(raw) {
  * @param {Array<object>} rawRecords
  * @returns {Array<object>}
  */
-function parseKdRecordsFromRaw(rawRecords) {
+function parseNsfRecordsFromRaw(rawRecords) {
   return (rawRecords || [])
-    .map(normalizeKdRecordRow)
+    .map(normalizeNsfRecordRow)
     .filter(Boolean);
 }
 
 module.exports = {
-  normalizeKdFolderRow,
-  buildKdFolderPaths,
-  parseKdFoldersFromRaw,
-  normalizeKdRecordRow,
-  parseKdRecordsFromRaw
+  normalizeNsfFolderRow,
+  buildNsfFolderPaths,
+  parseNsfFoldersFromRaw,
+  normalizeNsfRecordRow,
+  parseNsfRecordsFromRaw
 };

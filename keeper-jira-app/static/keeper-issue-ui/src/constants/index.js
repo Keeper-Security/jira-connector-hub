@@ -1,6 +1,6 @@
-// KD role options. Server-side peer: KD_ROLES in src/modules/utils/kdShareCommands.js
+// NSF role options. Server-side peer: NSF_ROLES in src/modules/utils/nsfShareCommands.js
 // Source: https://docs.keeper.io/en/keeperpam/commander-cli/command-reference/keeper-drive-commands
-export const KEEPER_DRIVE_ROLES = [
+export const NSF_ROLES = [
   { value: 'viewer',                label: 'Viewer',                    description: 'Can view content and participants' },
   { value: 'share-manager',         label: 'Share Manager',             description: 'Can manage share permissions, invite others, and approve requests' },
   { value: 'content-manager',       label: 'Content Manager',           description: 'Can manage content' },
@@ -82,11 +82,11 @@ export const KEEPER_ACTION_OPTIONS = [
   }
 ];
 
-// KD action overrides — only actions whose fields differ from Classic.
+// NSF action overrides — only actions whose fields differ from Classic.
 // Merged via getKeeperActionOptions() in IssuePanel.js.
-export const KEEPER_ACTION_OPTIONS_KD = [
+export const KEEPER_ACTION_OPTIONS_NSF = [
   {
-    // KD: folder is optional for kd-record-add (record is created at root if omitted).
+    // NSF: folder is optional for nsf-record-add (record is created at root if omitted).
     value: 'record-add',
     label: 'Create New Secret',
     description: 'Create a new secret record in Keeper.',
@@ -96,7 +96,7 @@ export const KEEPER_ACTION_OPTIONS_KD = [
     ]
   },
   {
-    // Same shape as Classic; KD routing handled in commandBuilder.
+    // Same shape as Classic; NSF routing handled in commandBuilder.
     value: 'record-update',
     label: 'Update Record',
     description: 'Update existing record fields. Only fill in the fields you want to change.',
@@ -113,27 +113,27 @@ export const KEEPER_ACTION_OPTIONS_KD = [
     ]
   },
   {
-    // KD: uses --role instead of Classic permission-flag checkboxes.
+    // NSF: uses --role instead of Classic permission-flag checkboxes.
     value: 'record-permission',
     label: 'Update Record Permissions in Folder',
     requiresSharedFolderSelection: true,
     fields: [
-      { name: 'sharedFolder', label: 'Keeper Drive Folder', type: 'folder-select', required: true, placeholder: 'Select Keeper Drive folder' },
+      { name: 'sharedFolder', label: 'Select Folder', type: 'folder-select', required: true, placeholder: 'Select folder' },
       { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'revoke'], placeholder: 'Select action' },
-      { name: 'role', label: 'Role', type: 'role', required: false, options: KEEPER_DRIVE_ROLES, placeholder: 'Select role', description: 'Required when action is grant; for revoke, optionally filter by role' },
+      { name: 'role', label: 'Role', type: 'role', required: false, options: NSF_ROLES, placeholder: 'Select role', description: 'Required when action is grant; for revoke, optionally filter by role' },
       { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply permission changes to all sub-folders' }
     ]
   },
   {
-    // KD: action set is grant | revoke | owner (no cancel).
+    // NSF: action set is grant | revoke | owner (no cancel).
     value: 'share-record',
     label: 'Request Access to Record',
     requiresSharedFolderSelection: true,
     fields: [
       { name: 'user', label: 'Email', type: 'email', required: true, placeholder: 'Email of account to share with' },
       { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'revoke', 'owner'], placeholder: 'Select action' },
-      { name: 'sharedFolder', label: 'Record Folder', type: 'folder-select', required: false, placeholder: 'Select KD folder (optional, share all records in folder)' },
-      { name: 'role', label: 'Role', type: 'role', required: false, options: KEEPER_DRIVE_ROLES, placeholder: 'Select role', description: 'Required when action is grant. Ignored for revoke and owner transfers.' },
+      { name: 'sharedFolder', label: 'Record Folder', type: 'folder-select', required: false, placeholder: 'Select folder (optional, share all records in folder)' },
+      { name: 'role', label: 'Role', type: 'role', required: false, options: NSF_ROLES, placeholder: 'Select role', description: 'Required when action is grant. Ignored for revoke and owner transfers.' },
       { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply to all records in folder and sub-folders' },
       { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
       { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
@@ -141,15 +141,15 @@ export const KEEPER_ACTION_OPTIONS_KD = [
     ]
   },
   {
-    // KD: action set is grant | remove (matches Classic).
+    // NSF: action set is grant | remove (matches Classic).
     value: 'share-folder',
     label: 'Request Access to Folder',
     requiresSharedFolderSelection: true,
     fields: [
-      { name: 'folder', label: 'Keeper Drive Folder', type: 'folder-select', required: true, placeholder: 'Select Keeper Drive folder' },
+      { name: 'folder', label: 'Select Folder', type: 'folder-select', required: true, placeholder: 'Select folder' },
       { name: 'user', label: 'Email/Team', type: 'text', required: true, placeholder: 'Email, team name, or team UID' },
       { name: 'action', label: 'Action', type: 'select', required: true, options: ['grant', 'remove'], placeholder: 'Select action' },
-      { name: 'role', label: 'Role', type: 'role', required: false, options: KEEPER_DRIVE_ROLES, placeholder: 'Select role', description: 'Required when action is grant.' },
+      { name: 'role', label: 'Role', type: 'role', required: false, options: NSF_ROLES, placeholder: 'Select role', description: 'Required when action is grant.' },
       { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
       { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
       { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 1d, 2h, 30mi', description: 'Period until expiration (e.g., 1d=1 day, 2h=2 hours, 30mi=30 minutes)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }

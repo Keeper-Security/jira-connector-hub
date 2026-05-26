@@ -1,8 +1,8 @@
 /**
- * Keeper Drive (KD) share command argument builders.
+ * Nested Shared Subfolders (NSF) share command argument builders.
  *
- * Pure helpers for assembling `kd-share-folder`, `kd-share-record`, and
- * `kd-record-permission` argument suffixes. The builders return only the
+ * Pure helpers for assembling `nsf-share-folder`, `nsf-share-record`, and
+ * `nsf-record-permission` argument suffixes. The builders return only the
  * argument portion (no command name) so `buildKeeperCommand` can prepend
  * the resolved command name.
  *
@@ -12,24 +12,24 @@
  * - Classic command builders are NOT touched here; this module is additive
  *   so existing Legacy/Classic emitted strings remain byte-identical.
  *
- * CommonJS module.exports (matches `kdParser.js`).
+ * CommonJS module.exports (matches `nsfParser.js`).
  */
 
 /**
- * Single source of truth for UI-action -> KD Commander command name.
+ * Single source of truth for UI-action -> NSF Commander command name.
  * Consumed by the command-name mapping in `buildKeeperCommand` and the
  * server-side allowlist in `getKeeperCommand` to avoid drift.
  */
-const KD_COMMAND_NAME_MAP = Object.freeze({
-  'record-add': 'kd-record-add',
-  'record-update': 'kd-record-update',
-  'share-folder': 'kd-share-folder',
-  'share-record': 'kd-share-record',
-  'record-permission': 'kd-record-permission'
+const NSF_COMMAND_NAME_MAP = Object.freeze({
+  'record-add': 'nsf-record-add',
+  'record-update': 'nsf-record-update',
+  'share-folder': 'nsf-share-folder',
+  'share-record': 'nsf-share-record',
+  'record-permission': 'nsf-record-permission'
 });
 
-/** Allowed KD roles. Frontend peer: KEEPER_DRIVE_ROLES in static/keeper-issue-ui/src/constants/index.js */
-const KD_ROLES = Object.freeze([
+/** Allowed NSF roles. Frontend peer: NSF_ROLES in static/keeper-issue-ui/src/constants/index.js */
+const NSF_ROLES = Object.freeze([
   'viewer',
   'share-manager',
   'content-manager',
@@ -78,7 +78,7 @@ function appendAction(command, action) {
 
 /**
  * Append `-r <role>` only when the action requires it and the role is set.
- * KD share commands accept role on `grant` (and tolerate it elsewhere where
+ * NSF share commands accept role on `grant` (and tolerate it elsewhere where
  * documented, e.g. record-permission revoke as a filter).
  *
  * @param {string} command
@@ -89,8 +89,8 @@ function appendAction(command, action) {
 function appendRole(command, parameters, action) {
   const role = parameters && parameters.role ? String(parameters.role).trim() : '';
   if (!role) return command;
-  // Allow grant always; allow revoke as filter (kd-record-permission revoke -r).
-  // Skip for `remove` (kd-share-folder) and `owner` (kd-share-record) where
+  // Allow grant always; allow revoke as filter (nsf-record-permission revoke -r).
+  // Skip for `remove` (nsf-share-folder) and `owner` (nsf-share-record) where
   // role is not meaningful per Commander docs.
   if (action === 'remove' || action === 'owner') return command;
   return `${command} -r ${role}`;
@@ -112,13 +112,13 @@ function appendRecursive(command, parameters) {
 
 /**
  * Convert a `datetime-local` value (no timezone) to an ISO UTC string
- * accepted by Keeper Drive (`2026-05-18T21:30:00Z`). Inputs that already
+ * accepted by NSF Commander (`2026-05-18T21:30:00Z`). Inputs that already
  * carry a `Z` or explicit offset are passed through unchanged.
  *
  * @param {string} value
  * @returns {string}
  */
-function toKdExpireAt(value) {
+function toNsfExpireAt(value) {
   if (!value) return '';
   const raw = String(value).trim();
   if (!raw) return '';
@@ -129,23 +129,23 @@ function toKdExpireAt(value) {
 }
 
 /**
- * Append `--expire-at` or `--expire-in` for KD commands. Classic uses a
+ * Append `--expire-at` or `--expire-in` for NSF commands. Classic uses a
  * different `--expire-at` format (space-separated local time) and lives in
- * `src/index.js`; this helper is KD-only on purpose to avoid touching
+ * `src/index.js`; this helper is NSF-only on purpose to avoid touching
  * Classic emitted strings.
  *
  * @param {string} command
  * @param {object} parameters
  * @returns {string}
  */
-function appendKdExpiration(command, parameters) {
+function appendNsfExpiration(command, parameters) {
   if (!parameters) return command;
   if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
-    const iso = toKdExpireAt(parameters.expire_at);
+    const iso = toNsfExpireAt(parameters.expire_at);
     return `${command} --expire-at "${escapeForDoubleQuotes(iso)}"`;
   }
   if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-    const safe = sanitizeKdDuration(parameters.expire_in);
+    const safe = sanitizeNsfDuration(parameters.expire_in);
     if (safe) {
       return `${command} --expire-in ${safe}`;
     }
@@ -154,7 +154,7 @@ function appendKdExpiration(command, parameters) {
 }
 
 /**
- * Validate and normalize a KD expire-in duration. Accepts the units documented
+ * Validate and normalize a NSF expire-in duration. Accepts the units documented
  * by Commander (`d`, `h`, `m`, `s`, `mi`, `mo`, `y`) and the literal `never`.
  * Returns an empty string for anything else, so we never emit shell-unsafe or
  * malformed durations to Commander.
@@ -162,7 +162,7 @@ function appendKdExpiration(command, parameters) {
  * @param {string} value
  * @returns {string}
  */
-function sanitizeKdDuration(value) {
+function sanitizeNsfDuration(value) {
   if (!value) return '';
   const raw = String(value).trim().toLowerCase();
   if (!raw) return '';
@@ -172,17 +172,17 @@ function sanitizeKdDuration(value) {
 }
 
 // --------------------------------------------------------------------------
-// KD command argument builders (return suffix only, no command name)
+// NSF command argument builders (return suffix only, no command name)
 // --------------------------------------------------------------------------
 
 /**
- * Build the argument suffix for `kd-share-folder`.
+ * Build the argument suffix for `nsf-share-folder`.
  * Shape: `<folderUid> -e ... -a grant|remove [-r role] [--expire-*]`.
  *
  * @param {object} parameters
  * @returns {string}
  */
-function buildKdShareFolderArgs(parameters) {
+function buildNsfShareFolderArgs(parameters) {
   let args = '';
   if (parameters && parameters.folder) {
     args += ` '${escapeForSingleQuotes(parameters.folder)}'`;
@@ -190,7 +190,7 @@ function buildKdShareFolderArgs(parameters) {
   args = appendEmails(args, parameters && parameters.user);
   args = appendAction(args, parameters && parameters.action);
   args = appendRole(args, parameters || {}, parameters && parameters.action);
-  args = appendKdExpiration(args, parameters || {});
+  args = appendNsfExpiration(args, parameters || {});
   if (parameters && parameters.rotate_on_expiration === true) {
     args += ' --rotate-on-expiration';
   }
@@ -198,13 +198,13 @@ function buildKdShareFolderArgs(parameters) {
 }
 
 /**
- * Build the argument suffix for `kd-share-record`.
+ * Build the argument suffix for `nsf-share-record`.
  * Shape: `<recordOrFolderUid> -e ... -a grant|revoke|owner [-r role] [-R] [--expire-*]`.
  *
  * @param {object} parameters
  * @returns {string}
  */
-function buildKdShareRecordArgs(parameters) {
+function buildNsfShareRecordArgs(parameters) {
   let args = '';
   const positional = (parameters && (parameters.record || parameters.sharedFolder)) || '';
   if (positional) {
@@ -219,7 +219,7 @@ function buildKdShareRecordArgs(parameters) {
   } else if (parameters && parameters.record && parameters.recursive) {
     args = appendRecursive(args, parameters);
   }
-  args = appendKdExpiration(args, parameters || {});
+  args = appendNsfExpiration(args, parameters || {});
   if (parameters && parameters.rotate_on_expiration === true) {
     args += ' --rotate-on-expiration';
   }
@@ -227,7 +227,7 @@ function buildKdShareRecordArgs(parameters) {
 }
 
 /**
- * Build the argument suffix for `kd-record-permission`.
+ * Build the argument suffix for `nsf-record-permission`.
  * Shape: `<folderUid> -a grant|revoke [-r role] [-R] -f`.
  *
  * Commander's examples always pass `-f` for grant/revoke; we follow suit so
@@ -237,7 +237,7 @@ function buildKdShareRecordArgs(parameters) {
  * @param {object} parameters
  * @returns {string}
  */
-function buildKdRecordPermissionArgs(parameters) {
+function buildNsfRecordPermissionArgs(parameters) {
   let args = '';
   const folderUid =
     (parameters && (parameters.folder || parameters.sharedFolder)) || '';
@@ -255,16 +255,16 @@ function buildKdRecordPermissionArgs(parameters) {
 }
 
 module.exports = {
-  KD_COMMAND_NAME_MAP,
-  KD_ROLES,
+  NSF_COMMAND_NAME_MAP,
+  NSF_ROLES,
   appendEmails,
   appendAction,
   appendRole,
   appendRecursive,
-  appendKdExpiration,
-  sanitizeKdDuration,
-  toKdExpireAt,
-  buildKdShareFolderArgs,
-  buildKdShareRecordArgs,
-  buildKdRecordPermissionArgs
+  appendNsfExpiration,
+  sanitizeNsfDuration,
+  toNsfExpireAt,
+  buildNsfShareFolderArgs,
+  buildNsfShareRecordArgs,
+  buildNsfRecordPermissionArgs
 };
