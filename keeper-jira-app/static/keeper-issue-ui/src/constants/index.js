@@ -60,7 +60,7 @@ export const KEEPER_ACTION_OPTIONS = [
       { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply to all records in folder and subfolders (only for shared folder selection)' },
       { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
       { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
-      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 1d, 2h, 30mi', description: 'Period until expiration (e.g., 1d=1 day, 2h=2 hours, 30mi=30 minutes)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
+      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 5mi, 2h, 1d, 1mo, 1y', description: 'Duration until expiration (mi=minutes, h=hours, d=days, mo=months, y=years)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
     ]
   },
   { 
@@ -77,7 +77,7 @@ export const KEEPER_ACTION_OPTIONS = [
       { name: 'can_edit', label: 'Can Edit Records', type: 'checkbox', required: false, description: 'Allow user to modify records (records only)' },
       { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
       { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
-      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 1d, 2h, 30mi', description: 'Period until expiration (e.g., 1d=1 day, 2h=2 hours, 30mi=30 minutes)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
+      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 5mi, 2h, 1d, 1mo, 1y', description: 'Duration until expiration (mi=minutes, h=hours, d=days, mo=months, y=years)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
     ]
   }
 ];
@@ -137,7 +137,7 @@ export const KEEPER_ACTION_OPTIONS_NSF = [
       { name: 'recursive', label: 'Apply Recursively', type: 'checkbox', required: false, description: 'Apply to all records in folder and sub-folders' },
       { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
       { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
-      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 1d, 2h, 30mi', description: 'Period until expiration (e.g., 1d=1 day, 2h=2 hours, 30mi=30 minutes)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
+      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 5mi, 2h, 1d, 1mo, 1y', description: 'Duration until expiration (mi=minutes, h=hours, d=days, mo=months, y=years)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
     ]
   },
   {
@@ -152,7 +152,7 @@ export const KEEPER_ACTION_OPTIONS_NSF = [
       { name: 'role', label: 'Role', type: 'role', required: false, options: NSF_ROLES, placeholder: 'Select role', description: 'Required when action is grant.' },
       { name: 'expiration_type', label: 'Expiration', type: 'select', required: false, options: ['none', 'expire-at', 'expire-in'], placeholder: 'Select expiration type', description: 'Set when the share access expires' },
       { name: 'expire_at', label: 'Expire At', type: 'datetime-local', required: false, placeholder: 'yyyy-MM-dd hh:mm:ss', description: 'Specific date and time when share expires', conditionalOn: 'expiration_type', conditionalValue: 'expire-at' },
-      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 1d, 2h, 30mi', description: 'Period until expiration (e.g., 1d=1 day, 2h=2 hours, 30mi=30 minutes)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
+      { name: 'expire_in', label: 'Expire In', type: 'text', required: false, placeholder: 'e.g., 5mi, 2h, 1d, 1mo, 1y', description: 'Duration until expiration (mi=minutes, h=hours, d=days, mo=months, y=years)', conditionalOn: 'expiration_type', conditionalValue: 'expire-in' }
     ]
   }
 ];

@@ -165,9 +165,9 @@ const IssuePanel = () => {
   const isSharableFolder = (folder) =>
     folder.source === 'nsf' || folder.shared || (folder.flags && folder.flags.includes('S'));
 
-  // Render nested KD folder path (hidden for Classic or when path equals folder name).
+  // Render nested folder path when it differs from the folder name (works for both Classic and NSF).
   const renderFolderPath = (folder) => {
-    if (!folder || folder.source !== 'nsf') return null;
+    if (!folder) return null;
     const path = folder.path || folder.folderPath || '';
     if (!path || path === folder.name || path === folder.title) return null;
     return <div className="nsf-folder-path">{path}</div>;
@@ -347,6 +347,7 @@ const IssuePanel = () => {
     setShowRecordForUpdateDropdown(false);
     setRotateOnExpiration(false);
     setIsRotationEligible(false);
+    lastCheckedRoeRef.current = { type: '', uid: '' };
     setFormData(prev => {
       const cleared = { ...prev };
       delete cleared.can_share;
@@ -376,6 +377,7 @@ const IssuePanel = () => {
   // Flag to track if we're preserving stored data
   const [isPreservingStoredData, setIsPreservingStoredData] = useState(false);
   const isPreservingStoredDataRef = useRef(false);
+  const lastCheckedRoeRef = useRef({ type: '', uid: '' });
 
   // Fetch Keeper record details when needed for record-update
   const fetchKeeperRecordDetails = async (recordUid, preserveStoredData = null) => {
@@ -2516,10 +2518,16 @@ const IssuePanel = () => {
     refetchVaultData({ mode, action: selectedAction.value });
   }, [isNsfMode]);
 
-  // Check rotation eligibility whenever the selected record/folder or action changes.
+  // Check rotation eligibility only when expiration is selected (lazy — avoids
+  // API calls while the user is still browsing records/folders). Caches the
+  // last-checked UID so switching between expire-in and expire-at for the same
+  // record/folder skips the redundant call.
   useEffect(() => {
     const action = selectedAction?.value;
-    if (!isAdmin || (action !== 'share-record' && action !== 'share-folder')) {
+    const hasExpiration = formData.expiration_type && formData.expiration_type !== 'none';
+
+    if (!isAdmin || !hasExpiration ||
+        (action !== 'share-record' && action !== 'share-folder')) {
       setIsRotationEligible(false);
       setRotateOnExpiration(false);
       return;
@@ -2540,21 +2548,32 @@ const IssuePanel = () => {
       return;
     }
 
+    // Skip API call if we already checked this exact record/folder.
+    if (lastCheckedRoeRef.current.type === type &&
+        lastCheckedRoeRef.current.uid === uid) {
+      return;
+    }
+
     let cancelled = false;
     setCheckingRotationEligibility(true);
     api.checkRotationEligibility(type, uid)
       .then(res => {
         if (cancelled) return;
+        lastCheckedRoeRef.current = { type, uid };
         setIsRotationEligible(res?.eligible === true);
         if (!res?.eligible) setRotateOnExpiration(false);
       })
       .catch(() => {
-        if (!cancelled) { setIsRotationEligible(false); setRotateOnExpiration(false); }
+        if (!cancelled) {
+          lastCheckedRoeRef.current = { type, uid };
+          setIsRotationEligible(false);
+          setRotateOnExpiration(false);
+        }
       })
       .finally(() => { if (!cancelled) setCheckingRotationEligibility(false); });
 
     return () => { cancelled = true; };
-  }, [selectedRecord, selectedFolder, selectedAction, isAdmin]);
+  }, [selectedRecord, selectedFolder, selectedAction, isAdmin, formData.expiration_type]);
 
   // Auto-dismiss workflow info dialog after 5 seconds
   useEffect(() => {
@@ -4652,6 +4671,7 @@ const IssuePanel = () => {
                 setCustomFields([]);
                 setRotateOnExpiration(false);
                 setIsRotationEligible(false);
+                lastCheckedRoeRef.current = { type: '', uid: '' };
               }}
               disabled={isFormDisabled}
               searchTerm={searchTerm}
@@ -5724,22 +5744,7 @@ const IssuePanel = () => {
                       );
                     })}
 
-                  {/* Checkbox fields for share-folder, share-record, and record-permission actions */}
-                  {(selectedAction.value === 'share-folder' || selectedAction.value === 'share-record' || selectedAction.value === 'record-permission') && actionOptions.find(action => action.value === selectedAction.value)?.fields
-                    .filter((field) => {
-                      // Only render checkbox fields
-                      return field.type === 'checkbox';
-                    })
-                    .map((field) => (
-                      <div
-                        key={field.name}
-                        className="mb-12"
-                      >
-                        {renderFormInput(field)}
-                      </div>
-                    ))}
-
-                  {/* Rotate password upon expiration — visible when record is pamUser or folder is ROE-eligible */}
+                  {/* Rotate password upon expiration — visible when expiration is active and record is pamUser or folder is ROE-eligible */}
                   {(selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') &&
                    isRotationEligible &&
                    formData.expiration_type && formData.expiration_type !== 'none' && (
@@ -5758,6 +5763,21 @@ const IssuePanel = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* Checkbox fields for share-folder, share-record, and record-permission actions */}
+                  {(selectedAction.value === 'share-folder' || selectedAction.value === 'share-record' || selectedAction.value === 'record-permission') && actionOptions.find(action => action.value === selectedAction.value)?.fields
+                    .filter((field) => {
+                      // Only render checkbox fields
+                      return field.type === 'checkbox';
+                    })
+                    .map((field) => (
+                      <div
+                        key={field.name}
+                        className="mb-12"
+                      >
+                        {renderFormInput(field)}
+                      </div>
+                    ))}
 
                   {/* Classic: require at least one of can_edit/can_share for record-permission. */}
                   {selectedAction.value === 'record-permission' &&
@@ -5876,6 +5896,7 @@ const IssuePanel = () => {
                         fontSize: "14px",
                         padding: "8px 16px",
                         borderRadius: "8px",
+                        marginTop: "8px",
                         border: "none",
                         cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isExecuting) ? "not-allowed" : "pointer",
                         boxShadow: (selectedAction && validateForm() && !isExecuting) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
