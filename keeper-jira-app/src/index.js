@@ -22,7 +22,8 @@ import {
   NSF_ROLES,
   buildNsfShareFolderArgs,
   buildNsfShareRecordArgs,
-  buildNsfRecordPermissionArgs
+  buildNsfRecordPermissionArgs,
+  sanitizeNsfDuration
 } from './modules/utils/nsfShareCommands.js';
 import {
   escapeForSingleQuotes,
@@ -566,8 +567,8 @@ const VALIDATION_PATTERNS = {
   // Date: ISO format YYYY-MM-DD or Unix timestamp
   date: /^(\d{4}-\d{2}-\d{2}|\d{10,13})$/,
   
-  // Expiration duration: Number with time unit (e.g., 30d, 24h, 60m)
-  duration: /^\d+[dhms]?$/i,
+  // Expiration duration: Number with time unit (e.g., 30d, 24h, 60mi, 6mo, 1y)
+  duration: /^\d+(mi|mo|d|h|m|s|y)$/i,
 };
 
 /**
@@ -1592,8 +1593,8 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
           const expireAtFormatted = parameters.expire_at.replace('T', ' ');
           command += ` --expire-at "${escapeForDoubleQuotes(expireAtFormatted)}"`;
         } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-          const expireInValue = String(parameters.expire_in).replace(/[^0-9dhms]/gi, '');
-          command += ` --expire-in ${expireInValue}`;
+          const expireInValue = sanitizeNsfDuration(parameters.expire_in);
+          if (expireInValue) command += ` --expire-in ${expireInValue}`;
         }
         if (parameters.rotate_on_expiration === true) {
           command += ' --rotate-on-expiration';
@@ -1637,8 +1638,8 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
         const expireAtFormatted = parameters.expire_at.replace('T', ' ');
         command += ` --expire-at "${escapeForDoubleQuotes(expireAtFormatted)}"`;
       } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-        const expireInValue = String(parameters.expire_in).replace(/[^0-9dhms]/gi, '');
-        command += ` --expire-in ${expireInValue}`;
+        const expireInValue = sanitizeNsfDuration(parameters.expire_in);
+        if (expireInValue) command += ` --expire-in ${expireInValue}`;
       }
       if (parameters.rotate_on_expiration === true) {
         command += ' --rotate-on-expiration';
@@ -1787,7 +1788,7 @@ resolver.define('getKeeperFolders', async (req) => {
   const mode = resolveVaultMode(req?.payload);
   const command = mode === 'nsf'
     ? 'nsf-list --folders --format=json'
-    : 'ls -f --format=json';
+    : 'ls -f -R --format=json';
 
   try {
     const result = await executeKeeperApiCommand(command, { userId, forgeSafe: true });
@@ -1825,7 +1826,8 @@ resolver.define('getKeeperFolders', async (req) => {
           return rawSource === 'legacy';
         });
 
-        folders = classicRawFolders.map((folder, index) => {
+        // First pass: normalize each folder row.
+        const normalized = classicRawFolders.map((folder, index) => {
           let cleanName = folder.name || '';
           cleanName = cleanName.replace(/\[?\d+m/g, '');
 
@@ -1841,6 +1843,8 @@ resolver.define('getKeeperFolders', async (req) => {
               parentUid = parentMatch[1].trim();
             }
           }
+          // "/" means root level — treat as no parent.
+          if (parentUid === '/') parentUid = '';
 
           return {
             number: index + 1,
@@ -1848,7 +1852,6 @@ resolver.define('getKeeperFolders', async (req) => {
             uid: folder.uid,
             name: cleanName,
             title: cleanName,
-            path: cleanName,
             flags: flags,
             parent_uid: parentUid,
             shared: !!(flags && flags.includes('S')),
@@ -1856,6 +1859,37 @@ resolver.define('getKeeperFolders', async (req) => {
             raw_data: folder
           };
         });
+
+        // Second pass: build nested paths from parent_uid chains (same algorithm as buildNsfFolderPaths).
+        const byUid = new Map();
+        for (const f of normalized) {
+          if (f && f.uid) byUid.set(f.uid, f);
+        }
+        const pathCache = new Map();
+        const resolvePath = (uid, visiting = new Set()) => {
+          if (!uid) return '';
+          if (pathCache.has(uid)) return pathCache.get(uid);
+          if (visiting.has(uid)) return byUid.get(uid)?.name || '';
+          const f = byUid.get(uid);
+          if (!f) return '';
+          visiting.add(uid);
+          const name = f.name || '';
+          const pUid = f.parent_uid || '';
+          let path = name;
+          if (pUid && byUid.has(pUid)) {
+            const parentPath = resolvePath(pUid, visiting);
+            path = parentPath ? `${parentPath} / ${name}` : name;
+          }
+          visiting.delete(uid);
+          pathCache.set(uid, path);
+          return path;
+        };
+
+        folders = normalized.map((f) => ({
+          ...f,
+          path: resolvePath(f.uid) || f.name || '',
+          folderPath: resolvePath(f.uid) || f.name || ''
+        }));
       }
     } catch (parseError) {
       return keeperError('Failed to parse folders data from Keeper API');
@@ -2967,9 +3001,13 @@ resolver.define('executeKeeperAction', async (req) => {
     }
 
     // Rotation-on-expiration: Commander rejects the flag when the target record
-    // is not a pamUser with rotation fully configured (linked PAM config,
-    // resource, enabled state, active Gateway).
-    if (errorMessage && errorMessage.includes('rotate-on-expiration requires a pamUser record with rotation configured')) {
+    // is not a pamUser with rotation fully configured. The CLI shows
+    // "rotate-on-expiration requires a pamUser record..." but the HTTP API
+    // returns a generic 500 with just the record UID. Catch both cases.
+    if (errorMessage && (
+      errorMessage.includes('rotate-on-expiration requires a pamUser record with rotation configured') ||
+      (command && command.includes('--rotate-on-expiration') && errorMessage.includes('500'))
+    )) {
       return errorResponse(
         ERROR_CODES.KEEPER_PERMISSION_DENIED,
         'Rotate-on-expiration failed — the target record requires a fully configured PAM User with rotation enabled (linked PAM config/resource, enabled state, and an active Gateway).',
