@@ -999,7 +999,7 @@ const IssuePanel = () => {
     setRotateOnExpiration(data.rotateOnExpiration === true);
     setIsRotationEligible(data.isRotationEligible === true);
 
-    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : false;
+    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : true;
     setIsNsfMode(nsfEnabled);
 
     if (data.formData?.addressRef?.startsWith('temp_addr_')) {
