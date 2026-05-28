@@ -216,7 +216,18 @@ const IssuePanel = () => {
   const { items: paginatedOptions, totalPages } = paginate(filteredOptions, currentPage, itemsPerPage);
 
   // Defense-in-depth: filter records/folders to match active vault mode.
-  const recordsForActiveMode = keeperRecords.filter(record => (record.source || 'classic') === activeVaultMode);
+  // Primary gate is `source` (set by backend); secondary gate uses Commander's
+  // `record_category` in classic mode to reject any Nested records that leaked
+  // through (Commander's `list` returns the entire vault).  NSF mode skips the
+  // category check because `nsf-list` already scopes to nested records and the
+  // parsed output may not carry `record_category`.
+  const recordsForActiveMode = keeperRecords.filter(record => {
+    if ((record.source || 'classic') !== activeVaultMode) return false;
+    if (activeVaultMode === 'classic') {
+      return (record.record_category || 'classic').toLowerCase() === 'classic';
+    }
+    return true;
+  });
   const foldersForActiveMode = keeperFolders.filter(folder => (folder.source || 'classic') === activeVaultMode);
 
   // Filter and paginate records (search by title or UID)
