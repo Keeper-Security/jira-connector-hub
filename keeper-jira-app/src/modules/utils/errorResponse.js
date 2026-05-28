@@ -81,7 +81,7 @@ const ERROR_CODES = {
   UNKNOWN_ERROR: 'UNKNOWN_ERROR'
 };
 
-/** Commander verbs required on the Keeper Service allowlist when KD mode is used. */
+/** Commander verbs required on the Keeper Service allowlist when NSF mode is used. */
 const KEEPER_NSF_SERVICE_ALLOWLIST =
   'nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission';
 
@@ -540,7 +540,7 @@ function isKeeperNsfUnavailableError(errorOrMessage) {
     message.includes('not allowed') ||
     message.includes('disallowed') ||
     message.includes('not authorized') ||
-    (message.includes('keeper drive') && (
+    ((message.includes('keeper drive') || message.includes('nested share')) && (
       message.includes('not enabled') ||
       message.includes('not available') ||
       message.includes('disabled') ||

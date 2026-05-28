@@ -713,12 +713,12 @@ function validateCommandParameters(action, parameters, options = {}) {
   const errors = [];
   const isNsfMode = !!(options && options.mode === 'nsf');
 
-  // Skip validation for pre-formatted Classic CLI commands; KD always rebuilds server-side.
+  // Skip validation for pre-formatted Classic CLI commands; NSF always rebuilds server-side.
   if (parameters.cliCommand && !isNsfMode) {
     return { valid: true };
   }
 
-  // KD share/permission commands require -r <role> on grant per Commander docs.
+  // NSF share/permission commands require -r <role> on grant per Commander docs.
   // Classic uses permission flags instead and is unaffected.
   if (
     isNsfMode &&
@@ -1013,7 +1013,7 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
         command += ` Notes="${escapeForDoubleQuotes(parameters.notes)}"`;
       }
       
-      // Skip metadata fields; folder is excluded (already emitted as --folder in KD mode).
+      // Skip metadata fields; folder is excluded (already emitted as --folder in NSF mode).
       const metadataFields = ['recordType', 'title', 'notes', 'skipComment', 'phoneEntries', 'folder'];
       
       // Special handling for login record type (password generation)
@@ -1170,7 +1170,7 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
       break;
       
     case 'record-update':
-      // KD uses short -r <UID>; Classic uses --record=<UID>.
+      // NSF uses short -r <UID>; Classic uses --record=<UID>.
       if (parameters.record) {
         if (isNsf) {
           command += ` -r '${escapeForSingleQuotes(parameters.record)}'`;

@@ -1,5 +1,5 @@
 // NSF role options. Server-side peer: NSF_ROLES in src/modules/utils/nsfShareCommands.js
-// Source: https://docs.keeper.io/en/keeperpam/commander-cli/command-reference/keeper-drive-commands
+// Source: https://docs.keeper.io/en/keeperpam/commander-cli/command-reference/nsf-commands
 export const NSF_ROLES = [
   { value: 'viewer',                label: 'Viewer',                    description: 'Can view content and participants' },
   { value: 'share-manager',         label: 'Share Manager',             description: 'Can manage share permissions, invite others, and approve requests' },
