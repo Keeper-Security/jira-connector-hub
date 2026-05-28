@@ -18,21 +18,8 @@ const PASSWORD_POLICY = Object.freeze({
   requireSpecial: true,
 });
 
-/**
- * Sentinels the command builder treats as "generate a password server-side".
- * These should always bypass the complexity check.
- */
-const PASSWORD_GENERATION_SENTINELS = Object.freeze(new Set(['$GEN', 'generate']));
-
-/**
- * Should `validatePasswordComplexity` skip this value?
- * Centralised so callers don't repeat the `$GEN`/`generate` check.
- * @param {*} value
- * @returns {boolean}
- */
-function isPasswordGenerationSentinel(value) {
-  return typeof value === 'string' && PASSWORD_GENERATION_SENTINELS.has(value);
-}
+// Sentinels the command builder treats as "generate a password server-side".
+const PASSWORD_GENERATION_SENTINELS = new Set(['$GEN', 'generate']);
 
 /**
  * Validate a plaintext password against `PASSWORD_POLICY`.
@@ -48,7 +35,7 @@ function validatePasswordComplexity(password, policy = PASSWORD_POLICY) {
   if (password === undefined || password === null || password === '') {
     return { valid: true, errors: [] };
   }
-  if (isPasswordGenerationSentinel(password)) {
+  if (typeof password === 'string' && PASSWORD_GENERATION_SENTINELS.has(password)) {
     return { valid: true, errors: [] };
   }
   if (typeof password !== 'string') {
@@ -87,8 +74,6 @@ function formatPasswordPolicyError(errors) {
 
 module.exports = {
   PASSWORD_POLICY,
-  PASSWORD_GENERATION_SENTINELS,
-  isPasswordGenerationSentinel,
   validatePasswordComplexity,
   formatPasswordPolicyError,
 };

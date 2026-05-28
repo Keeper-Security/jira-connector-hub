@@ -1,17 +1,14 @@
 /**
- * Custom hook for managing configuration state and operations. 
- * We track an `isApiKeyDirty` flag so we know whether the user actually typed a new value. When dirty=false on save / test, we pass through the masked value and the backend reuses the stored key.
+ * Custom hook for managing configuration state and operations.
+ *
+ * KJ-26-07: We track an `isApiKeyDirty` flag internally so we know whether
+ * the user actually typed a new value. When dirty=false on save / test, we
+ * pass through the masked value and the backend reuses the stored key.
  */
 import { useState, useEffect } from 'react';
 import * as api from '../services/api';
 import { handleApiError, getConnectionErrorContext, isStructuredError } from '../utils/errorHandler';
 import { MESSAGE_TYPES } from '../constants';
-
-// Treat both the explicit sentinel and the masked placeholder shape as
-// "user did not change the key". Mirrors `isMaskedApiKey` in src/modules/utils/auth.js.
-const isMaskedApiKey = (value) =>
-  typeof value === 'string' &&
-  (value === '__KEEP_EXISTING__' || /^\*+[A-Za-z0-9\-_]{1,8}$/.test(value));
 
 export const useConfig = () => {
   const [formValues, setFormValues] = useState({ apiUrl: "", apiKey: "" });
@@ -229,11 +226,7 @@ export const useConfig = () => {
 
   return {
     formValues,
-    setFormValues,
     updateFormValue,
-    originalFormValues,
-    hasExistingConfig,
-    isApiKeyDirty,
     isLoading,
     formKey,
     isApiKeyMasked,
@@ -245,7 +238,7 @@ export const useConfig = () => {
     setStatusMessage,
     handleSubmit,
     handleTestConnection,
-    handleClearForm
+    handleClearForm,
   };
 };
 

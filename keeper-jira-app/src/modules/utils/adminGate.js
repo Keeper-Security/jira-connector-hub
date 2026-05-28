@@ -22,7 +22,7 @@ import { extractProjectKey, buildAdminVerdict, isAdminGroup } from './auth.js';
  * Throws on failure so callers can fail closed.
  * @returns {Promise<{ userData: object, userGroups: string[] }>}
  */
-export async function getCurrentUserWithGroups() {
+async function getCurrentUserWithGroups() {
   const resp = await requestJiraAsUserWithRetry(
     route`/rest/api/3/myself?expand=groups`,
     { method: 'GET', headers: { Accept: 'application/json' } },

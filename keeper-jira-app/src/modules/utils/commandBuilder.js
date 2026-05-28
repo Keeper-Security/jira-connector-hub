@@ -229,9 +229,6 @@ function validateCommandParameters(action, parameters) {
         if (!recordValidation.valid) errors.push(recordValidation.error);
       }
       
-      
-KJ
-// Record type validation
       if (action === 'record-update' && parameters.recordType) {
         errors.push('Record type cannot be changed after a record is created.');
       } else if (parameters.recordType) {

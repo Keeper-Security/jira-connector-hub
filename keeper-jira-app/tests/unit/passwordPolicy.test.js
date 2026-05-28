@@ -4,8 +4,6 @@
 
 const {
   PASSWORD_POLICY,
-  PASSWORD_GENERATION_SENTINELS,
-  isPasswordGenerationSentinel,
   validatePasswordComplexity,
   formatPasswordPolicyError,
 } = require('../../src/modules/utils/passwordPolicy');
@@ -20,32 +18,6 @@ describe('PASSWORD_POLICY', () => {
       requireDigit: true,
       requireSpecial: true,
     });
-  });
-});
-
-describe('PASSWORD_GENERATION_SENTINELS', () => {
-  test('contains the documented generation tokens only', () => {
-    expect(Object.isFrozen(PASSWORD_GENERATION_SENTINELS)).toBe(true);
-    expect(PASSWORD_GENERATION_SENTINELS.has('$GEN')).toBe(true);
-    expect(PASSWORD_GENERATION_SENTINELS.has('generate')).toBe(true);
-    expect(PASSWORD_GENERATION_SENTINELS.has('GENERATE')).toBe(false);
-  });
-});
-
-describe('isPasswordGenerationSentinel', () => {
-  test('returns true for $GEN and "generate"', () => {
-    expect(isPasswordGenerationSentinel('$GEN')).toBe(true);
-    expect(isPasswordGenerationSentinel('generate')).toBe(true);
-  });
-
-  test('rejects any other value (including case-variants)', () => {
-    expect(isPasswordGenerationSentinel('GEN')).toBe(false);
-    expect(isPasswordGenerationSentinel('gen')).toBe(false);
-    expect(isPasswordGenerationSentinel('Generate')).toBe(false);
-    expect(isPasswordGenerationSentinel('')).toBe(false);
-    expect(isPasswordGenerationSentinel(null)).toBe(false);
-    expect(isPasswordGenerationSentinel(undefined)).toBe(false);
-    expect(isPasswordGenerationSentinel(123)).toBe(false);
   });
 });
 

@@ -45,6 +45,3 @@ export const MESSAGE_STYLES = {
   }
 };
 
-// Copy message timeout
-export const COPY_MESSAGE_TIMEOUT = 2000;
-
