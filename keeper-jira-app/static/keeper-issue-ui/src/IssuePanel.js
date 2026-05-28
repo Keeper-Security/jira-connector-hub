@@ -994,8 +994,7 @@ const IssuePanel = () => {
     setRotateOnExpiration(data.rotateOnExpiration === true);
     setIsRotationEligible(data.isRotationEligible === true);
 
-    // Backward compat: older saved requests stored isKeeperDriveMode instead of isNsfMode.
-    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : data.isKeeperDriveMode !== false;
+    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : true;
     setIsNsfMode(nsfEnabled);
 
     if (data.formData?.addressRef?.startsWith('temp_addr_')) {
@@ -1082,7 +1081,6 @@ const IssuePanel = () => {
         selectedRecordForUpdate,
         selectedFolder,
         tempAddressData,
-        isKeeperDriveMode,
         rotateOnExpiration,
         isRotationEligible,
         isNsfMode,
