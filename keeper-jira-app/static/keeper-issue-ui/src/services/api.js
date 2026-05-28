@@ -24,6 +24,12 @@ export const getKeeperFolders = async (mode = 'classic') => {
   return await invoke("getKeeperFolders", { mode });
 };
 
+// Get record types permitted by the user's enterprise role policy,
+// intersected with the app's supported set (KJ-26-02).
+export const getRecordTypes = async () => {
+  return await invoke("getRecordTypes");
+};
+
 // Get keeper record details
 export const getKeeperRecordDetails = async (recordUid) => {
   return await invoke("getKeeperRecordDetails", { recordUid });

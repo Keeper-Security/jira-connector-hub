@@ -1725,6 +1725,86 @@ function filterRecordsByVaultMode(records, mode) {
   });
 }
 
+/**
+ * Record types the app supports. Frontend peer: SUPPORTED_RECORD_TYPES in
+ * static/keeper-issue-ui/src/constants/index.js.
+ *
+ * Keyed by Commander's `content` value (the $id used in record-type-info).
+ * The Map gives O(1) lookup for both the intersection filter and the
+ * server-side validation gate in executeKeeperAction (KJ-26-02).
+ */
+const SUPPORTED_RECORD_TYPES = new Map([
+  ['contact',             'Contact'],
+  ['databaseCredentials', 'Database'],
+  ['encryptedNotes',      'Secure Note'],
+  ['login',               'Login'],
+  ['membership',          'Membership'],
+  ['serverCredentials',   'Server'],
+  ['softwareLicense',     'Software License'],
+  ['sshKeys',             'SSH Keys'],
+]);
+
+/**
+ * Convert the SUPPORTED_RECORD_TYPES map into the { label, value } shape
+ * the frontend expects. Used both as the resolver response and as the
+ * fallback when Commander's rti command is unavailable.
+ */
+function allSupportedRecordTypes() {
+  return Array.from(SUPPORTED_RECORD_TYPES, ([value, label]) => ({ label, value }));
+}
+
+/**
+ * Parse the JSON response from `rti -lr --effective --format=json` and
+ * return only the entries whose `content` is in SUPPORTED_RECORD_TYPES.
+ *
+ * Commander returns: [{ recordTypeId: number, content: string }, ...]
+ *
+ * @param {unknown} raw - Parsed JSON array from Commander.
+ * @returns {{ label: string, value: string }[]}
+ */
+function intersectEffectiveRecordTypes(raw) {
+  if (!Array.isArray(raw)) return allSupportedRecordTypes();
+  const effectiveIds = new Set(raw.map(r => r?.content).filter(Boolean));
+  return Array.from(SUPPORTED_RECORD_TYPES, ([value, label]) => ({ label, value }))
+    .filter(t => effectiveIds.has(t.value));
+}
+
+/**
+ * KJ-26-02: Return the record types the current user is permitted to create,
+ * intersected with the app's supported set.
+ *
+ * Runs `rti -lr --effective --format=json` to honour enterprise role policies
+ * (RESTRICT_RECORD_TYPES). On any failure (older Commander, network error,
+ * parse failure) falls back to the full supported list — no regression.
+ */
+resolver.define('getRecordTypes', async (req) => {
+  const userId = req?.context?.accountId;
+  try {
+    const result = await executeKeeperApiCommand(
+      'record-type-info -lr --effective --format=json',
+      { userId, forgeSafe: true },
+    );
+    const apiData = result?.data;
+
+    let parsed = [];
+    if (apiData?.data && Array.isArray(apiData.data)) {
+      parsed = apiData.data;
+    } else if (apiData?.message && typeof apiData.message === 'string') {
+      parsed = JSON.parse(apiData.message);
+    } else if (apiData?.data && typeof apiData.data === 'string') {
+      parsed = JSON.parse(apiData.data);
+    }
+
+    const types = intersectEffectiveRecordTypes(parsed);
+    return successResponse({ recordTypes: types });
+  } catch (err) {
+    logger.warn('getRecordTypes: rti --effective failed, falling back to full list', {
+      error: err.message,
+    });
+    return successResponse({ recordTypes: allSupportedRecordTypes() });
+  }
+});
+
 // Get records from Keeper API. NSF mode uses nsf-list; items are tagged with source.
 resolver.define('getKeeperRecords', async (req) => {
   const userId = req?.context?.accountId;
@@ -2026,8 +2106,8 @@ resolver.define('executeKeeperCommand', async (req) => {
   const ALLOWED_COMMAND_PREFIXES = [
     'list', 'list-sf', 'ls', 'get', 'search',
     'record-add', 'record-update', 'record-permission',
+    'record-type-info', 'rti',
     'share-record', 'share-folder',
-    // NSF sharing/permission variants (see NSF_COMMAND_NAME_MAP).
     'nsf-list', 'nsf-get',
     'nsf-record-add', 'nsf-record-update', 'nsf-record-permission',
     'nsf-share-record', 'nsf-share-folder',
@@ -2296,6 +2376,49 @@ resolver.define('executeKeeperAction', async (req) => {
   if (ADMIN_GATED_COMMANDS.has(command)) {
     const adminErr = await requireProjectAdmin(issueKey);
     if (adminErr) return adminErr;
+  }
+
+  // KJ-26-02: Validate that the submitted recordType is both supported by
+  // the app AND permitted by the user's enterprise role policy.  The first
+  // check (SUPPORTED_RECORD_TYPES) is synchronous and always enforced.  The
+  // second check (rti --effective) is best-effort: on failure, we allow the
+  // request through so older Commander installs don't break.
+  if (command === 'record-add' && parameters?.recordType) {
+    if (!SUPPORTED_RECORD_TYPES.has(parameters.recordType)) {
+      return validationError(
+        'recordType',
+        `Record type "${parameters.recordType}" is not supported by this application.`,
+      );
+    }
+    try {
+      const rtiResult = await executeKeeperApiCommand(
+        'record-type-info -lr --effective --format=json',
+        { userId, skipRateLimit: true, forgeSafe: true },
+      );
+      const rtiData = rtiResult?.data;
+      let rtiParsed = [];
+      if (rtiData?.data && Array.isArray(rtiData.data)) {
+        rtiParsed = rtiData.data;
+      } else if (rtiData?.message && typeof rtiData.message === 'string') {
+        rtiParsed = JSON.parse(rtiData.message);
+      } else if (rtiData?.data && typeof rtiData.data === 'string') {
+        rtiParsed = JSON.parse(rtiData.data);
+      }
+      if (Array.isArray(rtiParsed) && rtiParsed.length > 0) {
+        const effectiveIds = new Set(rtiParsed.map(r => r?.content).filter(Boolean));
+        if (!effectiveIds.has(parameters.recordType)) {
+          return errorResponse(
+            ERROR_CODES.VALIDATION_ERROR,
+            `Your enterprise role policy does not permit creating "${parameters.recordType}" records.`,
+            { recordType: parameters.recordType },
+          );
+        }
+      }
+    } catch (rtiErr) {
+      logger.warn('executeKeeperAction: rti --effective check failed, allowing request', {
+        error: rtiErr.message,
+      });
+    }
   }
   
 

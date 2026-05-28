@@ -157,6 +157,20 @@ export const KEEPER_ACTION_OPTIONS_NSF = [
   }
 ];
 
+// Record types the app supports. Backend peer: SUPPORTED_RECORD_TYPES in src/index.js.
+// Used as the fallback when the getRecordTypes resolver is unavailable, and as
+// the display-label source when intersecting with Commander's effective list.
+export const SUPPORTED_RECORD_TYPES = [
+  { label: 'Contact',          value: 'contact' },
+  { label: 'Database',         value: 'databaseCredentials' },
+  { label: 'Secure Note',      value: 'encryptedNotes' },
+  { label: 'Login',            value: 'login' },
+  { label: 'Membership',       value: 'membership' },
+  { label: 'Server',           value: 'serverCredentials' },
+  { label: 'Software License', value: 'softwareLicense' },
+  { label: 'SSH Keys',         value: 'sshKeys' },
+];
+
 // Pagination settings
 export const PAGINATION_SETTINGS = {
   ITEMS_PER_PAGE: 5,

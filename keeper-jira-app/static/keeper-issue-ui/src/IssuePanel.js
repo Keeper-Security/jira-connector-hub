@@ -10,7 +10,7 @@ import ErrorIcon from "@atlaskit/icon/glyph/error";
 import LockIcon from "@atlaskit/icon/glyph/lock";
 import CrossIcon from "@atlaskit/icon/glyph/cross";
 
-import { KEEPER_ACTION_OPTIONS, KEEPER_ACTION_OPTIONS_NSF, PAGINATION_SETTINGS } from "./constants";
+import { KEEPER_ACTION_OPTIONS, KEEPER_ACTION_OPTIONS_NSF, SUPPORTED_RECORD_TYPES, PAGINATION_SETTINGS } from "./constants";
 import * as api from "./services/api";
 import { handleApiError as handleApiErrorUtil, isStructuredError, getErrorCode } from "./utils/errorHandler";
 import { formatWithUid, filterByTitleOrUid } from "./utils/formatters";
@@ -670,24 +670,23 @@ const IssuePanel = () => {
     }
   };
 
-  // Fetch Keeper record types - using static list
-  const fetchRecordTypes = () => {
+  // KJ-26-02: Fetch record types from the backend, which intersects
+  // Commander's `rti --effective` output with the app's supported set.
+  // Falls back to the frontend constant on any failure (no regression).
+  const fetchRecordTypes = async () => {
     setLoadingRecordTypes(true);
-    
-    // Static list of record types
-    const staticRecordTypes = [
-      { label: 'Contact', value: 'contact' },
-      { label: 'Database', value: 'databaseCredentials' },
-      { label: 'Secure Note', value: 'encryptedNotes' },
-      { label: 'Login', value: 'login' },
-      { label: 'Membership', value: 'membership' },
-      { label: 'Server', value: 'serverCredentials' },
-      { label: 'Software License', value: 'softwareLicense' },
-      { label: 'SSH Keys', value: 'sshKeys' }
-    ];
-    
-    setRecordTypes(staticRecordTypes);
+    try {
+      const result = await api.getRecordTypes();
+      if (result?.recordTypes && Array.isArray(result.recordTypes) && result.recordTypes.length > 0) {
+        setRecordTypes(result.recordTypes);
+      } else {
+        setRecordTypes(SUPPORTED_RECORD_TYPES);
+      }
+    } catch {
+      setRecordTypes(SUPPORTED_RECORD_TYPES);
+    } finally {
       setLoadingRecordTypes(false);
+    }
   };
 
   // Static field templates for each record type
