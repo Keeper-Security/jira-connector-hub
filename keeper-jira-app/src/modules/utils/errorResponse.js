@@ -81,7 +81,7 @@ const ERROR_CODES = {
   UNKNOWN_ERROR: 'UNKNOWN_ERROR'
 };
 
-/** Commander verbs required on the Keeper Service allowlist when KD mode is used. */
+/** Commander verbs required on the Keeper Service allowlist when NSF mode is used. */
 const KEEPER_NSF_SERVICE_ALLOWLIST =
   'nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission';
 
@@ -540,20 +540,12 @@ function isKeeperNsfUnavailableError(errorOrMessage) {
     message.includes('not allowed') ||
     message.includes('disallowed') ||
     message.includes('not authorized') ||
-    // Commander emits NSF-not-available errors with either phrasing depending
-    // on its version: older builds say "Nested Share Subfolders (NSF)", newer builds say
-    // "nested share". This substring set matches Commander's external output
-    // (NOT our internal naming), so the legacy phrase MUST stay until we drop
-    // support for older Keeper Service hosts.
-    (
-      (message.includes('keeper drive') || message.includes('nested share')) &&
-      (
-        message.includes('not enabled') ||
-        message.includes('not available') ||
-        message.includes('disabled') ||
-        message.includes('not supported')
-      )
-    ) ||
+    ((message.includes('keeper drive') || message.includes('nested share')) && (
+      message.includes('not enabled') ||
+      message.includes('not available') ||
+      message.includes('disabled') ||
+      message.includes('not supported')
+    )) ||
     (message.includes('nsf-list') && message.includes('not')) ||
     message.includes('feature flag')
   );

@@ -1,7 +1,11 @@
 {
   "files": {
     "main.css": "./static/css/main.6e4d5d5a.css",
-    "main.js": "./static/js/main.bbfb76dc.js",
+<<<<<<< HEAD
+    "main.js": "./static/js/main.8aecf37b.js",
+=======
+    "main.js": "./static/js/main.b7bc3981.js",
+>>>>>>> ab0c79d97e81df1a3bb2cb4f96671388165bb2e4
     "@atlaskit-internal_atlassian-custom-theme.js": "./static/js/@atlaskit-internal_atlassian-custom-theme.758145aa.chunk.js",
     "@atlaskit-internal_atlassian-light.js": "./static/js/@atlaskit-internal_atlassian-light.e2c222c8.chunk.js",
     "@atlaskit-internal_atlassian-light-future.js": "./static/js/@atlaskit-internal_atlassian-light-future.896b6928.chunk.js",
@@ -16,6 +20,10 @@
   },
   "entrypoints": [
     "static/css/main.6e4d5d5a.css",
-    "static/js/main.bbfb76dc.js"
+<<<<<<< HEAD
+    "static/js/main.8aecf37b.js"
+=======
+    "static/js/main.b7bc3981.js"
+>>>>>>> ab0c79d97e81df1a3bb2cb4f96671388165bb2e4
   ]
 }
