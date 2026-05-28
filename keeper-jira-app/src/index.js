@@ -1637,6 +1637,36 @@ function resolveVaultMode(payload) {
   return raw === 'nsf' ? 'nsf' : 'classic';
 }
 
+/**
+ * Map vault mode → expected Commander `record_category` value (lowercased).
+ * Commander tags Classic records as "Classic" and NSF records as "Nested".
+ * Keeping the mapping in one place avoids scattered magic strings.
+ */
+const VAULT_MODE_CATEGORY = Object.freeze({ classic: 'classic', nsf: 'nested' });
+
+/**
+ * Filter a list of records so only those belonging to the requested vault mode
+ * are returned.  Comparison is case-insensitive against Commander's
+ * `record_category` field.  Records without a `record_category` are assumed
+ * Classic (backward-compat with older Commander versions).
+ *
+ * Only meaningful for `classic` mode — Commander's `list` returns the entire
+ * vault (both Classic and Nested).  The `nsf-list --records` command already
+ * scopes to NSF records, so NSF mode passes through unfiltered.
+ *
+ * @param {object[]} records
+ * @param {'classic'|'nsf'} mode
+ * @returns {object[]}
+ */
+function filterRecordsByVaultMode(records, mode) {
+  if (mode !== 'classic') return records;
+  const expected = VAULT_MODE_CATEGORY[mode];
+  return records.filter(r => {
+    const cat = (r.record_category || 'classic').toLowerCase();
+    return cat === expected;
+  });
+}
+
 // Get records from Keeper API. NSF mode uses nsf-list; items are tagged with source.
 resolver.define('getKeeperRecords', async (req) => {
   const userId = req?.context?.accountId;
@@ -1668,7 +1698,8 @@ resolver.define('getKeeperRecords', async (req) => {
     }
 
     const parsedRecords = mode === 'nsf' ? parseNsfRecordsFromRaw(records) : (records || []);
-    const tagged = parsedRecords.map(record => ({
+    const scoped = filterRecordsByVaultMode(parsedRecords, mode);
+    const tagged = scoped.map(record => ({
       ...record,
       source: mode
     }));
