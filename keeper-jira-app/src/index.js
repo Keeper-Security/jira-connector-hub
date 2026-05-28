@@ -1364,8 +1364,6 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
               break;
               
             case 'passphrase':
-              // Passphrase is a password-type field with label "passphrase"
-              // Keeper CLI format: password.label='value'
               if (value === '$GEN' || value === 'generate') {
                 command += ` password.passphrase=$GEN`;
               } else {
@@ -1678,7 +1676,18 @@ resolver.define('getKeeperRecords', async (req) => {
     }
 
     const parsedRecords = mode === 'nsf' ? parseNsfRecordsFromRaw(records) : (records || []);
-    const tagged = parsedRecords.map(record => ({
+
+    // Classic: exclude Nested records (they're surfaced via nsf-list --records).
+    const filteredRecords = mode === 'classic'
+      ? parsedRecords.filter(record => {
+          const cat = record && record.record_category
+            ? String(record.record_category).trim().toLowerCase()
+            : '';
+          return cat !== 'nested';
+        })
+      : parsedRecords;
+
+    const tagged = filteredRecords.map(record => ({
       ...record,
       source: mode
     }));
