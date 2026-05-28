@@ -1386,8 +1386,6 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
               break;
               
             case 'passphrase':
-              // Passphrase is a password-type field with label "passphrase"
-              // Keeper CLI format: password.label='value'
               if (value === '$GEN' || value === 'generate') {
                 command += ` password.passphrase=$GEN`;
               } else {
