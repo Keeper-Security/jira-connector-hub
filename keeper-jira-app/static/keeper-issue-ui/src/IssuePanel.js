@@ -122,7 +122,7 @@ const IssuePanel = () => {
   // Email validation state
   const [emailValidationError, setEmailValidationError] = useState(null);
 
-  // Vault mode: KD by default; Classic when user opts in via checkbox.
+  // Vault mode: NSF by default; Classic when user opts in via checkbox.
   const [isNsfMode, setIsNsfMode] = useState(true);
 
   // Rotation-on-expiration: visible when selected record is pamUser or folder is ROE-eligible.
@@ -145,7 +145,7 @@ const IssuePanel = () => {
     return isStructuredError(result);
   };
 
-  // Classic / KD badge for picker items; defaults to Classic if source is missing.
+  // Classic / NSF badge for picker items; defaults to Classic if source is missing.
   const renderSourceBadge = (item) => {
     if (!item) return null;
     const source = item.source || 'classic';
@@ -165,7 +165,7 @@ const IssuePanel = () => {
   const isSharableFolder = (folder) =>
     folder.source === 'nsf' || folder.shared || (folder.flags && folder.flags.includes('S'));
 
-  // Render nested folder path when it differs from the folder name (works for both Classic and NSF).
+  // Render nested NSF folder path (hidden for Classic or when path equals folder name).
   const renderFolderPath = (folder) => {
     if (!folder) return null;
     const path = folder.path || folder.folderPath || '';
@@ -173,7 +173,7 @@ const IssuePanel = () => {
     return <div className="nsf-folder-path">{path}</div>;
   };
 
-  // Merged action options (Classic + KD overrides), memoized on mode/types/role.
+  // Merged action options (Classic + NSF overrides), memoized on mode/types/role.
   const actionOptions = useMemo(() => {
     const nsfOverridesByValue = isNsfMode
       ? KEEPER_ACTION_OPTIONS_NSF.reduce((acc, action) => {
@@ -2863,7 +2863,7 @@ const IssuePanel = () => {
         return false;
       }
       
-      // Classic: require at least one of can_edit/can_share. KD uses --role instead.
+      // Classic: require at least one of can_edit/can_share. NSF uses --role instead.
       if (!isNsfMode &&
           (formData.action === 'grant' || formData.action === 'revoke')) {
         const hasPermissionFlags = formData.can_share || formData.can_edit;
@@ -2909,7 +2909,7 @@ const IssuePanel = () => {
       }
     }
 
-    // KD: role is required on grant for share/permission actions.
+    // NSF: role is required on grant for share/permission actions.
     if (isNsfMode &&
         ['share-record', 'share-folder', 'record-permission'].includes(selectedAction.value) &&
         formData.action === 'grant' &&
@@ -3319,7 +3319,7 @@ const IssuePanel = () => {
           </select>
         );
       case 'role': {
-        // KD role select with description beneath the dropdown.
+        // NSF role select with description beneath the dropdown.
         const roleOptions = field.options || [];
         const selectedRole = roleOptions.find(r => r && r.value === value);
         return (
@@ -4362,7 +4362,7 @@ const IssuePanel = () => {
               });
             }
 
-            // Address records are always created as Classic (no KD folder in this sub-flow).
+            // Address records are always created as Classic (no NSF folder in this sub-flow).
             const addressResult = await api.executeKeeperAction(
               issueContext.issueKey,
               "record-add",
@@ -5719,7 +5719,7 @@ const IssuePanel = () => {
                         || selectedAction.value === 'share-folder'
                         || selectedAction.value === 'record-permission'
                       );
-                      // Role is contextually required for KD grant; field.required stays false for revoke.
+                      // Role is contextually required for NSF grant; field.required stays false for revoke.
                       const isRoleRequired = field.name === 'role' && isNsfMode && formData.action === 'grant';
                       const showRequiredMarker = (field.required || isRoleRequired)
                         && selectedAction.value !== 'record-update'

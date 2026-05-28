@@ -3889,7 +3889,7 @@ textarea.input-field {
   line-height: 1.4;
 }
 
-/* Source badge in record/folder pickers (Classic vs Keeper Drive) */
+/* Source badge in record/folder pickers (Classic vs NSF) */
 .source-badge {
   display: inline-block;
   margin-left: 8px;
