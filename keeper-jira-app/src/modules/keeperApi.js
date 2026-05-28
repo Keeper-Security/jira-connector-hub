@@ -8,6 +8,12 @@
 
 import { storage, fetch } from '@forge/api';
 import { logger } from './utils/logger.js';
+import {
+  computeWindowEpoch,
+  buildRateLimitKey,
+  windowEndsInMs,
+  coerceCounter,
+} from './utils/rateLimitWindow.js';
 
 // ============================================================================
 // Configuration Constants
@@ -234,46 +240,73 @@ function getRateLimitBucketForCommand(command) {
   return READ_ONLY_COMMAND_VERBS.has(verb) ? 'read' : 'write';
 }
 
+// ---------------------------------------------------------------------------
+// Rate-limit storage (KJ-26-09)
+//
+// The previous timestamp-array approach was vulnerable to a Time-Of-Check-To-
+// Time-Of-Use race: concurrent invocations all read the same stale array,
+// each saw `requestsInMinute < limit`, and all wrote `requests.push(now)` —
+// effectively bypassing the cap.
+//
+// Pure window math (epoch computation, key building) lives in
+// `utils/rateLimitWindow.js` so it is unit-testable without Forge stubs.
+// This file only handles the IO side: reading the counter at the current
+// window's key, then incrementing it.
+// ---------------------------------------------------------------------------
+
 /**
- * Load per-bucket rate-limit window counts from Forge storage.
+ * Load the (numeric) value at a storage key, defaulting to 0. Forge storage
+ * may return the legacy object shape (`{ requests: [...] }`) from the
+ * pre-KJ-26-09 implementation — coerce those to 0 so we never poison the
+ * counter math.
+ * @param {string} key
+ * @returns {Promise<number>}
+ */
+async function loadCounter(key) {
+  return coerceCounter(await storage.get(key));
+}
+
+/**
+ * Per-bucket usage snapshot used by `checkCommandRateLimit` and
+ * `getRateLimitStatus`. Pure IO — does not mutate Forge storage.
  * @param {'read'|'write'} bucket
  * @param {string} userId
  * @param {number} now
  */
 async function loadBucketWindowCounts(bucket, userId, now) {
-  const minuteWindowStart = now - API_CONFIG.rateLimit.minuteWindowMs;
-  const hourWindowStart = now - API_CONFIG.rateLimit.hourWindowMs;
-  const rateLimitKey = `keeper-cmd-ratelimit-${bucket}-${userId}`;
-  let rateLimitData = await storage.get(rateLimitKey);
+  const minuteEpoch = computeWindowEpoch(now, API_CONFIG.rateLimit.minuteWindowMs);
+  const hourEpoch = computeWindowEpoch(now, API_CONFIG.rateLimit.hourWindowMs);
+  const minuteKey = buildRateLimitKey(bucket, userId, 'min', minuteEpoch);
+  const hourKey = buildRateLimitKey(bucket, userId, 'hr', hourEpoch);
 
-  if (!rateLimitData) {
-    rateLimitData = { requests: [], lastCleanup: now };
-  }
-
-  const validRequests = (rateLimitData.requests || []).filter(timestamp => timestamp > hourWindowStart);
-  const requestsInMinute = validRequests.filter(t => t > minuteWindowStart).length;
-  const requestsInHour = validRequests.length;
+  const [requestsInMinute, requestsInHour] = await Promise.all([
+    loadCounter(minuteKey),
+    loadCounter(hourKey),
+  ]);
 
   return {
-    rateLimitKey,
-    rateLimitData,
-    validRequests,
+    minuteKey,
+    hourKey,
+    minuteEpoch,
+    hourEpoch,
     requestsInMinute,
     requestsInHour,
-    minuteWindowStart,
-    hourWindowStart,
   };
 }
 
 /**
- * Check and update rate limit for a user
- * Uses dual-window rate limiting: per-minute and per-hour
- * Each bucket ('read' / 'write') has its own storage entry so they
- * cannot starve each other.
+ * Check and update rate limit for a user.
+ *
+ * KJ-26-09: Uses fixed-width window counter keys whose name encodes the
+ * current window epoch (see header comment above). The residual race window
+ * is limited to the very first request of each new epoch.
+ *
+ * Each bucket (`read`/`write`) has its own counter pair so the two cannot
+ * starve each other.
  *
  * @param {string} userId - Unique user identifier (accountId)
  * @param {'read'|'write'} [bucket='write'] - Which rate-limit bucket to apply
- * @returns {Promise<Object>} - { allowed: boolean, error?: string, retryAfter?: number }
+ * @returns {Promise<Object>} - { allowed, error?, retryAfter?, limitType?, bucket, remaining }
  */
 export async function checkCommandRateLimit(userId, bucket = 'write') {
   if (!userId) {
@@ -286,77 +319,64 @@ export async function checkCommandRateLimit(userId, bucket = 'write') {
 
   const now = Date.now();
   const {
-    rateLimitKey,
-    rateLimitData,
-    validRequests,
+    minuteKey,
+    hourKey,
+    minuteEpoch,
+    hourEpoch,
     requestsInMinute,
     requestsInHour,
-    minuteWindowStart,
-    hourWindowStart,
   } = await loadBucketWindowCounts(bucket, userId, now);
 
-  rateLimitData.requests = validRequests;
-  
   // Check minute limit (per-bucket)
   if (requestsInMinute >= limits.perMinute) {
-    // Find when the oldest request in the minute window will expire
-    const oldestInMinute = rateLimitData.requests
-      .filter(t => t > minuteWindowStart)
-      .sort((a, b) => a - b)[0];
-    const retryAfter = Math.ceil((oldestInMinute + API_CONFIG.rateLimit.minuteWindowMs - now) / 1000);
-
-    // Save the data (to preserve request history)
-    await storage.set(rateLimitKey, rateLimitData);
-
+    const retryAfter = Math.ceil(
+      windowEndsInMs(minuteEpoch, API_CONFIG.rateLimit.minuteWindowMs, now) / 1000,
+    );
     return {
       allowed: false,
       error: `Rate limit exceeded (${bucket}): Maximum ${limits.perMinute} commands per minute. Please wait ${retryAfter} seconds.`,
-      retryAfter: retryAfter,
+      retryAfter,
       limitType: 'minute',
       bucket,
       remaining: {
         minute: 0,
-        hour: Math.max(0, limits.perHour - requestsInHour)
-      }
+        hour: Math.max(0, limits.perHour - requestsInHour),
+      },
     };
   }
 
   // Check hour limit (per-bucket)
   if (requestsInHour >= limits.perHour) {
-    // Find when the oldest request in the hour window will expire
-    const oldestInHour = rateLimitData.requests.sort((a, b) => a - b)[0];
-    const retryAfter = Math.ceil((oldestInHour + API_CONFIG.rateLimit.hourWindowMs - now) / 1000);
-
-    // Save the data
-    await storage.set(rateLimitKey, rateLimitData);
-
+    const retryAfter = Math.ceil(
+      windowEndsInMs(hourEpoch, API_CONFIG.rateLimit.hourWindowMs, now) / 1000,
+    );
     return {
       allowed: false,
       error: `Rate limit exceeded (${bucket}): Maximum ${limits.perHour} commands per hour. Please wait ${Math.ceil(retryAfter / 60)} minutes.`,
-      retryAfter: retryAfter,
+      retryAfter,
       limitType: 'hour',
       bucket,
       remaining: {
         minute: 0,
-        hour: 0
-      }
+        hour: 0,
+      },
     };
   }
-  
-  // Add current request timestamp
-  rateLimitData.requests.push(now);
-  rateLimitData.lastCleanup = now;
-  
-  // Save updated rate limit data
-  await storage.set(rateLimitKey, rateLimitData);
-  
+
+  // Increment both counters. Writes are individually atomic; the residual
+  // race window only opens on the FIRST request of a new epoch.
+  await Promise.all([
+    storage.set(minuteKey, requestsInMinute + 1),
+    storage.set(hourKey, requestsInHour + 1),
+  ]);
+
   return {
     allowed: true,
     bucket,
     remaining: {
       minute: limits.perMinute - requestsInMinute - 1,
-      hour: limits.perHour - requestsInHour - 1
-    }
+      hour: limits.perHour - requestsInHour - 1,
+    },
   };
 }
 

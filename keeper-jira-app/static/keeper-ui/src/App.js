@@ -62,18 +62,16 @@ const App = () => {
               statusMessage={configHook.statusMessage}
               setStatusMessage={configHook.setStatusMessage}
               formValues={configHook.formValues}
-              setFormValues={configHook.setFormValues}
+              updateFormValue={configHook.updateFormValue}
               formKey={configHook.formKey}
               isApiKeyMasked={configHook.isApiKeyMasked}
               setIsApiKeyMasked={configHook.setIsApiKeyMasked}
-              showCopiedMessage={configHook.showCopiedMessage}
               isTestingConnection={configHook.isTestingConnection}
               hasFormChanges={configHook.hasFormChanges}
               connectionTested={configHook.connectionTested}
               handleSubmit={configHook.handleSubmit}
               handleTestConnection={configHook.handleTestConnection}
               handleClearForm={configHook.handleClearForm}
-              copyApiKey={configHook.copyApiKey}
             />
           )}
 

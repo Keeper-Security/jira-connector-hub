@@ -275,6 +275,36 @@ describe('validateCommandParameters', () => {
     });
     expect(result.valid).toBe(true);
   });
+
+  // KJ-26-06: Record type immutability on record-update.
+  describe('record-update recordType immutability', () => {
+    test('rejects recordType on record-update', () => {
+      const result = validateCommandParameters('record-update', {
+        record: 'abc123',
+        recordType: 'login',
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining(['Record type cannot be changed after a record is created.']),
+      );
+    });
+
+    test('still accepts recordType on record-add', () => {
+      const result = validateCommandParameters('record-add', {
+        title: 'New Record',
+        recordType: 'login',
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    test('record-update without recordType passes', () => {
+      const result = validateCommandParameters('record-update', {
+        record: 'abc123',
+        title: 'New Title',
+      });
+      expect(result.valid).toBe(true);
+    });
+  });
 });
 
 // ============================================================================
@@ -347,6 +377,17 @@ describe('buildKeeperCommand', () => {
       expect(() => {
         buildKeeperCommand('record-update', { title: 'Test' }, 'TEST-1');
       }).toThrow('Record UID is required');
+    });
+
+    // KJ-26-06: Validation must reject `recordType` on record-update.
+    test('throws when recordType is supplied on update (validator rejects)', () => {
+      expect(() => {
+        buildKeeperCommand('record-update', {
+          record: 'abc123',
+          title: 'Updated Title',
+          recordType: 'login',
+        }, 'TEST-1');
+      }).toThrow('Record type cannot be changed');
     });
   });
 

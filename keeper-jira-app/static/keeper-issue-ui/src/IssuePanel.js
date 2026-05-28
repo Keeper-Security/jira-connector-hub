@@ -983,8 +983,8 @@ const IssuePanel = () => {
     setRotateOnExpiration(data.rotateOnExpiration === true);
     setIsRotationEligible(data.isRotationEligible === true);
 
-    // Backward compat: older saved requests stored isKeeperDriveMode instead of isNsfMode.
-    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : data.isKeeperDriveMode !== false;
+    // Saved requests carry `isNsfMode`. Missing (older saves) defaults to NSF=true.
+    const nsfEnabled = data.isNsfMode !== false;
     setIsNsfMode(nsfEnabled);
 
     if (data.formData?.addressRef?.startsWith('temp_addr_')) {
@@ -1071,7 +1071,6 @@ const IssuePanel = () => {
         selectedRecordForUpdate,
         selectedFolder,
         tempAddressData,
-        isKeeperDriveMode,
         rotateOnExpiration,
         isRotationEligible,
         isNsfMode,
@@ -4161,6 +4160,11 @@ const IssuePanel = () => {
         if (finalParameters.password === '••••••••') {
           delete finalParameters.password; // Don't send masked password back
         }
+
+        // KJ-26-06: Record type is immutable on update. The form still shows
+        // the record type for context, but we never submit it — the backend
+        // will reject the request if recordType is present.
+        delete finalParameters.recordType;
         
         // IMPORTANT: Merge existing values for complex JSON fields to prevent data loss
         // When sending partial updates for fields like name, address, host, etc.,

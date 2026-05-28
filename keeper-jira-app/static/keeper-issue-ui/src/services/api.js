@@ -68,10 +68,10 @@ export const getProjectAdmins = async (projectKey, issueKey) => {
 };
 
 // Execute keeper action.
-// `mode` ('classic' | 'kd') controls whether the resolver/commandBuilder routes
-// `record-add` and `record-update` to their Keeper Drive variants
-// (`nsf-record-add`, `nsf-record-update`). Defaults to 'classic' for backward
-// compatibility.
+// `mode` ('classic' | 'nsf') controls whether the resolver/commandBuilder routes
+// `record-add` and `record-update` to their NSF (Nested Share Subfolders)
+// variants (`nsf-record-add`, `nsf-record-update`). Defaults to 'classic' for
+// backward compatibility.
 export const executeKeeperAction = async (issueKey, command, commandDescription, parameters, formattedTimestamp = null, mode = 'classic') => {
   const payload = {
     issueKey,

@@ -15,18 +15,16 @@ const ConfigTab = ({
   statusMessage,
   setStatusMessage,
   formValues,
-  setFormValues,
+  updateFormValue,
   formKey,
   isApiKeyMasked,
   setIsApiKeyMasked,
-  showCopiedMessage,
   isTestingConnection,
   hasFormChanges,
   connectionTested,
   handleSubmit,
   handleTestConnection,
   handleClearForm,
-  copyApiKey
 }) => {
   return (
     <>
@@ -60,18 +58,16 @@ const ConfigTab = ({
           ) : (
             <ConfigForm
               formValues={formValues}
-              setFormValues={setFormValues}
+              updateFormValue={updateFormValue}
               formKey={formKey}
               isApiKeyMasked={isApiKeyMasked}
               setIsApiKeyMasked={setIsApiKeyMasked}
-              showCopiedMessage={showCopiedMessage}
               isTestingConnection={isTestingConnection}
               hasFormChanges={hasFormChanges}
               connectionTested={connectionTested}
               handleSubmit={handleSubmit}
               handleTestConnection={handleTestConnection}
               handleClearForm={handleClearForm}
-              copyApiKey={copyApiKey}
             />
           )}
         </>

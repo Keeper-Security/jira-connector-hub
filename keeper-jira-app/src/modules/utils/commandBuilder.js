@@ -229,8 +229,12 @@ function validateCommandParameters(action, parameters) {
         if (!recordValidation.valid) errors.push(recordValidation.error);
       }
       
-      // Record type validation
-      if (parameters.recordType) {
+      
+KJ
+// Record type validation
+      if (action === 'record-update' && parameters.recordType) {
+        errors.push('Record type cannot be changed after a record is created.');
+      } else if (parameters.recordType) {
         const typeValidation = validateField('recordType', parameters.recordType, { 
           limitKey: 'recordType',
           pattern: 'recordType'
@@ -476,8 +480,9 @@ function buildKeeperCommand(action, parameters, issueKey) {
       }
       command += ` "${escapeForDoubleQuotes(parameters.record)}"`;
       
-      // Handle fields to update
-      const skipFields = ['record', 'skipComment'];
+      
+// Record type validation must be skipped for record-update
+      const skipFields = ['record', 'skipComment', 'recordType'];
       for (const [key, value] of Object.entries(parameters)) {
         if (skipFields.includes(key) || !value) continue;
         const fieldName = capitalizeFieldName(key);
