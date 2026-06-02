@@ -269,11 +269,15 @@ describe('validateCommandParameters', () => {
     expect(result.errors.length).toBeGreaterThanOrEqual(2);
   });
 
-  test('passes cliCommand without validation', () => {
-    const result = validateCommandParameters('any-action', {
-      cliCommand: 'some pre-built command'
+  // KJ-26-03: cliCommand passthrough removed. A stray cliCommand field is just
+  // an unknown parameter now and is neither honored nor used to skip validation.
+  test('ignores a stray cliCommand field (no passthrough)', () => {
+    const result = validateCommandParameters('record-add', {
+      cliCommand: 'enterprise-info',
     });
-    expect(result.valid).toBe(true);
+    // record-add still requires a title regardless of any cliCommand field.
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContain('Title is required for record-add');
   });
 
   // KJ-26-06: Record type immutability on record-update.
@@ -452,11 +456,14 @@ describe('buildKeeperCommand', () => {
     });
   });
 
-  describe('device-approve', () => {
-    test('builds unquoted email then flag (matches interactive shell)', () => {
+  // KJ-26-03: device-approve is now rebuilt from structured params
+  // ({ deviceDecision, deviceTarget }) and rejects anything outside the
+  // allowlisted target charset rather than escaping it.
+  describe('device-approve (structured, KJ-26-03)', () => {
+    test('builds approve from structured params', () => {
       const command = buildKeeperCommand(
         'device-approve',
-        { email: 'mnaqvi@keepersecurity.com', action: 'approve' },
+        { deviceDecision: 'approve', deviceTarget: 'mnaqvi@keepersecurity.com' },
         'TEST-1'
       );
       expect(command).toBe('device-approve mnaqvi@keepersecurity.com --approve');
@@ -465,39 +472,83 @@ describe('buildKeeperCommand', () => {
     test('builds deny variant', () => {
       const command = buildKeeperCommand(
         'device-approve',
-        { email: 'user@example.com', action: 'deny' },
+        { deviceDecision: 'deny', deviceTarget: 'user@example.com' },
         'TEST-1'
       );
       expect(command).toBe('device-approve user@example.com --deny');
     });
 
-    test('trims email whitespace', () => {
+    test('trims target whitespace', () => {
       const command = buildKeeperCommand(
         'device-approve',
-        { email: '  user@example.com  ', action: 'approve' },
+        { deviceDecision: 'approve', deviceTarget: '  user@example.com  ' },
         'TEST-1'
       );
       expect(command).toBe('device-approve user@example.com --approve');
     });
 
-    test('double-quotes email when token needs it', () => {
+    test('accepts a bare device ID target', () => {
       const command = buildKeeperCommand(
         'device-approve',
-        { email: 'user!name@example.com', action: 'approve' },
+        { deviceDecision: 'deny', deviceTarget: '1234hgghjjhg234gh123' },
         'TEST-1'
       );
-      expect(command).toBe('device-approve "user\\!name@example.com" --approve');
+      expect(command).toBe('device-approve 1234hgghjjhg234gh123 --deny');
+    });
+
+    test('rejects a target with shell/command metacharacters', () => {
+      expect(() => {
+        buildKeeperCommand(
+          'device-approve',
+          { deviceDecision: 'approve', deviceTarget: 'user@example.com; enterprise-info' },
+          'TEST-1'
+        );
+      }).toThrow('invalid device approval target');
+    });
+
+    test('rejects a missing/unknown decision', () => {
+      expect(() => {
+        buildKeeperCommand(
+          'device-approve',
+          { deviceTarget: 'user@example.com' },
+          'TEST-1'
+        );
+      }).toThrow('device approval decision');
     });
   });
 
-  describe('pre-formatted commands', () => {
-    test('returns cliCommand as-is', () => {
-      const prebuilt = 'epm approval action --approve abc123';
+  describe('epm approval action (structured, KJ-26-03)', () => {
+    test('builds approve from structured params', () => {
       const command = buildKeeperCommand('epm approval action', {
-        cliCommand: prebuilt
+        epmDecision: 'approve',
+        approvalUid: 'abc123_-',
       }, 'TEST-1');
-      
-      expect(command).toBe(prebuilt);
+      expect(command).toBe('epm approval action --approve abc123_-');
+    });
+
+    test('builds deny from structured params', () => {
+      const command = buildKeeperCommand('epm approval action', {
+        epmDecision: 'deny',
+        approvalUid: 'abc123',
+      }, 'TEST-1');
+      expect(command).toBe('epm approval action --deny abc123');
+    });
+
+    test('rejects a UID with shell/command metacharacters', () => {
+      expect(() => {
+        buildKeeperCommand('epm approval action', {
+          epmDecision: 'approve',
+          approvalUid: 'abc123; enterprise-info',
+        }, 'TEST-1');
+      }).toThrow('invalid EPM approval request UID');
+    });
+
+    test('a stray cliCommand can no longer smuggle an arbitrary command', () => {
+      expect(() => {
+        buildKeeperCommand('epm approval action', {
+          cliCommand: 'enterprise-info',
+        }, 'TEST-1');
+      }).toThrow('Input validation failed');
     });
   });
 });

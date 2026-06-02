@@ -274,7 +274,8 @@ const EpmApprovalPanel = ({ issueContext }) => {
         issueContext.issueKey,
         command,
         `EPM Approval: Approved request ${requestUid}`,
-        { cliCommand: command },
+        // KJ-26-03: send structured params; the backend rebuilds the command.
+        { epmDecision: 'approve', approvalUid: requestUid },
         new Date().toLocaleString('en-US', {
           month: '2-digit',
           day: '2-digit',
@@ -338,7 +339,8 @@ const EpmApprovalPanel = ({ issueContext }) => {
         issueContext.issueKey,
         command,
         `EPM Approval: Denied request ${requestUid}`,
-        { cliCommand: command },
+        // KJ-26-03: send structured params; the backend rebuilds the command.
+        { epmDecision: 'deny', approvalUid: requestUid },
         new Date().toLocaleString('en-US', {
           month: '2-digit',
           day: '2-digit',

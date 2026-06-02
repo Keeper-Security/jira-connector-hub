@@ -198,15 +198,18 @@ const DeviceApprovalPanel = ({ issueContext }) => {
     //   device-approve John.Doe@gmail.com --approve
     //   device-approve 1234hgghjjhg234gh123 --deny
     const flag = verb === 'approve' ? '--approve' : '--deny';
-    const cliCommand = `device-approve ${target} ${flag}`;
+    // Descriptive command string (used for audit/labels only; the backend
+    // rebuilds the executed command from the structured params below).
+    const command = `device-approve ${target} ${flag}`;
     const description = `Device Admin Approval: ${verb === 'approve' ? 'Approved' : 'Denied'} ${target}`;
 
     try {
       const result = await api.executeKeeperAction(
         issueContext.issueKey,
-        cliCommand,
+        command,
         description,
-        { cliCommand },
+        // KJ-26-03: send structured params; the backend rebuilds the command.
+        { deviceDecision: verb, deviceTarget: target },
         new Date().toLocaleString('en-US', {
           month: '2-digit',
           day: '2-digit',
