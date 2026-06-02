@@ -98,10 +98,11 @@ export const checkRotationEligibility = async (type, uid) => {
 };
 
 // Reject keeper request
-export const rejectKeeperRequest = async (issueKey, rejectionReason) => {
+export const rejectKeeperRequest = async (issueKey, rejectionReason, formattedTimestamp = null) => {
   return await invoke("rejectKeeperRequest", {
     issueKey,
-    rejectionReason
+    rejectionReason,
+    formattedTimestamp
   });
 };
 

@@ -1868,6 +1868,17 @@ resolver.define('getKeeperFolders', async (req) => {
     : 'ls -f -R --format=json';
 
   try {
+    // Best-effort sync-down so newly created folders are visible without
+    // requiring a Commander restart. Mirrors the pattern used by runEpmSyncDown.
+    // Failures are logged and ignored — never block the user-facing fetch.
+    try {
+      await executeKeeperApiCommand('sync-down', { userId, skipRateLimit: true });
+    } catch (syncErr) {
+      logger.warn('sync-down before folder fetch failed; continuing with cached data', {
+        error: syncErr.message
+      });
+    }
+
     const result = await executeKeeperApiCommand(command, { userId, forgeSafe: true });
     const apiData = result.data;
 

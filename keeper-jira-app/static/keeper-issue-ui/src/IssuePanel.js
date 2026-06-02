@@ -4516,7 +4516,7 @@ const IssuePanel = () => {
       });
       
       // Update the JIRA ticket with rejection comment
-      const result = await api.rejectKeeperRequest(issueContext.issueKey, rejectionReason.trim());
+      const result = await api.rejectKeeperRequest(issueContext.issueKey, rejectionReason.trim(), formattedTimestamp);
 
       // Check for structured error response (new pattern)
       if (checkResultError(result)) {
