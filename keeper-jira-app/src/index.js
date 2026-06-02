@@ -1,5 +1,5 @@
 import Resolver from '@forge/resolver';
-import { storage, webTrigger } from '@forge/api';
+import { storage } from '@forge/api';
 import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus, fetchEpmApprovalDetails } from './modules/keeperApi.js';
 import { requestJiraAsAppWithRetry, requestJiraAsUserWithRetry, route } from './modules/utils/jiraApiRetry.js';
 import { logger } from './modules/utils/logger.js';
@@ -267,6 +267,17 @@ async function getCurrentUser() {
  * Get Keeper config (called from frontend)
  */
 resolver.define('getConfig', async () => {
+  // One-shot cleanup of webhook storage left by pre-ITSM versions.
+  const migrated = await storage.get('postWebhookMigrationDone');
+  if (!migrated) {
+    await Promise.all([
+      storage.delete('webhookConfig'),
+      storage.delete('webhookToken'),
+      storage.delete('webhookAuditLog'),
+    ]);
+    await storage.set('postWebhookMigrationDone', true);
+  }
+
   const config = await storage.get('keeperConfig');
   return config || {};
 });
@@ -696,11 +707,6 @@ function validatePhoneEntry(phoneEntry) {
 function validateCommandParameters(action, parameters) {
   const errors = [];
   
-  // Skip validation for pre-formatted CLI commands
-  if (parameters.cliCommand) {
-    return { valid: true };
-  }
-  
   // Common validations based on action type
   switch (action) {
     case 'record-add':
@@ -828,7 +834,7 @@ function validateCommandParameters(action, parameters) {
       
       // Validate all remaining string parameters against default limits
       for (const [key, value] of Object.entries(parameters)) {
-        if (typeof value === 'string' && !['cliCommand'].includes(key)) {
+        if (typeof value === 'string') {
           // Skip already validated fields
           if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email'].includes(key)) {
             continue;
@@ -991,11 +997,6 @@ function sanitizeJsonObject(obj) {
 }
 
 function buildKeeperCommand(action, parameters, issueKey) {
-  // Check if we have a pre-formatted CLI command (used for record-permission)
-  if (parameters.cliCommand) {
-    return parameters.cliCommand;
-  }
-  
   // ========================================================================
   // Input Validation - validate all parameters before building command
   // ========================================================================
@@ -1903,15 +1904,25 @@ function isTargetPending(pendingList, target) {
   if (!Array.isArray(pendingList) || pendingList.length === 0 || !target) {
     return false;
   }
-  const lowered = String(target).toLowerCase();
+  // Reject very short non-email targets to prevent a malformed payload like
+  // target = "a" from sweeping up multiple unrelated devices.
+  const targetStr = String(target);
+  if (targetStr.length < 6 && !targetStr.includes('@')) {
+    return false;
+  }
+  const lowered = targetStr.toLowerCase();
   const looksLikeEmail = lowered.includes('@');
   return pendingList.some((entry) => {
     if (!entry) return false;
     if (looksLikeEmail) {
       return String(entry.email || '').toLowerCase() === lowered;
     }
+    // Only allow the user-supplied target as a prefix of the canonical device
+    // ID (CLI convention: user can type a shortened ID that expands to the
+    // full one). The reverse direction (short pending ID matches a longer
+    // target) is intentionally excluded to prevent false positives.
     const id = String(entry.device_id || '');
-    return id === target || id.startsWith(target) || target.startsWith(id);
+    return id === target || id.startsWith(target);
   });
 }
 
@@ -1933,30 +1944,21 @@ async function markAlreadyProcessedOutsideJira(
   formattedTimestamp,
   kind = 'device'
 ) {
-  // Add the label (idempotent — fetch current labels first).
+  // Atomically add the label via Jira's `update` payload — no GET required,
+  // no race with concurrent label writes, and idempotent (Jira ignores
+  // duplicate adds).
   try {
-    const labelsResp = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue/${issueKey}?fields=labels`,
-      { method: 'GET', headers: { Accept: 'application/json' } },
-      'Fetch labels before processed-outside marker'
+    await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          update: { labels: [{ add: PROCESSED_OUTSIDE_JIRA_LABEL }] }
+        })
+      },
+      'Add processed-outside-jira label'
     );
-    if (labelsResp.ok) {
-      const data = await labelsResp.json();
-      const current = data.fields?.labels || [];
-      if (!current.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
-        await requestJiraAsAppWithRetry(
-          route`/rest/api/3/issue/${issueKey}`,
-          {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              fields: { labels: [...current, PROCESSED_OUTSIDE_JIRA_LABEL] }
-            })
-          },
-          'Add processed-outside-jira label'
-        );
-      }
-    }
   } catch (labelErr) {
     logger.warn('Failed to add processed-outside-jira label', {
       issueKey,
@@ -2039,31 +2041,43 @@ resolver.define('executeKeeperAction', async (req) => {
     return validationError('command', 'Command is required');
   }
 
-  // Enforce server-side admin check for record creation.
-  // The frontend may hide "Create New Secret" for non-admins, but any user can bypass
-  // that restriction via direct API calls. We re-verify the Jira admin permission here.
-  if (command === 'record-add') {
+  // Enforce server-side admin check for privileged actions. The frontend hides
+  // admin controls for non-admins, but any user can bypass that restriction via
+  // direct invoke() calls. We re-verify the Jira project-admin permission here.
+  const requiresProjectAdmin =
+    command === 'record-add' ||
+    command.startsWith('device-approve') ||
+    command.startsWith('epm approval action');
+
+  if (requiresProjectAdmin) {
     try {
       const projectKey = issueKey.split('-')[0];
       const permResponse = await requestJiraAsUserWithRetry(
         route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=ADMINISTER_PROJECTS`,
         { method: 'GET', headers: { Accept: 'application/json' } },
-        'Server-side admin check for record-add'
+        'Server-side admin check'
       );
-      if (permResponse.ok) {
-        const permData = await permResponse.json();
-        const isAdmin = permData?.permissions?.ADMINISTER_PROJECTS?.havePermission === true;
-        if (!isAdmin) {
-          return errorResponse(
-            ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
-            'Only Jira project administrators are allowed to create new secrets.',
-            { requiredPermission: 'ADMINISTER_PROJECTS' }
-          );
-        }
+      if (!permResponse.ok) {
+        return errorResponse(
+          ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
+          'Could not verify administrator permissions. Please try again.',
+          {}
+        );
+      }
+      const permData = await permResponse.json();
+      const isProjectAdmin = permData?.permissions?.ADMINISTER_PROJECTS?.havePermission === true;
+      if (!isProjectAdmin) {
+        return errorResponse(
+          ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
+          'Only Jira project administrators are allowed to perform this action.',
+          { requiredPermission: 'ADMINISTER_PROJECTS' }
+        );
       }
     } catch (adminCheckErr) {
-      logger.warn('executeKeeperAction: admin check failed for record-add', { error: adminCheckErr.message });
-      // Fail closed — deny the request if we cannot verify admin status
+      logger.warn('executeKeeperAction: admin check failed', {
+        command: command.split(' ')[0],
+        error: adminCheckErr.message,
+      });
       return errorResponse(
         ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
         'Could not verify administrator permissions. Please try again.',
@@ -2167,7 +2181,7 @@ resolver.define('executeKeeperAction', async (req) => {
     const isApproveOrDeny =
       command.includes('--approve') || command.includes('--deny');
     if (isApproveOrDeny) {
-      const target = extractDeviceTarget(parameters?.cliCommand || command);
+      const target = parameters?.email || parameters?.deviceTarget || extractDeviceTarget(command);
       if (target) {
         try {
           const pending = await fetchPendingDeviceApprovals(userId);
@@ -2315,17 +2329,16 @@ resolver.define('executeKeeperAction', async (req) => {
       if (isEpmCommand) {
         if (command.includes('--approve')) {
           actionMessage = `Endpoint privilege approval request has been approved`;
-          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
+          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters?.approvalUid || command.split(/\s+/).pop() || ''}`;
         } else if (command.includes('--deny')) {
           actionMessage = `Endpoint privilege approval request has been denied`;
-          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
+          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters?.approvalUid || command.split(/\s+/).pop() || ''}`;
         }
       } else if (isDeviceCommand) {
         // Canonical CLI form is `device-approve <user_email_or_device_id> --approve|--deny`,
         // but flag/positional order is interchangeable in argparse. Pick the
         // first non-flag token that isn't `device-approve` itself.
-        const tokens = parameters.cliCommand ? parameters.cliCommand.split(/\s+/) : [];
-        const target = tokens.find((t, i) => i > 0 && t && !t.startsWith('-')) || '';
+        const target = parameters?.email || parameters?.deviceTarget || extractDeviceTarget(command) || '';
         if (command.includes('--approve')) {
           actionMessage = 'Device admin approval request has been approved';
           actionDescription = `Device Admin Approval: Approved ${target}`;
@@ -2740,10 +2753,9 @@ resolver.define('executeKeeperAction', async (req) => {
       isEpmRequestNotFoundError(errorMessage)
     ) {
       const requestUid =
-        (parameters && (parameters.request_uid || parameters.approval_uid)) ||
-        (parameters && parameters.cliCommand
-          ? parameters.cliCommand.split(/\s+/).pop()
-          : '') ||
+        parameters?.approvalUid ||
+        parameters?.request_uid ||
+        parameters?.approval_uid ||
         command.split(/\s+/).pop();
       try {
         await markAlreadyProcessedOutsideJira(
