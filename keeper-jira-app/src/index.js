@@ -1611,13 +1611,42 @@ function buildKeeperCommand(action, parameters, issueKey) {
       command += ` --force`;
       break;
 
+    case 'epm approval action': {
+      const decision = parameters.epmDecision;
+      const uid = String(parameters.approvalUid || '').trim();
+      if (!decision || !['approve', 'deny'].includes(decision)) {
+        throw new Error('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!uid) {
+        throw new Error('EPM approval UID is required');
+      }
+      if (!/^[A-Za-z0-9_-]+$/.test(uid)) {
+        throw new Error('EPM approval UID contains invalid characters');
+      }
+      command += ` --${decision} ${uid}`;
+      break;
+    }
+
+    case 'device-approve': {
+      const rawTarget = (parameters.email || '').trim();
+      if (!rawTarget) {
+        throw new Error('Email or device ID is required for device-approve command');
+      }
+      if (!parameters.action || !['approve', 'deny'].includes(parameters.action)) {
+        throw new Error('Action must be "approve" or "deny" for device-approve command');
+      }
+      const flag = parameters.action === 'approve' ? '--approve' : '--deny';
+      const safeToken = /^[a-zA-Z0-9._+\-@]+$/;
+      if (safeToken.test(rawTarget)) {
+        command += ` ${rawTarget} ${flag}`;
+      } else {
+        command += ` "${escapeForDoubleQuotes(rawTarget)}" ${flag}`;
+      }
+      break;
+    }
+
     default:
-      // For any other commands, add parameters as key=value pairs with proper escaping
-      Object.keys(parameters).forEach(key => {
-        if (parameters[key]) {
-            command += ` ${key}='${escapeForSingleQuotes(String(parameters[key]))}'`;
-        }
-      });
+      break;
   }
   
   return command;
@@ -2132,7 +2161,7 @@ resolver.define('executeKeeperAction', async (req) => {
     // cleanly or fail with the canonical "Approval request does not exist"
     // error (which the catch-block handler below converts into a structured
     // "already processed outside Jira" response + label).
-    if (command.includes('--approve') || command.includes('--deny')) {
+    if (parameters?.epmDecision === 'approve' || parameters?.epmDecision === 'deny') {
       await runEpmSyncDown(userId);
     }
   }
@@ -2179,7 +2208,7 @@ resolver.define('executeKeeperAction', async (req) => {
     // ticket being created and now, mark the ticket and refuse the action so
     // we never call approve/deny on a stale request.
     const isApproveOrDeny =
-      command.includes('--approve') || command.includes('--deny');
+      parameters?.action === 'approve' || parameters?.action === 'deny';
     if (isApproveOrDeny) {
       const target = parameters?.email || parameters?.deviceTarget || extractDeviceTarget(command);
       if (target) {
@@ -2299,6 +2328,13 @@ resolver.define('executeKeeperAction', async (req) => {
     // by the `--approve` / `--deny` flag.
     const isDeviceCommand = command.startsWith('device-approve');
 
+    // After the structured-params refactoring `command` is just the action
+    // name (e.g. 'device-approve'), not the full CLI string. Derive the
+    // approve/deny decision from the structured parameters so every
+    // downstream label, comment, and pre-check works correctly.
+    const epmDecision = isEpmCommand ? parameters?.epmDecision : null;
+    const deviceDecision = isDeviceCommand ? parameters?.action : null;
+
     // Only add comment for main record creation, not for records created as references
     // Check if this is a main record creation (not just a reference record)
     // Records created as references will have skipComment: true parameter
@@ -2327,22 +2363,19 @@ resolver.define('executeKeeperAction', async (req) => {
       // Set command-specific messages
       // Handle EPM commands first
       if (isEpmCommand) {
-        if (command.includes('--approve')) {
+        if (epmDecision === 'approve') {
           actionMessage = `Endpoint privilege approval request has been approved`;
-          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters?.approvalUid || command.split(/\s+/).pop() || ''}`;
-        } else if (command.includes('--deny')) {
+          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters?.approvalUid || ''}`;
+        } else if (epmDecision === 'deny') {
           actionMessage = `Endpoint privilege approval request has been denied`;
-          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters?.approvalUid || command.split(/\s+/).pop() || ''}`;
+          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters?.approvalUid || ''}`;
         }
       } else if (isDeviceCommand) {
-        // Canonical CLI form is `device-approve <user_email_or_device_id> --approve|--deny`,
-        // but flag/positional order is interchangeable in argparse. Pick the
-        // first non-flag token that isn't `device-approve` itself.
-        const target = parameters?.email || parameters?.deviceTarget || extractDeviceTarget(command) || '';
-        if (command.includes('--approve')) {
+        const target = parameters?.email || parameters?.deviceTarget || '';
+        if (deviceDecision === 'approve') {
           actionMessage = 'Device admin approval request has been approved';
           actionDescription = `Device Admin Approval: Approved ${target}`;
-        } else if (command.includes('--deny')) {
+        } else if (deviceDecision === 'deny') {
           actionMessage = 'Device admin approval request has been denied';
           actionDescription = `Device Admin Approval: Denied ${target}`;
         }
@@ -2456,15 +2489,15 @@ resolver.define('executeKeeperAction', async (req) => {
       // Build ADF content with panel (matching save/reject request format)
       let panelTitle = 'Keeper Request Approved and Executed';
       if (isEpmCommand) {
-        if (command.includes('--approve')) {
+        if (epmDecision === 'approve') {
           panelTitle = 'Endpoint Privilege Approval Request - Approved';
-        } else if (command.includes('--deny')) {
+        } else if (epmDecision === 'deny') {
           panelTitle = 'Endpoint Privilege Approval Request - Denied';
         }
       } else if (isDeviceCommand) {
-        if (command.includes('--approve')) {
+        if (deviceDecision === 'approve') {
           panelTitle = 'Device Admin Approval Request - Approved';
-        } else if (command.includes('--deny')) {
+        } else if (deviceDecision === 'deny') {
           panelTitle = 'Device Admin Approval Request - Denied';
         }
       } else if (isShareInvitationPending) {
@@ -2515,9 +2548,9 @@ resolver.define('executeKeeperAction', async (req) => {
       
       // Use different panel types for different scenarios
       let panelType = 'success';
-      if (isEpmCommand && command.includes('--deny')) {
+      if (isEpmCommand && epmDecision === 'deny') {
         panelType = 'warning';
-      } else if (isDeviceCommand && command.includes('--deny')) {
+      } else if (isDeviceCommand && deviceDecision === 'deny') {
         panelType = 'warning';
       } else if (isShareInvitationPending) {
         panelType = 'info';
@@ -2547,14 +2580,14 @@ resolver.define('executeKeeperAction', async (req) => {
       // fan-out for environments that tagged tickets with the Keeper request UID).
       if (isEpmCommand) {
         try {
-          const newLabel = command.includes('--approve')
+          const newLabel = epmDecision === 'approve'
             ? 'epm-approved'
-            : command.includes('--deny')
+            : epmDecision === 'deny'
               ? 'epm-denied'
               : '';
           if (newLabel) {
-            const requestUid = command.split(/\s+/).pop();
-            const sanitizedUid = (requestUid || '').replace(/[^a-zA-Z0-9_-]/g, '-');
+            const requestUid = parameters?.approvalUid || '';
+            const sanitizedUid = (requestUid).replace(/[^a-zA-Z0-9_-]/g, '-');
             const uidLabel = sanitizedUid ? `request-${sanitizedUid}` : '';
 
             const updatedKeys = new Set();
@@ -2576,13 +2609,14 @@ resolver.define('executeKeeperAction', async (req) => {
                   currentLabels.includes('epm-denied') ||
                   currentLabels.includes('epm-expired');
                 if (!alreadyActioned && !currentLabels.includes(newLabel)) {
-                  const updatedLabels = [...currentLabels, newLabel];
                   await requestJiraAsAppWithRetry(
                     route`/rest/api/3/issue/${issueKey}`,
                     {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ fields: { labels: updatedLabels } })
+                      body: JSON.stringify({
+                        update: { labels: [{ add: newLabel }] }
+                      })
                     },
                     'Update EPM label on current ticket'
                   );
@@ -2619,14 +2653,14 @@ resolver.define('executeKeeperAction', async (req) => {
                   );
                 });
                 for (const issue of issuesToUpdate) {
-                  const currentLabels = issue.fields?.labels || [];
-                  const updatedLabels = [...currentLabels, newLabel];
                   await requestJiraAsAppWithRetry(
                     route`/rest/api/3/issue/${issue.key}`,
                     {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ fields: { labels: updatedLabels } })
+                      body: JSON.stringify({
+                        update: { labels: [{ add: newLabel }] }
+                      })
                     },
                     'Update EPM label on sibling ticket'
                   );
@@ -2645,33 +2679,23 @@ resolver.define('executeKeeperAction', async (req) => {
       // can show the correct state on reload.
       if (isDeviceCommand) {
         try {
-          const newLabel = command.includes('--approve')
+          const newLabel = deviceDecision === 'approve'
             ? 'device-approved'
-            : command.includes('--deny')
+            : deviceDecision === 'deny'
               ? 'device-denied'
               : '';
           if (newLabel) {
-            const issueLabelsResponse = await requestJiraAsAppWithRetry(
-              route`/rest/api/3/issue/${issueKey}?fields=labels`,
-              { method: 'GET', headers: { 'Accept': 'application/json' } },
-              'Fetch labels before device label update'
+            await requestJiraAsAppWithRetry(
+              route`/rest/api/3/issue/${issueKey}`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  update: { labels: [{ add: newLabel }] }
+                })
+              },
+              'Update device approval label'
             );
-            if (issueLabelsResponse.ok) {
-              const issueLabelsData = await issueLabelsResponse.json();
-              const currentLabels = issueLabelsData.fields?.labels || [];
-              if (!currentLabels.includes(newLabel)) {
-                const updatedLabels = [...currentLabels, newLabel];
-                await requestJiraAsAppWithRetry(
-                  route`/rest/api/3/issue/${issueKey}`,
-                  {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fields: { labels: updatedLabels } })
-                  },
-                  'Update device approval label'
-                );
-              }
-            }
           }
         } catch (labelErr) {
           logger.error('Failed to add device approval label', labelErr);
