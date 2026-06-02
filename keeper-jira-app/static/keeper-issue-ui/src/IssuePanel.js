@@ -4708,7 +4708,8 @@ const IssuePanel = () => {
                     Required Information:
                   </div>
 
-                  {selectedAction.value === 'record-update' && renderClassicModeCheckbox()}
+                  {(['record-update', 'share-record', 'share-folder', 'record-permission'].includes(selectedAction.value)) &&
+                    renderClassicModeCheckbox()}
 
                   {/* Records Selector for record-update action only */}
                   {selectedAction.value === 'record-update' && (
@@ -5742,7 +5743,6 @@ const IssuePanel = () => {
 
                       return (
                         <React.Fragment key={field.name}>
-                          {field.name === 'action' && renderClassicModeCheckbox()}
                           <FormField
                             hideLabel={field.type === 'phoneEntries'}
                             label={field.label}
