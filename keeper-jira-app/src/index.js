@@ -3106,13 +3106,19 @@ resolver.define('executeKeeperAction', async (req) => {
     // is not a pamUser with rotation fully configured. The CLI shows
     // "rotate-on-expiration requires a pamUser record..." but the HTTP API
     // returns a generic 500 with just the record UID. Catch both cases.
+    // Note: `command` here is the action name ('share-record'), not the full
+    // CLI string, so we check `parameters.rotate_on_expiration` instead.
     if (errorMessage && (
       errorMessage.includes('rotate-on-expiration requires a pamUser record with rotation configured') ||
-      (command && command.includes('--rotate-on-expiration') && errorMessage.includes('500'))
+      (parameters?.rotate_on_expiration === true && errorMessage.includes('500'))
     )) {
+      const ineligibleUid = errorMessage.match(/500\s*-\s*([A-Za-z0-9_-]{10,})/)?.[1];
+      const roeMsg = ineligibleUid
+        ? `Rotate-on-expiration failed — record "${ineligibleUid}" requires a fully configured PAM User with rotation enabled (linked PAM config/resource, enabled state, and an active Gateway).`
+        : 'Rotate-on-expiration failed — the target record requires a fully configured PAM User with rotation enabled (linked PAM config/resource, enabled state, and an active Gateway).';
       return errorResponse(
         ERROR_CODES.KEEPER_PERMISSION_DENIED,
-        'Rotate-on-expiration failed — the target record requires a fully configured PAM User with rotation enabled (linked PAM config/resource, enabled state, and an active Gateway).',
+        roeMsg,
         { troubleshooting: [
           'Verify the record is of type pamUser',
           'Ensure rotation is enabled for that record (pam rotation edit)',
