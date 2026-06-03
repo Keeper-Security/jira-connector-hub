@@ -200,11 +200,6 @@ function validatePhoneEntry(entry) {
 function validateCommandParameters(action, parameters) {
   const errors = [];
   
-  // Skip validation for pre-formatted CLI commands
-  if (parameters.cliCommand) {
-    return { valid: true };
-  }
-  
   // Common validations based on action type
   switch (action) {
     case 'record-add':
@@ -299,7 +294,12 @@ function validateCommandParameters(action, parameters) {
     }
     
     case 'epm approval action': {
-      // Approval UID required (handled by cliCommand path)
+      if (!parameters.epmDecision || !['approve', 'deny'].includes(parameters.epmDecision)) {
+        errors.push('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!parameters.approvalUid || !String(parameters.approvalUid).trim()) {
+        errors.push('EPM approval UID is required');
+      }
       break;
     }
 
@@ -411,11 +411,6 @@ function capitalizeFieldName(fieldName) {
  * @throws {Error} - If validation fails
  */
 function buildKeeperCommand(action, parameters, issueKey) {
-  // Check if we have a pre-formatted CLI command (used for record-permission)
-  if (parameters.cliCommand) {
-    return parameters.cliCommand;
-  }
-  
   // Input Validation
   const validation = validateCommandParameters(action, parameters);
   if (!validation.valid) {
@@ -525,6 +520,23 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (parameters.action) {
         command += ` --action='${escapeForSingleQuotes(parameters.action)}'`;
       }
+      break;
+    }
+
+    case 'epm approval action': {
+      const decision = parameters.epmDecision;
+      const uid = String(parameters.approvalUid || '').trim();
+      if (!decision || !['approve', 'deny'].includes(decision)) {
+        throw new Error('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!uid) {
+        throw new Error('EPM approval UID is required');
+      }
+      // Strict charset — prevent shell injection via the UID.
+      if (!/^[A-Za-z0-9_-]+$/.test(uid)) {
+        throw new Error('EPM approval UID contains invalid characters');
+      }
+      command += ` --${decision} ${uid}`;
       break;
     }
 
