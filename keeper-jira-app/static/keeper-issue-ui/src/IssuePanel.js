@@ -998,6 +998,7 @@ const IssuePanel = () => {
     setFormData(data.formData || {});
     setRotateOnExpiration(data.rotateOnExpiration === true);
     setIsRotationEligible(data.isRotationEligible === true);
+    lastCheckedRoeRef.current = { type: '', uid: '' };
 
     const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : true;
     setIsNsfMode(nsfEnabled);
@@ -2552,6 +2553,10 @@ const IssuePanel = () => {
       type = 'record';
       uid = selectedRecord.record_uid;
     } else if (action === 'share-folder' && selectedFolder) {
+      type = 'folder';
+      uid = selectedFolder.folder_uid || selectedFolder.uid;
+    } else if (action === 'share-record' && !selectedRecord && selectedFolder) {
+      // NSF folder-level share-record: entire folder shared via sharedFolder param
       type = 'folder';
       uid = selectedFolder.folder_uid || selectedFolder.uid;
     }

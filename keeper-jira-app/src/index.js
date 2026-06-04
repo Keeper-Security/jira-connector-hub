@@ -1949,6 +1949,40 @@ resolver.define('getKeeperRecordDetails', async (req) => {
   }
 });
 
+/**
+ * Core ROE eligibility check shared by the checkRotationEligibility resolver
+ * and the server-side guard inside executeKeeperAction.
+ *
+ * Returns { eligible: boolean, recordType?: string, roeResponse?: array }.
+ * Propagates rate-limit errors as-thrown so callers can handle them.
+ */
+async function checkRoeEligibility(userId, type, uid) {
+  if (type === 'record') {
+    const result = await executeKeeperApiCommand(
+      `get "${uid}" --format=json`,
+      { userId, skipRateLimit: true, forgeSafe: true }
+    );
+    let details = {};
+    if (result.data?.data) {
+      details = typeof result.data.data === 'string'
+        ? JSON.parse(result.data.data)
+        : result.data.data;
+    }
+    const recordType = details.record_type || details.type || '';
+    return { eligible: recordType.toLowerCase() === 'pamuser', recordType };
+  }
+
+  // Folder: list-sf <uid> --roe-eligible --format=json
+  const result = await executeKeeperApiCommand(
+    `list-sf "${uid}" --roe-eligible --format=json`,
+    { userId, skipRateLimit: true, forgeSafe: true }
+  );
+  let rows = result.data?.data ?? [];
+  if (typeof rows === 'string') rows = JSON.parse(rows);
+  if (!Array.isArray(rows)) rows = [];
+  return { eligible: rows.some(r => r.shared_folder_uid === uid), roeResponse: rows };
+}
+
 // Check if a record is pamUser or a folder is rotation-on-expiration eligible.
 // Used by the issue panel to decide whether to show the "Rotate password upon
 // expiration" checkbox on share-record / share-folder.
@@ -1962,38 +1996,8 @@ resolver.define('checkRotationEligibility', async (req) => {
   }
 
   try {
-    if (type === 'record') {
-      const result = await executeKeeperApiCommand(
-        `get "${uid}" --format=json`,
-        { userId, skipRateLimit: true, forgeSafe: true }
-      );
-      let details = {};
-      if (result.data?.data) {
-        details = typeof result.data.data === 'string'
-          ? JSON.parse(result.data.data)
-          : result.data.data;
-      }
-      const recordType = details.record_type || details.type || '';
-      return successResponse({
-        eligible: recordType.toLowerCase() === 'pamuser',
-        recordType
-      });
-    }
-
-    // Folder: list-sf <uid> --roe-eligible --format=json
-    const result = await executeKeeperApiCommand(
-      `list-sf "${uid}" --roe-eligible --format=json`,
-      { userId, skipRateLimit: true, forgeSafe: true }
-    );
-    let rows = [];
-    if (result.data?.data) {
-      rows = typeof result.data.data === 'string'
-        ? JSON.parse(result.data.data)
-        : result.data.data;
-    }
-    if (!Array.isArray(rows)) rows = [];
-    const match = rows.some(r => r.shared_folder_uid === uid);
-    return successResponse({ eligible: match, roeResponse: rows });
+    const eligibility = await checkRoeEligibility(userId, type, uid);
+    return successResponse(eligibility);
   } catch (err) {
     if (err.rateLimited) {
       return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
@@ -2507,6 +2511,42 @@ resolver.define('executeKeeperAction', async (req) => {
       }
       // Otherwise, log and continue (don't block if we can't fetch record details)
       logger.error('Failed to check record owner for share-record validation', { error: ownerCheckError.message });
+    }
+  }
+
+  // Re-check rotation eligibility server-side before building the command.
+  // Any invoke() caller can pass rotate_on_expiration; we verify it here
+  // using the same checkRoeEligibility helper as the UI-facing resolver.
+  if (parameters?.rotate_on_expiration === true &&
+      (command === 'share-record' || command === 'share-folder')) {
+    const roeType = (command === 'share-record' && parameters.record) ? 'record' : 'folder';
+    const roeUid = roeType === 'record'
+      ? parameters.record
+      : (parameters.folder || parameters.sharedFolder);
+
+    if (roeUid) {
+      try {
+        const { eligible } = await checkRoeEligibility(userId, roeType, roeUid);
+        if (!eligible) {
+          return errorResponse(
+            ERROR_CODES.VALIDATION_INVALID_FORMAT,
+            'rotate-on-expiration is not supported for this record or folder',
+            { uid: roeUid, type: roeType, reason: 'not_roe_eligible' }
+          );
+        }
+      } catch (roeCheckErr) {
+        if (roeCheckErr.rateLimited) {
+          return rateLimitError(roeCheckErr.limitType || 'minute', roeCheckErr.retryAfter || 60);
+        }
+        logger.warn('executeKeeperAction: ROE eligibility re-check failed, rejecting to be safe', {
+          roeType, roeUid, error: roeCheckErr.message
+        });
+        return errorResponse(
+          ERROR_CODES.VALIDATION_INVALID_FORMAT,
+          'Could not verify rotation eligibility. Please try again.',
+          { uid: roeUid, type: roeType, reason: 'eligibility_check_failed' }
+        );
+      }
     }
   }
 
