@@ -753,7 +753,11 @@ function validateCommandParameters(action, parameters, options = {}) {
     case 'record-update': {
       // Title validation
       if (action === 'record-add' && !parameters.title) {
-        errors.push('Title is required for Nested Share Subfolders (NSF) record-add');
+        errors.push(
+          isNsfMode
+            ? 'Title is required for Nested Share Subfolders (NSF) record-add'
+            : 'Title is required for record-add'
+        );
       } else if (parameters.title) {
         const titleValidation = validateField('title', parameters.title, { 
           limitKey: 'title',
@@ -1003,14 +1007,9 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
       const recordType = parameters.recordType || 'login';
       command += ` --record-type='${escapeForSingleQuotes(recordType)}'`;
 
-      // NSF records must live inside an NSF folder; fail if folder UID is missing.
-      if (isNsf) {
-        const nsfFolder = parameters.folder;
-        if (!nsfFolder || !String(nsfFolder).trim()) {
-          throw new Error('Folder is required for nsf-record-add. Pick a folder in the issue panel.');
-        }
-        command += ` --folder='${escapeForSingleQuotes(String(nsfFolder).trim())}'`;
-      } else if (parameters.folder && String(parameters.folder).trim()) {
+      // Folder is optional for both Classic and NSF record-add; if provided, emit --folder,
+      // otherwise Commander creates the record at vault root.
+      if (parameters.folder && String(parameters.folder).trim()) {
         command += ` --folder='${escapeForSingleQuotes(String(parameters.folder).trim())}'`;
       }
 

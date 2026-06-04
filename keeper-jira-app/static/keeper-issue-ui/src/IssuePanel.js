@@ -4223,21 +4223,10 @@ const IssuePanel = () => {
             folder: folderUid
           };
         } else {
-          // Classic record-permission: build cliCommand with -d/-s/-R/--force flags.
-          let commandParts = ['record-permission', folderUid];
-
-          if (finalParameters.action) {
-            commandParts.push('-a', finalParameters.action);
-          }
-          if (finalParameters.can_edit) commandParts.push('-d');
-          if (finalParameters.can_share) commandParts.push('-s');
-          if (finalParameters.recursive) commandParts.push('-R');
-          if (finalParameters.action === 'grant' || finalParameters.action === 'revoke') {
-            commandParts.push('--force');
-          }
-
+          // Classic: pass structured params; server builds the CLI command with validation.
           finalParameters = {
-            cliCommand: commandParts.join(' ')
+            ...finalParameters,
+            folder: folderUid
           };
         }
       }
