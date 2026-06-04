@@ -340,7 +340,7 @@ describe('buildKeeperCommand', () => {
         notes: 'Some notes'
       }, 'TEST-1');
       
-      expect(command).toContain('Notes="Some notes"');
+      expect(command).toContain("--notes='Some notes'");
     });
 
     test('handles phone entries', () => {

@@ -917,15 +917,16 @@ function validateCommandParameters(action, parameters, options = {}) {
       for (const [key, value] of Object.entries(parameters)) {
         if (typeof value === 'string' && !['cliCommand'].includes(key)) {
           // Skip already validated fields
-          if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email'].includes(key)) {
+          if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email',
+               'keyPair_privateKey', 'keyPair_publicKey', 'passphrase'].includes(key)) {
             continue;
           }
           if (addressFields.includes(key) || nameFields.includes(key)) {
             continue;
           }
           
-          // Validate against default limit
-          const validation = validateField(key, value, { limitKey: 'default' });
+          // Use field-specific limit when available (e.g. privateKey: 16000), else default.
+          const validation = validateField(key, value, { limitKey: key });
           if (!validation.valid) errors.push(validation.error);
         }
       }
@@ -1070,9 +1071,8 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
         throw new Error(`Title is required for record-add command. Record type: ${recordType}`);
       }
       command += ` --title="${escapeForDoubleQuotes(parameters.title)}"`;
-      // Handle common fields for all record types
       if (parameters.notes) {
-        command += ` Notes="${escapeForDoubleQuotes(parameters.notes)}"`;
+        command += ` --notes='${escapeForSingleQuotes(parameters.notes)}'`;
       }
       
       // Skip metadata fields; folder is excluded (already emitted as --folder in NSF mode).
@@ -3162,6 +3162,16 @@ resolver.define('executeKeeperAction', async (req) => {
         `EPM approval request "${requestUid}" is no longer pending in Keeper. ` +
           'It looks like the request was already approved or denied outside Jira.'
       );
+    }
+
+    // Strip CLI-internal hint that is meaningless to Jira users.
+    if (errorMessage && errorMessage.includes('Use --force to bypass password policy warnings')) {
+      const cleaned = errorMessage
+        .split('\n')
+        .filter(line => !line.includes('Use --force to bypass password policy warnings'))
+        .join('\n')
+        .trim();
+      return keeperError(cleaned || errorMessage, err);
     }
 
     // Return Keeper error with automatic error type detection

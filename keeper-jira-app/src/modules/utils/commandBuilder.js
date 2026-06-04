@@ -39,6 +39,9 @@ const VALIDATION_LIMITS = {
   lastName: 64,
   hostname: 256,
   port: 10,
+  privateKey: 16000,
+  publicKey: 8000,
+  passphrase: 1024,
   default: 1024
 };
 
@@ -435,10 +438,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
         throw new Error(`Title is required for record-add command. Record type: ${recordType}`);
       }
       command += ` --title="${escapeForDoubleQuotes(parameters.title)}"`;
-      
-      // Handle common fields
       if (parameters.notes) {
-        command += ` Notes="${escapeForDoubleQuotes(parameters.notes)}"`;
+        command += ` --notes='${escapeForSingleQuotes(parameters.notes)}'`;
       }
       
       // Password generation for login records

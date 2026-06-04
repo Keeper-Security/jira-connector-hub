@@ -487,27 +487,23 @@ function parseKeeperErrorMessage(errorMessage) {
   // Skip system messages like "Bypassing master password enforcement..."
   const meaningfulLines = lines.filter(line => 
     !line.startsWith('Bypassing master password') &&
-    !line.includes('running in service mode')
+    !line.includes('running in service mode') &&
+    !line.includes('Use --force to bypass password policy warnings')
   );
   
   let result;
   
-  // If we have meaningful lines, process them
-  if (meaningfulLines.length > 0) {
-    const lastLine = meaningfulLines[meaningfulLines.length - 1];
-    
-    // Look for pattern: "Failed to ... : <actual error message>"
-    // Extract the part after the last colon if it contains a meaningful message
+  if (meaningfulLines.length > 1) {
+    result = meaningfulLines.join('\n');
+  } else if (meaningfulLines.length === 1) {
+    const lastLine = meaningfulLines[0];
     const colonIndex = lastLine.lastIndexOf(': ');
     if (colonIndex !== -1) {
       const afterColon = lastLine.substring(colonIndex + 2).trim();
-      // Check if the part after colon is a meaningful message (not just a short token)
       if (afterColon.length > 20 && !afterColon.includes('Failed to')) {
         result = afterColon;
       }
     }
-    
-    // If no colon pattern found, return the last meaningful line
     if (!result) {
       result = lastLine;
     }
