@@ -19,6 +19,7 @@ const {
   appendRole,
   appendRecursive,
   appendNsfExpiration,
+  sanitizeNsfDuration,
   toNsfExpireAt,
   buildNsfShareFolderArgs,
   buildNsfShareRecordArgs,
@@ -353,5 +354,179 @@ describe('buildNsfRecordPermissionArgs', () => {
     });
     expect(args).not.toMatch(/ -d\b/);
     expect(args).not.toMatch(/ -s\b/);
+  });
+});
+
+describe('sanitizeNsfDuration', () => {
+  test('returns empty string for empty / falsy input', () => {
+    expect(sanitizeNsfDuration('')).toBe('');
+    expect(sanitizeNsfDuration(undefined)).toBe('');
+    expect(sanitizeNsfDuration(null)).toBe('');
+  });
+
+  test('returns empty string for invalid / shell-unsafe strings', () => {
+    expect(sanitizeNsfDuration('30d; rm -rf /')).toBe('');
+    expect(sanitizeNsfDuration('$(whoami)')).toBe('');
+    expect(sanitizeNsfDuration('30 days')).toBe('');
+    expect(sanitizeNsfDuration('abc')).toBe('');
+  });
+
+  test('accepts all documented Commander units', () => {
+    expect(sanitizeNsfDuration('7d')).toBe('7d');
+    expect(sanitizeNsfDuration('12h')).toBe('12h');
+    expect(sanitizeNsfDuration('30m')).toBe('30m');
+    expect(sanitizeNsfDuration('60s')).toBe('60s');
+    expect(sanitizeNsfDuration('30mi')).toBe('30mi');
+    expect(sanitizeNsfDuration('6mo')).toBe('6mo');
+    expect(sanitizeNsfDuration('1y')).toBe('1y');
+  });
+
+  test('accepts the literal "never"', () => {
+    expect(sanitizeNsfDuration('never')).toBe('never');
+  });
+
+  test('normalizes input to lowercase', () => {
+    expect(sanitizeNsfDuration('30D')).toBe('30d');
+    expect(sanitizeNsfDuration('12H')).toBe('12h');
+    expect(sanitizeNsfDuration('NEVER')).toBe('never');
+  });
+});
+
+describe('buildNsfShareFolderArgs — rotate-on-expiration', () => {
+  test('appends --rotate-on-expiration when rotate_on_expiration is strictly true', () => {
+    const args = buildNsfShareFolderArgs({
+      folder: 'FOLDER_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      expiration_type: 'expire-in',
+      expire_in: '30d',
+      rotate_on_expiration: true
+    });
+    expect(args).toContain(' --rotate-on-expiration');
+  });
+
+  test('rotate flag appears after expiration flags', () => {
+    const args = buildNsfShareFolderArgs({
+      folder: 'FOLDER_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      expiration_type: 'expire-in',
+      expire_in: '30d',
+      rotate_on_expiration: true
+    });
+    const expireIdx = args.indexOf('--expire-in');
+    const rotateIdx = args.indexOf('--rotate-on-expiration');
+    expect(expireIdx).toBeGreaterThan(-1);
+    expect(rotateIdx).toBeGreaterThan(expireIdx);
+  });
+
+  test('does NOT append --rotate-on-expiration when rotate_on_expiration is false', () => {
+    const args = buildNsfShareFolderArgs({
+      folder: 'FOLDER_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      rotate_on_expiration: false
+    });
+    expect(args).not.toContain('--rotate-on-expiration');
+  });
+
+  test('does NOT append --rotate-on-expiration when rotate_on_expiration is absent', () => {
+    const args = buildNsfShareFolderArgs({
+      folder: 'FOLDER_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer'
+    });
+    expect(args).not.toContain('--rotate-on-expiration');
+  });
+
+  test('does NOT append --rotate-on-expiration when rotate_on_expiration is the string "true" (strict === true required)', () => {
+    const args = buildNsfShareFolderArgs({
+      folder: 'FOLDER_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      rotate_on_expiration: 'true'
+    });
+    expect(args).not.toContain('--rotate-on-expiration');
+  });
+});
+
+describe('buildNsfShareRecordArgs — rotate-on-expiration', () => {
+  test('appends --rotate-on-expiration for a record UID when strictly true', () => {
+    const args = buildNsfShareRecordArgs({
+      record: 'REC_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      expiration_type: 'expire-at',
+      expire_at: '2027-06-01T00:00:00Z',
+      rotate_on_expiration: true
+    });
+    expect(args).toContain(' --rotate-on-expiration');
+  });
+
+  test('appends --rotate-on-expiration for folder (sharedFolder) when strictly true', () => {
+    const args = buildNsfShareRecordArgs({
+      sharedFolder: 'FOLDER_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      expiration_type: 'expire-in',
+      expire_in: '7d',
+      rotate_on_expiration: true
+    });
+    expect(args).toContain(' --rotate-on-expiration');
+  });
+
+  test('rotate flag appears after expiration flags', () => {
+    const args = buildNsfShareRecordArgs({
+      record: 'REC_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      expiration_type: 'expire-in',
+      expire_in: '30d',
+      rotate_on_expiration: true
+    });
+    const expireIdx = args.indexOf('--expire-in');
+    const rotateIdx = args.indexOf('--rotate-on-expiration');
+    expect(expireIdx).toBeGreaterThan(-1);
+    expect(rotateIdx).toBeGreaterThan(expireIdx);
+  });
+
+  test('does NOT append --rotate-on-expiration when rotate_on_expiration is false', () => {
+    const args = buildNsfShareRecordArgs({
+      record: 'REC_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      rotate_on_expiration: false
+    });
+    expect(args).not.toContain('--rotate-on-expiration');
+  });
+
+  test('does NOT append --rotate-on-expiration when rotate_on_expiration is absent', () => {
+    const args = buildNsfShareRecordArgs({
+      record: 'REC_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer'
+    });
+    expect(args).not.toContain('--rotate-on-expiration');
+  });
+
+  test('does NOT append --rotate-on-expiration when rotate_on_expiration is the string "true" (strict === true required)', () => {
+    const args = buildNsfShareRecordArgs({
+      record: 'REC_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      rotate_on_expiration: 'true'
+    });
+    expect(args).not.toContain('--rotate-on-expiration');
   });
 });
