@@ -9,6 +9,14 @@
  * Classic command-string regressions are guarded indirectly: this module is
  * additive (only invoked when `mode === 'nsf'`), so Classic emitted strings
  * are unaffected by anything tested here.
+ *
+ * TODO (integration gap): The production Forge resolver uses buildKeeperCommand
+ * in src/index.js (NSF-aware, { mode } option), which is not exported and therefore
+ * not directly testable here. Until that builder is extracted into a shared module,
+ * the following scenarios are covered only by manual / end-to-end testing:
+ *   - buildKeeperCommand('record-add', params, key, { mode: 'nsf' }) mode routing
+ *   - nsf-record-add with an optional --folder (root creation when folder omitted)
+ *   - nsf-share-folder / nsf-record-permission grant requires -r <role>
  */
 
 const {
