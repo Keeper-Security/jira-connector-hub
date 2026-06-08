@@ -269,11 +269,11 @@ describe('validateCommandParameters', () => {
     expect(result.errors.length).toBeGreaterThanOrEqual(2);
   });
 
-  test('passes cliCommand without validation', () => {
-    const result = validateCommandParameters('any-action', {
-      cliCommand: 'some pre-built command'
+  test('cliCommand field does not bypass validation', () => {
+    const result = validateCommandParameters('share-record', {
+      cliCommand: 'get someRecordUid --format=json'
     });
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
   });
 
   // KJ-26-06: Record type immutability on record-update.
@@ -488,16 +488,53 @@ describe('buildKeeperCommand', () => {
       );
       expect(command).toBe('device-approve "user\\!name@example.com" --approve');
     });
+
+    test('accepts a device ID (non-email token) as target', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: 'ABC123_device-id', action: 'approve' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve ABC123_device-id --approve');
+    });
+
+    test('throws with correct message when target is missing', () => {
+      expect(() => {
+        buildKeeperCommand('device-approve', { action: 'approve' }, 'TEST-1');
+      }).toThrow('Email or device ID is required');
+    });
   });
 
-  describe('pre-formatted commands', () => {
-    test('returns cliCommand as-is', () => {
-      const prebuilt = 'epm approval action --approve abc123';
+  describe('EPM approval action', () => {
+    test('builds approve command from structured params', () => {
       const command = buildKeeperCommand('epm approval action', {
-        cliCommand: prebuilt
+        epmDecision: 'approve',
+        approvalUid: 'abc123'
       }, 'TEST-1');
-      
-      expect(command).toBe(prebuilt);
+      expect(command).toBe('epm approval action --approve abc123');
+    });
+
+    test('builds deny command from structured params', () => {
+      const command = buildKeeperCommand('epm approval action', {
+        epmDecision: 'deny',
+        approvalUid: 'xyz789'
+      }, 'TEST-1');
+      expect(command).toBe('epm approval action --deny xyz789');
+    });
+
+    test('rejects missing decision', () => {
+      expect(() => {
+        buildKeeperCommand('epm approval action', { approvalUid: 'abc123' }, 'TEST-1');
+      }).toThrow('Input validation failed');
+    });
+
+    test('rejects invalid UID characters', () => {
+      expect(() => {
+        buildKeeperCommand('epm approval action', {
+          epmDecision: 'approve',
+          approvalUid: 'abc; enterprise-info'
+        }, 'TEST-1');
+      }).toThrow('invalid characters');
     });
   });
 });

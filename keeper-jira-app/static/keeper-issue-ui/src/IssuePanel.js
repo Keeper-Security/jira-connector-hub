@@ -111,8 +111,13 @@ const IssuePanel = () => {
   const [storedRequestData, setStoredRequestData] = useState(null); // Store user's saved request
   const [hasStoredData, setHasStoredData] = useState(false); // Track if data has been stored
   const [isUpdating, setIsUpdating] = useState(false); // Track update operation
-  const [isItsmApprovalTicket, setIsItsmApprovalTicket] = useState(false); // Ticket created by JIRA ITSM Forge app for an EPM approval request (label: ITSM_approval_request_created)
-  const [isItsmDeviceApprovalTicket, setIsItsmDeviceApprovalTicket] = useState(false); // Ticket for a device admin approval request (label: ITSM_device_admin_approval_requested)
+  // ITSM-driven approval ticket type: 'epm' | 'device' | null.
+  // Adding a new ITSM workflow requires only a new entry in this map.
+  const ITSM_LABEL_HANDLERS = {
+    'ITSM_approval_request_created': 'epm',
+    'ITSM_device_admin_approval_requested': 'device',
+  };
+  const [itsmKind, setItsmKind] = useState(null);
 
 
   // Expiration warning modal for share-record action
@@ -992,6 +997,7 @@ const IssuePanel = () => {
     setFormData(data.formData || {});
     setRotateOnExpiration(data.rotateOnExpiration === true);
     setIsRotationEligible(data.isRotationEligible === true);
+    lastCheckedRoeRef.current = { type: '', uid: '' };
 
     const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : true;
     setIsNsfMode(nsfEnabled);
@@ -2548,6 +2554,10 @@ const IssuePanel = () => {
     } else if (action === 'share-folder' && selectedFolder) {
       type = 'folder';
       uid = selectedFolder.folder_uid || selectedFolder.uid;
+    } else if (action === 'share-record' && !selectedRecord && selectedFolder) {
+      // NSF folder-level share-record: entire folder shared via sharedFolder param
+      type = 'folder';
+      uid = selectedFolder.folder_uid || selectedFolder.uid;
     }
 
     if (!type || !uid) {
@@ -4025,10 +4035,8 @@ const IssuePanel = () => {
         // when adding it as a Jira label. Detect each ITSM-driven workflow we
         // know how to render so we can route to the right admin panel below.
         const labels = context.labels || [];
-        const isItsmApproval = labels.includes('ITSM_approval_request_created');
-        const isItsmDeviceApproval = labels.includes('ITSM_device_admin_approval_requested');
-        setIsItsmApprovalTicket(isItsmApproval);
-        setIsItsmDeviceApprovalTicket(isItsmDeviceApproval);
+        const matchedLabel = labels.find(l => ITSM_LABEL_HANDLERS[l]);
+        setItsmKind(matchedLabel ? ITSM_LABEL_HANDLERS[matchedLabel] : null);
         
         // Clear any previous stored data to ensure fresh start for new ticket
         setStoredRequestData(null);
@@ -4308,21 +4316,10 @@ const IssuePanel = () => {
             folder: folderUid
           };
         } else {
-          // Classic record-permission: build cliCommand with -d/-s/-R/--force flags.
-          let commandParts = ['record-permission', folderUid];
-
-          if (finalParameters.action) {
-            commandParts.push('-a', finalParameters.action);
-          }
-          if (finalParameters.can_edit) commandParts.push('-d');
-          if (finalParameters.can_share) commandParts.push('-s');
-          if (finalParameters.recursive) commandParts.push('-R');
-          if (finalParameters.action === 'grant' || finalParameters.action === 'revoke') {
-            commandParts.push('--force');
-          }
-
+          // Classic: pass structured params; server builds the CLI command with validation.
           finalParameters = {
-            cliCommand: commandParts.join(' ')
+            ...finalParameters,
+            folder: folderUid
           };
         }
       }
@@ -4587,9 +4584,8 @@ const IssuePanel = () => {
  // Restrict access for ITSM-driven approval tickets (EPM + device admin).
   // Only admins can act on these; everyone else gets the same locked-out
   // message regardless of which specific ITSM workflow created the ticket.
-  const isItsmRestrictedTicket = isItsmApprovalTicket || isItsmDeviceApprovalTicket;
-  if (isItsmRestrictedTicket && !isAdmin) {
-    const restrictedSubject = isItsmDeviceApprovalTicket
+  if (itsmKind && !isAdmin) {
+    const restrictedSubject = itsmKind === 'device'
       ? 'a device admin approval request'
       : 'an Endpoint Privilege Manager approval request';
     return (
@@ -4621,10 +4617,10 @@ const IssuePanel = () => {
 
   // Admin-facing routing: dispatch to the dedicated panel for each ITSM
   // workflow we recognise via labels.
-  if (isItsmApprovalTicket && isAdmin) {
+  if (itsmKind === 'epm' && isAdmin) {
     return <EpmApprovalPanel issueContext={issueContext} />;
   }
-  if (isItsmDeviceApprovalTicket && isAdmin) {
+  if (itsmKind === 'device' && isAdmin) {
     return <DeviceApprovalPanel issueContext={issueContext} />;
   }
 

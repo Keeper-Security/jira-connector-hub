@@ -1,10 +1,13 @@
 /**
  * Command Builder Utility
- * 
+ *
  * Builds Keeper Commander CLI commands from structured parameters.
  * Includes input validation and shell escaping to prevent command injection.
- * 
- * Extracted for testability - these functions are used by the main index.js resolvers.
+ *
+ * Extracted for testability. This module is the testable reference implementation
+ * for Classic command building. The production Forge resolver (src/index.js) extends
+ * this with NSF routing via { mode: 'nsf' } — keep the two in sync when adding new
+ * actions or changing command shapes.
  */
 
 // ============================================================================
@@ -203,11 +206,6 @@ function validatePhoneEntry(entry) {
 function validateCommandParameters(action, parameters) {
   const errors = [];
   
-  // Skip validation for pre-formatted CLI commands
-  if (parameters.cliCommand) {
-    return { valid: true };
-  }
-  
   // Common validations based on action type
   switch (action) {
     case 'record-add':
@@ -303,7 +301,12 @@ function validateCommandParameters(action, parameters) {
     }
     
     case 'epm approval action': {
-      // Approval UID required (handled by cliCommand path)
+      if (!parameters.epmDecision || !['approve', 'deny'].includes(parameters.epmDecision)) {
+        errors.push('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!parameters.approvalUid || !String(parameters.approvalUid).trim()) {
+        errors.push('EPM approval UID is required');
+      }
       break;
     }
 
@@ -311,16 +314,10 @@ function validateCommandParameters(action, parameters) {
       if (!parameters.action || (parameters.action !== 'approve' && parameters.action !== 'deny')) {
         errors.push('Action must be "approve" or "deny" for device-approve');
       }
-      const emailTrim = parameters.email ? String(parameters.email).trim() : '';
-      if (!emailTrim) {
-        errors.push('Email is required for device-approve');
-      } else {
-        const emailValidation = validateField('email', emailTrim, {
-          limitKey: 'email',
-          pattern: 'email',
-          required: true
-        });
-        if (!emailValidation.valid) errors.push(emailValidation.error);
+      // Target may be a user email or a Keeper device ID (matches index.js behaviour).
+      const targetTrim = parameters.email ? String(parameters.email).trim() : '';
+      if (!targetTrim) {
+        errors.push('Email or device ID is required for device-approve');
       }
       break;
     }
@@ -415,11 +412,6 @@ function capitalizeFieldName(fieldName) {
  * @throws {Error} - If validation fails
  */
 function buildKeeperCommand(action, parameters, issueKey) {
-  // Check if we have a pre-formatted CLI command (used for record-permission)
-  if (parameters.cliCommand) {
-    return parameters.cliCommand;
-  }
-  
   // Input Validation
   const validation = validateCommandParameters(action, parameters);
   if (!validation.valid) {
@@ -531,20 +523,38 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
     }
 
+    case 'epm approval action': {
+      const decision = parameters.epmDecision;
+      const uid = String(parameters.approvalUid || '').trim();
+      if (!decision || !['approve', 'deny'].includes(decision)) {
+        throw new Error('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!uid) {
+        throw new Error('EPM approval UID is required');
+      }
+      // Strict charset — prevent shell injection via the UID.
+      if (!/^[A-Za-z0-9_-]+$/.test(uid)) {
+        throw new Error('EPM approval UID contains invalid characters');
+      }
+      command += ` --${decision} ${uid}`;
+      break;
+    }
+
     case 'device-approve': {
-      const rawEmail = parameters.email ? String(parameters.email).trim() : '';
-      if (!rawEmail) {
-        throw new Error('Email is required for device-approve command');
+      // Target may be a user email or a Keeper device ID.
+      const rawTarget = parameters.email ? String(parameters.email).trim() : '';
+      if (!rawTarget) {
+        throw new Error('Email or device ID is required for device-approve command');
       }
       if (!parameters.action || (parameters.action !== 'approve' && parameters.action !== 'deny')) {
-        throw new Error('Action must be approve or deny for device-approve command');
+        throw new Error('Action must be "approve" or "deny" for device-approve command');
       }
-      const approveOrDeny = parameters.action === 'approve' ? '--approve' : '--deny';
-      const safeEmailToken = /^[a-zA-Z0-9._+\-@]+$/;
-      if (safeEmailToken.test(rawEmail)) {
-        command += ` ${rawEmail} ${approveOrDeny}`;
+      const flag = parameters.action === 'approve' ? '--approve' : '--deny';
+      const safeToken = /^[a-zA-Z0-9._+\-@]+$/;
+      if (safeToken.test(rawTarget)) {
+        command += ` ${rawTarget} ${flag}`;
       } else {
-        command += ` "${escapeForDoubleQuotes(rawEmail)}" ${approveOrDeny}`;
+        command += ` "${escapeForDoubleQuotes(rawTarget)}" ${flag}`;
       }
       break;
     }

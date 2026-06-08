@@ -1,5 +1,5 @@
 import Resolver from '@forge/resolver';
-import { storage, webTrigger } from '@forge/api';
+import { storage } from '@forge/api';
 import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus, fetchEpmApprovalDetails } from './modules/keeperApi.js';
 import { requestJiraAsAppWithRetry, requestJiraAsUserWithRetry, route } from './modules/utils/jiraApiRetry.js';
 import { logger } from './modules/utils/logger.js';
@@ -298,6 +298,17 @@ async function getCurrentUser() {
  * real secret remains server-side in Forge storage.
  */
 resolver.define('getConfig', async () => {
+  // One-shot cleanup of webhook storage left by pre-ITSM versions.
+  const migrated = await storage.get('postWebhookMigrationDone');
+  if (!migrated) {
+    await Promise.all([
+      storage.delete('webhookConfig'),
+      storage.delete('webhookToken'),
+      storage.delete('webhookAuditLog'),
+    ]);
+    await storage.set('postWebhookMigrationDone', true);
+  }
+
   const config = await storage.get('keeperConfig');
   if (!config) return {};
   const masked = maskApiKey(config.apiKey);
@@ -784,7 +795,11 @@ function validateCommandParameters(action, parameters, options = {}) {
     case 'record-update': {
       // Title validation
       if (action === 'record-add' && !parameters.title) {
-        errors.push('Title is required for Nested Share Subfolders (NSF) record-add');
+        errors.push(
+          isNsfMode
+            ? 'Title is required for Nested Share Subfolders (NSF) record-add'
+            : 'Title is required for record-add'
+        );
       } else if (parameters.title) {
         const titleValidation = validateField('title', parameters.title, { 
           limitKey: 'title',
@@ -915,7 +930,7 @@ function validateCommandParameters(action, parameters, options = {}) {
       
       // Validate all remaining string parameters against default limits
       for (const [key, value] of Object.entries(parameters)) {
-        if (typeof value === 'string' && !['cliCommand'].includes(key)) {
+        if (typeof value === 'string') {
           // Skip already validated fields
           if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email',
                'keyPair_privateKey', 'keyPair_publicKey', 'passphrase'].includes(key)) {
@@ -1055,14 +1070,9 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
       const recordType = parameters.recordType || 'login';
       command += ` --record-type='${escapeForSingleQuotes(recordType)}'`;
 
-      // NSF records must live inside an NSF folder; fail if folder UID is missing.
-      if (isNsf) {
-        const nsfFolder = parameters.folder;
-        if (!nsfFolder || !String(nsfFolder).trim()) {
-          throw new Error('Folder is required for nsf-record-add. Pick a folder in the issue panel.');
-        }
-        command += ` --folder='${escapeForSingleQuotes(String(nsfFolder).trim())}'`;
-      } else if (parameters.folder && String(parameters.folder).trim()) {
+      // Folder is optional for both Classic and NSF record-add; if provided, emit --folder,
+      // otherwise Commander creates the record at vault root.
+      if (parameters.folder && String(parameters.folder).trim()) {
         command += ` --folder='${escapeForSingleQuotes(String(parameters.folder).trim())}'`;
       }
 
@@ -1673,13 +1683,42 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
       command += ` --force`;
       break;
 
+    case 'epm approval action': {
+      const decision = parameters.epmDecision;
+      const uid = String(parameters.approvalUid || '').trim();
+      if (!decision || !['approve', 'deny'].includes(decision)) {
+        throw new Error('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!uid) {
+        throw new Error('EPM approval UID is required');
+      }
+      if (!/^[A-Za-z0-9_-]+$/.test(uid)) {
+        throw new Error('EPM approval UID contains invalid characters');
+      }
+      command += ` --${decision} ${uid}`;
+      break;
+    }
+
+    case 'device-approve': {
+      const rawTarget = (parameters.email || '').trim();
+      if (!rawTarget) {
+        throw new Error('Email or device ID is required for device-approve command');
+      }
+      if (!parameters.action || !['approve', 'deny'].includes(parameters.action)) {
+        throw new Error('Action must be "approve" or "deny" for device-approve command');
+      }
+      const flag = parameters.action === 'approve' ? '--approve' : '--deny';
+      const safeToken = /^[a-zA-Z0-9._+\-@]+$/;
+      if (safeToken.test(rawTarget)) {
+        command += ` ${rawTarget} ${flag}`;
+      } else {
+        command += ` "${escapeForDoubleQuotes(rawTarget)}" ${flag}`;
+      }
+      break;
+    }
+
     default:
-      // For any other commands, add parameters as key=value pairs with proper escaping
-      Object.keys(parameters).forEach(key => {
-        if (parameters[key]) {
-            command += ` ${key}='${escapeForSingleQuotes(String(parameters[key]))}'`;
-        }
-      });
+      break;
   }
   
   return command;
@@ -2039,6 +2078,40 @@ resolver.define('getKeeperRecordDetails', async (req) => {
   }
 });
 
+/**
+ * Core ROE eligibility check shared by the checkRotationEligibility resolver
+ * and the server-side guard inside executeKeeperAction.
+ *
+ * Returns { eligible: boolean, recordType?: string, roeResponse?: array }.
+ * Propagates rate-limit errors as-thrown so callers can handle them.
+ */
+async function checkRoeEligibility(userId, type, uid) {
+  if (type === 'record') {
+    const result = await executeKeeperApiCommand(
+      `get "${uid}" --format=json`,
+      { userId, skipRateLimit: true, forgeSafe: true }
+    );
+    let details = {};
+    if (result.data?.data) {
+      details = typeof result.data.data === 'string'
+        ? JSON.parse(result.data.data)
+        : result.data.data;
+    }
+    const recordType = details.record_type || details.type || '';
+    return { eligible: recordType.toLowerCase() === 'pamuser', recordType };
+  }
+
+  // Folder: list-sf <uid> --roe-eligible --format=json
+  const result = await executeKeeperApiCommand(
+    `list-sf "${uid}" --roe-eligible --format=json`,
+    { userId, skipRateLimit: true, forgeSafe: true }
+  );
+  let rows = result.data?.data ?? [];
+  if (typeof rows === 'string') rows = JSON.parse(rows);
+  if (!Array.isArray(rows)) rows = [];
+  return { eligible: rows.some(r => r.shared_folder_uid === uid), roeResponse: rows };
+}
+
 // Check if a record is pamUser or a folder is rotation-on-expiration eligible.
 // Used by the issue panel to decide whether to show the "Rotate password upon
 // expiration" checkbox on share-record / share-folder.
@@ -2052,38 +2125,8 @@ resolver.define('checkRotationEligibility', async (req) => {
   }
 
   try {
-    if (type === 'record') {
-      const result = await executeKeeperApiCommand(
-        `get "${uid}" --format=json`,
-        { userId, skipRateLimit: true, forgeSafe: true }
-      );
-      let details = {};
-      if (result.data?.data) {
-        details = typeof result.data.data === 'string'
-          ? JSON.parse(result.data.data)
-          : result.data.data;
-      }
-      const recordType = details.record_type || details.type || '';
-      return successResponse({
-        eligible: recordType.toLowerCase() === 'pamuser',
-        recordType
-      });
-    }
-
-    // Folder: list-sf <uid> --roe-eligible --format=json
-    const result = await executeKeeperApiCommand(
-      `list-sf "${uid}" --roe-eligible --format=json`,
-      { userId, skipRateLimit: true, forgeSafe: true }
-    );
-    let rows = [];
-    if (result.data?.data) {
-      rows = typeof result.data.data === 'string'
-        ? JSON.parse(result.data.data)
-        : result.data.data;
-    }
-    if (!Array.isArray(rows)) rows = [];
-    const match = rows.some(r => r.shared_folder_uid === uid);
-    return successResponse({ eligible: match, roeResponse: rows });
+    const eligibility = await checkRoeEligibility(userId, type, uid);
+    return successResponse(eligibility);
   } catch (err) {
     if (err.rateLimited) {
       return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
@@ -2238,15 +2281,25 @@ function isTargetPending(pendingList, target) {
   if (!Array.isArray(pendingList) || pendingList.length === 0 || !target) {
     return false;
   }
-  const lowered = String(target).toLowerCase();
+  // Reject very short non-email targets to prevent a malformed payload like
+  // target = "a" from sweeping up multiple unrelated devices.
+  const targetStr = String(target);
+  if (targetStr.length < 6 && !targetStr.includes('@')) {
+    return false;
+  }
+  const lowered = targetStr.toLowerCase();
   const looksLikeEmail = lowered.includes('@');
   return pendingList.some((entry) => {
     if (!entry) return false;
     if (looksLikeEmail) {
       return String(entry.email || '').toLowerCase() === lowered;
     }
+    // Only allow the user-supplied target as a prefix of the canonical device
+    // ID (CLI convention: user can type a shortened ID that expands to the
+    // full one). The reverse direction (short pending ID matches a longer
+    // target) is intentionally excluded to prevent false positives.
     const id = String(entry.device_id || '');
-    return id === target || id.startsWith(target) || target.startsWith(id);
+    return id === target || id.startsWith(target);
   });
 }
 
@@ -2268,30 +2321,21 @@ async function markAlreadyProcessedOutsideJira(
   formattedTimestamp,
   kind = 'device'
 ) {
-  // Add the label (idempotent — fetch current labels first).
+  // Atomically add the label via Jira's `update` payload — no GET required,
+  // no race with concurrent label writes, and idempotent (Jira ignores
+  // duplicate adds).
   try {
-    const labelsResp = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue/${issueKey}?fields=labels`,
-      { method: 'GET', headers: { Accept: 'application/json' } },
-      'Fetch labels before processed-outside marker'
+    await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          update: { labels: [{ add: PROCESSED_OUTSIDE_JIRA_LABEL }] }
+        })
+      },
+      'Add processed-outside-jira label'
     );
-    if (labelsResp.ok) {
-      const data = await labelsResp.json();
-      const current = data.fields?.labels || [];
-      if (!current.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
-        await requestJiraAsAppWithRetry(
-          route`/rest/api/3/issue/${issueKey}`,
-          {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              fields: { labels: [...current, PROCESSED_OUTSIDE_JIRA_LABEL] }
-            })
-          },
-          'Add processed-outside-jira label'
-        );
-      }
-    }
   } catch (labelErr) {
     logger.warn('Failed to add processed-outside-jira label', {
       issueKey,
@@ -2378,13 +2422,17 @@ resolver.define('executeKeeperAction', async (req) => {
     return validationError('command', 'Command is required');
   }
 
-  // KJ-26-03: Enforce server-side admin gate for mutating actions. The
-  // frontend hides record-add / record-update from non-admins, but those
-  // restrictions are bypassable via direct invoke calls. `requireProjectAdmin`
-  // centralises the (group-membership OR ADMINISTER_PROJECTS) check and
-  // fails closed when both lookups fail.
+  // KJ-26-03: Enforce server-side admin gate for privileged actions.
+  // The frontend hides admin controls for non-admins, but those restrictions
+  // are bypassable via direct invoke calls. `requireProjectAdmin` centralises
+  // the (group-membership OR ADMINISTER_PROJECTS) check and fails closed.
   const ADMIN_GATED_COMMANDS = new Set(['record-add', 'record-update']);
-  if (ADMIN_GATED_COMMANDS.has(command)) {
+  const isAdminGated =
+    ADMIN_GATED_COMMANDS.has(command) ||
+    command.startsWith('device-approve') ||
+    command.startsWith('epm approval action');
+
+  if (isAdminGated) {
     const adminErr = await requireProjectAdmin(issueKey);
     if (adminErr) return adminErr;
   }
@@ -2478,7 +2526,7 @@ resolver.define('executeKeeperAction', async (req) => {
     // cleanly or fail with the canonical "Approval request does not exist"
     // error (which the catch-block handler below converts into a structured
     // "already processed outside Jira" response + label).
-    if (command.includes('--approve') || command.includes('--deny')) {
+    if (parameters?.epmDecision === 'approve' || parameters?.epmDecision === 'deny') {
       await runEpmSyncDown(userId);
     }
   }
@@ -2525,9 +2573,9 @@ resolver.define('executeKeeperAction', async (req) => {
     // ticket being created and now, mark the ticket and refuse the action so
     // we never call approve/deny on a stale request.
     const isApproveOrDeny =
-      command.includes('--approve') || command.includes('--deny');
+      parameters?.action === 'approve' || parameters?.action === 'deny';
     if (isApproveOrDeny) {
-      const target = extractDeviceTarget(parameters?.cliCommand || command);
+      const target = parameters?.email || parameters?.deviceTarget || extractDeviceTarget(command);
       if (target) {
         try {
           const pending = await fetchPendingDeviceApprovals(userId);
@@ -2608,6 +2656,42 @@ resolver.define('executeKeeperAction', async (req) => {
     }
   }
 
+  // Re-check rotation eligibility server-side before building the command.
+  // Any invoke() caller can pass rotate_on_expiration; we verify it here
+  // using the same checkRoeEligibility helper as the UI-facing resolver.
+  if (parameters?.rotate_on_expiration === true &&
+      (command === 'share-record' || command === 'share-folder')) {
+    const roeType = (command === 'share-record' && parameters.record) ? 'record' : 'folder';
+    const roeUid = roeType === 'record'
+      ? parameters.record
+      : (parameters.folder || parameters.sharedFolder);
+
+    if (roeUid) {
+      try {
+        const { eligible } = await checkRoeEligibility(userId, roeType, roeUid);
+        if (!eligible) {
+          return errorResponse(
+            ERROR_CODES.VALIDATION_INVALID_FORMAT,
+            'rotate-on-expiration is not supported for this record or folder',
+            { uid: roeUid, type: roeType, reason: 'not_roe_eligible' }
+          );
+        }
+      } catch (roeCheckErr) {
+        if (roeCheckErr.rateLimited) {
+          return rateLimitError(roeCheckErr.limitType || 'minute', roeCheckErr.retryAfter || 60);
+        }
+        logger.warn('executeKeeperAction: ROE eligibility re-check failed, rejecting to be safe', {
+          roeType, roeUid, error: roeCheckErr.message
+        });
+        return errorResponse(
+          ERROR_CODES.VALIDATION_INVALID_FORMAT,
+          'Could not verify rotation eligibility. Please try again.',
+          { uid: roeUid, type: roeType, reason: 'eligibility_check_failed' }
+        );
+      }
+    }
+  }
+
   try {
     // Build dynamic command based on action and parameters
     // This is inside try block so validation errors are properly caught
@@ -2646,6 +2730,13 @@ resolver.define('executeKeeperAction', async (req) => {
     // by the `--approve` / `--deny` flag.
     const isDeviceCommand = command.startsWith('device-approve');
 
+    // After the structured-params refactoring `command` is just the action
+    // name (e.g. 'device-approve'), not the full CLI string. Derive the
+    // approve/deny decision from the structured parameters so every
+    // downstream label, comment, and pre-check works correctly.
+    const epmDecision = isEpmCommand ? parameters?.epmDecision : null;
+    const deviceDecision = isDeviceCommand ? parameters?.action : null;
+
     // Only add comment for main record creation, not for records created as references
     // Check if this is a main record creation (not just a reference record)
     // Records created as references will have skipComment: true parameter
@@ -2674,23 +2765,19 @@ resolver.define('executeKeeperAction', async (req) => {
       // Set command-specific messages
       // Handle EPM commands first
       if (isEpmCommand) {
-        if (command.includes('--approve')) {
+        if (epmDecision === 'approve') {
           actionMessage = `Endpoint privilege approval request has been approved`;
-          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
-        } else if (command.includes('--deny')) {
+          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters?.approvalUid || ''}`;
+        } else if (epmDecision === 'deny') {
           actionMessage = `Endpoint privilege approval request has been denied`;
-          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
+          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters?.approvalUid || ''}`;
         }
       } else if (isDeviceCommand) {
-        // Canonical CLI form is `device-approve <user_email_or_device_id> --approve|--deny`,
-        // but flag/positional order is interchangeable in argparse. Pick the
-        // first non-flag token that isn't `device-approve` itself.
-        const tokens = parameters.cliCommand ? parameters.cliCommand.split(/\s+/) : [];
-        const target = tokens.find((t, i) => i > 0 && t && !t.startsWith('-')) || '';
-        if (command.includes('--approve')) {
+        const target = parameters?.email || parameters?.deviceTarget || '';
+        if (deviceDecision === 'approve') {
           actionMessage = 'Device admin approval request has been approved';
           actionDescription = `Device Admin Approval: Approved ${target}`;
-        } else if (command.includes('--deny')) {
+        } else if (deviceDecision === 'deny') {
           actionMessage = 'Device admin approval request has been denied';
           actionDescription = `Device Admin Approval: Denied ${target}`;
         }
@@ -2808,15 +2895,15 @@ resolver.define('executeKeeperAction', async (req) => {
       // Build ADF content with panel (matching save/reject request format)
       let panelTitle = 'Keeper Request Approved and Executed';
       if (isEpmCommand) {
-        if (command.includes('--approve')) {
+        if (epmDecision === 'approve') {
           panelTitle = 'Endpoint Privilege Approval Request - Approved';
-        } else if (command.includes('--deny')) {
+        } else if (epmDecision === 'deny') {
           panelTitle = 'Endpoint Privilege Approval Request - Denied';
         }
       } else if (isDeviceCommand) {
-        if (command.includes('--approve')) {
+        if (deviceDecision === 'approve') {
           panelTitle = 'Device Admin Approval Request - Approved';
-        } else if (command.includes('--deny')) {
+        } else if (deviceDecision === 'deny') {
           panelTitle = 'Device Admin Approval Request - Denied';
         }
       } else if (isShareInvitationPending) {
@@ -2867,9 +2954,9 @@ resolver.define('executeKeeperAction', async (req) => {
       
       // Use different panel types for different scenarios
       let panelType = 'success';
-      if (isEpmCommand && command.includes('--deny')) {
+      if (isEpmCommand && epmDecision === 'deny') {
         panelType = 'warning';
-      } else if (isDeviceCommand && command.includes('--deny')) {
+      } else if (isDeviceCommand && deviceDecision === 'deny') {
         panelType = 'warning';
       } else if (isShareInvitationPending) {
         panelType = 'info';
@@ -2899,14 +2986,14 @@ resolver.define('executeKeeperAction', async (req) => {
       // fan-out for environments that tagged tickets with the Keeper request UID).
       if (isEpmCommand) {
         try {
-          const newLabel = command.includes('--approve')
+          const newLabel = epmDecision === 'approve'
             ? 'epm-approved'
-            : command.includes('--deny')
+            : epmDecision === 'deny'
               ? 'epm-denied'
               : '';
           if (newLabel) {
-            const requestUid = command.split(/\s+/).pop();
-            const sanitizedUid = (requestUid || '').replace(/[^a-zA-Z0-9_-]/g, '-');
+            const requestUid = parameters?.approvalUid || '';
+            const sanitizedUid = (requestUid).replace(/[^a-zA-Z0-9_-]/g, '-');
             const uidLabel = sanitizedUid ? `request-${sanitizedUid}` : '';
 
             const updatedKeys = new Set();
@@ -2928,13 +3015,14 @@ resolver.define('executeKeeperAction', async (req) => {
                   currentLabels.includes('epm-denied') ||
                   currentLabels.includes('epm-expired');
                 if (!alreadyActioned && !currentLabels.includes(newLabel)) {
-                  const updatedLabels = [...currentLabels, newLabel];
                   await requestJiraAsAppWithRetry(
                     route`/rest/api/3/issue/${issueKey}`,
                     {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ fields: { labels: updatedLabels } })
+                      body: JSON.stringify({
+                        update: { labels: [{ add: newLabel }] }
+                      })
                     },
                     'Update EPM label on current ticket'
                   );
@@ -2971,14 +3059,14 @@ resolver.define('executeKeeperAction', async (req) => {
                   );
                 });
                 for (const issue of issuesToUpdate) {
-                  const currentLabels = issue.fields?.labels || [];
-                  const updatedLabels = [...currentLabels, newLabel];
                   await requestJiraAsAppWithRetry(
                     route`/rest/api/3/issue/${issue.key}`,
                     {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ fields: { labels: updatedLabels } })
+                      body: JSON.stringify({
+                        update: { labels: [{ add: newLabel }] }
+                      })
                     },
                     'Update EPM label on sibling ticket'
                   );
@@ -2997,33 +3085,23 @@ resolver.define('executeKeeperAction', async (req) => {
       // can show the correct state on reload.
       if (isDeviceCommand) {
         try {
-          const newLabel = command.includes('--approve')
+          const newLabel = deviceDecision === 'approve'
             ? 'device-approved'
-            : command.includes('--deny')
+            : deviceDecision === 'deny'
               ? 'device-denied'
               : '';
           if (newLabel) {
-            const issueLabelsResponse = await requestJiraAsAppWithRetry(
-              route`/rest/api/3/issue/${issueKey}?fields=labels`,
-              { method: 'GET', headers: { 'Accept': 'application/json' } },
-              'Fetch labels before device label update'
+            await requestJiraAsAppWithRetry(
+              route`/rest/api/3/issue/${issueKey}`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  update: { labels: [{ add: newLabel }] }
+                })
+              },
+              'Update device approval label'
             );
-            if (issueLabelsResponse.ok) {
-              const issueLabelsData = await issueLabelsResponse.json();
-              const currentLabels = issueLabelsData.fields?.labels || [];
-              if (!currentLabels.includes(newLabel)) {
-                const updatedLabels = [...currentLabels, newLabel];
-                await requestJiraAsAppWithRetry(
-                  route`/rest/api/3/issue/${issueKey}`,
-                  {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fields: { labels: updatedLabels } })
-                  },
-                  'Update device approval label'
-                );
-              }
-            }
           }
         } catch (labelErr) {
           logger.error('Failed to add device approval label', labelErr);
@@ -3139,10 +3217,9 @@ resolver.define('executeKeeperAction', async (req) => {
       isEpmRequestNotFoundError(errorMessage)
     ) {
       const requestUid =
-        (parameters && (parameters.request_uid || parameters.approval_uid)) ||
-        (parameters && parameters.cliCommand
-          ? parameters.cliCommand.split(/\s+/).pop()
-          : '') ||
+        parameters?.approvalUid ||
+        parameters?.request_uid ||
+        parameters?.approval_uid ||
         command.split(/\s+/).pop();
       try {
         await markAlreadyProcessedOutsideJira(
