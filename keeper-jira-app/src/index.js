@@ -1,7 +1,6 @@
 import Resolver from '@forge/resolver';
-import { storage, webTrigger } from '@forge/api';
-import { webTriggerHandler, generateWebhookToken } from './modules/webhookHandler.js';
-import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus } from './modules/keeperApi.js';
+import { storage } from '@forge/api';
+import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus, fetchEpmApprovalDetails } from './modules/keeperApi.js';
 import { requestJiraAsAppWithRetry, requestJiraAsUserWithRetry, route } from './modules/utils/jiraApiRetry.js';
 import { logger } from './modules/utils/logger.js';
 import { 
@@ -12,7 +11,8 @@ import {
   rateLimitError, 
   connectionError, 
   keeperError, 
-  epmError 
+  epmError,
+  deviceError
 } from './modules/utils/errorResponse.js';
 
 const resolver = new Resolver();
@@ -267,6 +267,17 @@ async function getCurrentUser() {
  * Get Keeper config (called from frontend)
  */
 resolver.define('getConfig', async () => {
+  // One-shot cleanup of webhook storage left by pre-ITSM versions.
+  const migrated = await storage.get('postWebhookMigrationDone');
+  if (!migrated) {
+    await Promise.all([
+      storage.delete('webhookConfig'),
+      storage.delete('webhookToken'),
+      storage.delete('webhookAuditLog'),
+    ]);
+    await storage.set('postWebhookMigrationDone', true);
+  }
+
   const config = await storage.get('keeperConfig');
   return config || {};
 });
@@ -696,11 +707,6 @@ function validatePhoneEntry(phoneEntry) {
 function validateCommandParameters(action, parameters) {
   const errors = [];
   
-  // Skip validation for pre-formatted CLI commands
-  if (parameters.cliCommand) {
-    return { valid: true };
-  }
-  
   // Common validations based on action type
   switch (action) {
     case 'record-add':
@@ -828,7 +834,7 @@ function validateCommandParameters(action, parameters) {
       
       // Validate all remaining string parameters against default limits
       for (const [key, value] of Object.entries(parameters)) {
-        if (typeof value === 'string' && !['cliCommand'].includes(key)) {
+        if (typeof value === 'string') {
           // Skip already validated fields
           if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email'].includes(key)) {
             continue;
@@ -900,7 +906,7 @@ function validateCommandParameters(action, parameters) {
       }
       break;
     }
-    
+
     default: {
       // For unknown actions, validate all string parameters against default limits
       for (const [key, value] of Object.entries(parameters)) {
@@ -991,11 +997,6 @@ function sanitizeJsonObject(obj) {
 }
 
 function buildKeeperCommand(action, parameters, issueKey) {
-  // Check if we have a pre-formatted CLI command (used for record-permission)
-  if (parameters.cliCommand) {
-    return parameters.cliCommand;
-  }
-  
   // ========================================================================
   // Input Validation - validate all parameters before building command
   // ========================================================================
@@ -1609,14 +1610,43 @@ function buildKeeperCommand(action, parameters, issueKey) {
       // Add force flag at the end
       command += ` --force`;
       break;
-      
+
+    case 'epm approval action': {
+      const decision = parameters.epmDecision;
+      const uid = String(parameters.approvalUid || '').trim();
+      if (!decision || !['approve', 'deny'].includes(decision)) {
+        throw new Error('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!uid) {
+        throw new Error('EPM approval UID is required');
+      }
+      if (!/^[A-Za-z0-9_-]+$/.test(uid)) {
+        throw new Error('EPM approval UID contains invalid characters');
+      }
+      command += ` --${decision} ${uid}`;
+      break;
+    }
+
+    case 'device-approve': {
+      const rawTarget = (parameters.email || '').trim();
+      if (!rawTarget) {
+        throw new Error('Email or device ID is required for device-approve command');
+      }
+      if (!parameters.action || !['approve', 'deny'].includes(parameters.action)) {
+        throw new Error('Action must be "approve" or "deny" for device-approve command');
+      }
+      const flag = parameters.action === 'approve' ? '--approve' : '--deny';
+      const safeToken = /^[a-zA-Z0-9._+\-@]+$/;
+      if (safeToken.test(rawTarget)) {
+        command += ` ${rawTarget} ${flag}`;
+      } else {
+        command += ` "${escapeForDoubleQuotes(rawTarget)}" ${flag}`;
+      }
+      break;
+    }
+
     default:
-      // For any other commands, add parameters as key=value pairs with proper escaping
-      Object.keys(parameters).forEach(key => {
-        if (parameters[key]) {
-            command += ` ${key}='${escapeForSingleQuotes(String(parameters[key]))}'`;
-        }
-      });
+      break;
   }
   
   return command;
@@ -1781,8 +1811,27 @@ resolver.define('executeKeeperCommand', async (req) => {
     return validationError('command', 'Command is required');
   }
 
+  // KJ-26-05: Validate command against an allowlist and strip control characters
+  // to prevent log injection via crafted "command" values.
+  const ALLOWED_COMMAND_PREFIXES = [
+    'list', 'ls', 'get', 'search',
+    'record-add', 'record-update', 'record-permission',
+    'share-record', 'share-folder',
+    'epm',
+    'device-approve',
+    'service-status',
+    'enterprise-info', 'enterprise-role', 'enterprise-user',
+    'getConfig',
+  ];
+  // Strip newlines and control characters that could forge log entries
+  const sanitizedCommand = command.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();
+  const commandVerb = sanitizedCommand.split(/\s+/)[0].toLowerCase();
+  if (!ALLOWED_COMMAND_PREFIXES.some(p => commandVerb === p.toLowerCase())) {
+    return validationError('command', `Unknown command "${commandVerb}". Only approved commands are permitted.`);
+  }
+
   try {
-    const result = await executeKeeperApiCommand(command, { userId });
+    const result = await executeKeeperApiCommand(sanitizedCommand, { userId });
     return result;
   } catch (err) {
     // Check for rate limit error
@@ -1792,6 +1841,213 @@ resolver.define('executeKeeperCommand', async (req) => {
     return keeperError(err.message || 'Failed to execute command', err);
   }
 });
+
+// ============================================================================
+// "Already processed outside Jira" — shared helpers (EPM + Device Approval)
+// ============================================================================
+
+// Label added to a Jira ticket when we detect that the underlying Keeper
+// request (EPM approval OR device-approval) was already actioned outside
+// Jira (e.g. directly in the Keeper Admin Console / vault). Used to
+// short-circuit future panel loads so admins don't see stale buttons.
+const PROCESSED_OUTSIDE_JIRA_LABEL = 'request-already-processed-outside-jira';
+
+/**
+ * Detect whether a Keeper Commander error message indicates that an EPM
+ * approval request no longer exists (i.e. it was approved or denied outside
+ * of Jira since the ticket was created). Keeper's CLI returns:
+ *   "Failed to approved \"<uid>\": Approval request does not exist or cannot be modified"
+ * which `parseKeeperErrorMessage()` typically trims to:
+ *   "Approval request does not exist or cannot be modified"
+ * We match defensively against both the trimmed and the original forms.
+ */
+function isEpmRequestNotFoundError(errorMessage) {
+  if (!errorMessage || typeof errorMessage !== 'string') return false;
+  const lower = errorMessage.toLowerCase();
+  return (
+    lower.includes('approval request does not exist') ||
+    lower.includes('cannot be modified')
+  );
+}
+
+/**
+ * Best-effort `epm sync-down` to refresh Commander's local view of pending
+ * EPM approvals before we attempt approve/deny. Without this, an approval
+ * that was actioned in another session can still appear locally and produce
+ * a confusing "request does not exist" error on the next call. We never
+ * fail the user-facing action on a sync-down failure — just log and proceed.
+ */
+async function runEpmSyncDown(userId) {
+  try {
+    await executeKeeperApiCommand('epm sync-down', { userId, skipRateLimit: true });
+  } catch (syncErr) {
+    logger.warn('epm sync-down failed; continuing with approve/deny anyway', {
+      error: syncErr.message
+    });
+  }
+}
+
+/**
+ * Pull the device target (user email or device ID) out of a `device-approve`
+ * CLI invocation. Order-agnostic: we accept either
+ *   `device-approve <target> --approve`  (canonical)
+ * or
+ *   `device-approve --approve <target>`  (legacy)
+ */
+function extractDeviceTarget(cliCommand) {
+  if (!cliCommand) return null;
+  const tokens = cliCommand.split(/\s+/);
+  return tokens.find((t, i) => i > 0 && t && !t.startsWith('-')) || null;
+}
+
+/**
+ * Fetch Keeper's current list of pending device approvals via
+ * `device-approve --reload --format=json`. Returns an array of
+ * `{ device_id, email, ... }` objects (possibly empty).
+ *
+ * `skipRateLimit: true` is intentional — this is an internal pre-check that
+ * runs on every Approve/Deny click and shouldn't count against the user's
+ * Commander rate limit.
+ */
+async function fetchPendingDeviceApprovals(userId) {
+  const result = await executeKeeperApiCommand(
+    'device-approve --reload --format=json',
+    { userId, skipRateLimit: true }
+  );
+  const raw = result?.data;
+  if (!raw) return [];
+  if (Array.isArray(raw.data)) return raw.data;
+  if (Array.isArray(raw)) return raw;
+  return [];
+}
+
+/**
+ * Decide whether `target` (an email or device ID, exactly what we'd pass to
+ * `device-approve <X> --approve|--deny`) is still in the pending list.
+ *
+ *   - emails are matched case-insensitively
+ *   - device IDs match exactly OR by partial prefix (Keeper's CLI itself
+ *     supports partial-prefix device ID matching)
+ */
+function isTargetPending(pendingList, target) {
+  if (!Array.isArray(pendingList) || pendingList.length === 0 || !target) {
+    return false;
+  }
+  // Reject very short non-email targets to prevent a malformed payload like
+  // target = "a" from sweeping up multiple unrelated devices.
+  const targetStr = String(target);
+  if (targetStr.length < 6 && !targetStr.includes('@')) {
+    return false;
+  }
+  const lowered = targetStr.toLowerCase();
+  const looksLikeEmail = lowered.includes('@');
+  return pendingList.some((entry) => {
+    if (!entry) return false;
+    if (looksLikeEmail) {
+      return String(entry.email || '').toLowerCase() === lowered;
+    }
+    // Only allow the user-supplied target as a prefix of the canonical device
+    // ID (CLI convention: user can type a shortened ID that expands to the
+    // full one). The reverse direction (short pending ID matches a longer
+    // target) is intentionally excluded to prevent false positives.
+    const id = String(entry.device_id || '');
+    return id === target || id.startsWith(target);
+  });
+}
+
+/**
+ * Mark the Jira ticket as resolved-outside-Jira: add the shared label so
+ * future panel loads skip the buttons, and post an audit comment so the
+ * activity history reflects what happened.
+ *
+ * @param {string} issueKey
+ * @param {string} identifier   Human-friendly identifier of the request:
+ *                              user email or device ID for device approvals,
+ *                              EPM approval/request UID for EPM.
+ * @param {string|null} formattedTimestamp
+ * @param {'epm'|'device'} kind  Drives the wording of the audit comment.
+ */
+async function markAlreadyProcessedOutsideJira(
+  issueKey,
+  identifier,
+  formattedTimestamp,
+  kind = 'device'
+) {
+  // Atomically add the label via Jira's `update` payload — no GET required,
+  // no race with concurrent label writes, and idempotent (Jira ignores
+  // duplicate adds).
+  try {
+    await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          update: { labels: [{ add: PROCESSED_OUTSIDE_JIRA_LABEL }] }
+        })
+      },
+      'Add processed-outside-jira label'
+    );
+  } catch (labelErr) {
+    logger.warn('Failed to add processed-outside-jira label', {
+      issueKey,
+      error: labelErr.message
+    });
+  }
+
+  // Post an audit comment summarising what happened.
+  try {
+    const ts = formattedTimestamp || new Date().toISOString();
+    const isEpm = kind === 'epm';
+    const title = isEpm
+      ? 'EPM Approval — Already Processed Outside Jira'
+      : 'Device Admin Approval — Already Processed Outside Jira';
+    const bodyText = isEpm
+      ? `Approval request "${identifier}" is no longer pending in Keeper as of ${ts}. ` +
+        'It appears to have already been approved or denied outside Jira ' +
+        '(e.g. via the Keeper Admin Console / vault). No action was taken from this ticket.'
+      : `Target "${identifier}" is no longer in Keeper's pending device-approval list ` +
+        `as of ${ts}. The request appears to have already been approved or denied ` +
+        'outside Jira (e.g. via the Keeper Admin Console). No action was taken from this ticket.';
+
+    const commentBody = {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'panel',
+          attrs: { panelType: 'warning' },
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                { type: 'text', text: title, marks: [{ type: 'strong' }] }
+              ]
+            },
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: bodyText }]
+            }
+          ]
+        }
+      ]
+    };
+    await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}/comment`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: commentBody })
+      },
+      'Add processed-outside-jira comment'
+    );
+  } catch (commentErr) {
+    logger.warn('Failed to add processed-outside-jira comment', {
+      issueKey,
+      error: commentErr.message
+    });
+  }
+}
 
 /**
  * Manual Keeper action trigger (called from issue panel)
@@ -1813,7 +2069,53 @@ resolver.define('executeKeeperAction', async (req) => {
   if (!command) {
     return validationError('command', 'Command is required');
   }
+
+  // Enforce server-side admin check for privileged actions. The frontend hides
+  // admin controls for non-admins, but any user can bypass that restriction via
+  // direct invoke() calls. We re-verify the Jira project-admin permission here.
+  const requiresProjectAdmin =
+    command === 'record-add' ||
+    command.startsWith('device-approve') ||
+    command.startsWith('epm approval action');
+
+  if (requiresProjectAdmin) {
+    try {
+      const projectKey = issueKey.split('-')[0];
+      const permResponse = await requestJiraAsUserWithRetry(
+        route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=ADMINISTER_PROJECTS`,
+        { method: 'GET', headers: { Accept: 'application/json' } },
+        'Server-side admin check'
+      );
+      if (!permResponse.ok) {
+        return errorResponse(
+          ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
+          'Could not verify administrator permissions. Please try again.',
+          {}
+        );
+      }
+      const permData = await permResponse.json();
+      const isProjectAdmin = permData?.permissions?.ADMINISTER_PROJECTS?.havePermission === true;
+      if (!isProjectAdmin) {
+        return errorResponse(
+          ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
+          'Only Jira project administrators are allowed to perform this action.',
+          { requiredPermission: 'ADMINISTER_PROJECTS' }
+        );
+      }
+    } catch (adminCheckErr) {
+      logger.warn('executeKeeperAction: admin check failed', {
+        command: command.split(' ')[0],
+        error: adminCheckErr.message,
+      });
+      return errorResponse(
+        ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
+        'Could not verify administrator permissions. Please try again.',
+        {}
+      );
+    }
+  }
   
+
   // Check if this is an EPM command and if the request is already expired or action was already taken
   const isEpmCommand = command.startsWith('epm approval action');
   if (isEpmCommand) {
@@ -1841,6 +2143,9 @@ resolver.define('executeKeeperAction', async (req) => {
         if (labels.includes('epm-expired')) {
           return epmError('expired');
         }
+        if (labels.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
+          return epmError('processed_outside');
+        }
       }
     } catch (error) {
       // If it's a structured error response, return it
@@ -1848,6 +2153,90 @@ resolver.define('executeKeeperAction', async (req) => {
         return error;
       }
       // Otherwise, continue
+    }
+
+    // Refresh Commander's local view of pending EPM approvals before we
+    // attempt approve/deny. This ensures requests that were actioned in
+    // another session are removed from the local cache, so we either succeed
+    // cleanly or fail with the canonical "Approval request does not exist"
+    // error (which the catch-block handler below converts into a structured
+    // "already processed outside Jira" response + label).
+    if (parameters?.epmDecision === 'approve' || parameters?.epmDecision === 'deny') {
+      await runEpmSyncDown(userId);
+    }
+  }
+
+  // Device admin approval requests (label: ITSM_device_admin_approval_requested)
+  // are actioned via Keeper Commander's `device-approve <user_email_or_device_id>
+  // --approve|--deny` command (see
+  // https://docs.keeper.io/en/keeperpam/commander-cli/command-reference/enterprise-management-commands#device-approve-command).
+  // Block re-execution once one of those commands has already succeeded.
+  const isDeviceCommand = command.startsWith('device-approve');
+  if (isDeviceCommand) {
+    try {
+      const issueResponse = await requestJiraAsAppWithRetry(
+        route`/rest/api/3/issue/${issueKey}?fields=labels`,
+        {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        },
+        'Check device action labels'
+      );
+
+      if (issueResponse.ok) {
+        const issueData = await issueResponse.json();
+        const labels = issueData.fields?.labels || [];
+
+        if (labels.includes('device-approved')) {
+          return deviceError('approved');
+        }
+        if (labels.includes('device-denied')) {
+          return deviceError('denied');
+        }
+        if (labels.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
+          return deviceError('processed_outside');
+        }
+      }
+    } catch (error) {
+      if (error.success === false) {
+        return error;
+      }
+    }
+
+    // Pre-execution guard: confirm the target is still in Keeper's pending
+    // device-approval list. If it was approved/denied outside Jira between the
+    // ticket being created and now, mark the ticket and refuse the action so
+    // we never call approve/deny on a stale request.
+    const isApproveOrDeny =
+      parameters?.action === 'approve' || parameters?.action === 'deny';
+    if (isApproveOrDeny) {
+      const target = parameters?.email || parameters?.deviceTarget || extractDeviceTarget(command);
+      if (target) {
+        try {
+          const pending = await fetchPendingDeviceApprovals(userId);
+          if (!isTargetPending(pending, target)) {
+            await markAlreadyProcessedOutsideJira(
+              issueKey,
+              target,
+              formattedTimestamp,
+              'device'
+            );
+            return deviceError(
+              'processed_outside',
+              `${target} is not in Keeper's pending device-approval list anymore. ` +
+                'It looks like the request was already approved or denied outside Jira.'
+            );
+          }
+        } catch (precheckErr) {
+          // Treat the pre-check as best-effort: if Keeper is unreachable here
+          // we don't want to permanently block legitimate approvals. Log and
+          // let the actual approve/deny call surface the real error.
+          logger.warn(
+            'Device approval pre-check failed; proceeding to attempt action',
+            { issueKey, target, error: precheckErr.message }
+          );
+        }
+      }
     }
   }
   
@@ -1933,13 +2322,25 @@ resolver.define('executeKeeperAction', async (req) => {
 
     // Check if this is an EPM command
     const isEpmCommand = command.startsWith('epm approval action');
-    
+    // Detect device admin approval commands; these always add an audit comment
+    // and a `device-approved` / `device-denied` label, just like EPM does.
+    // Both approve and deny use the same `device-approve` command differentiated
+    // by the `--approve` / `--deny` flag.
+    const isDeviceCommand = command.startsWith('device-approve');
+
+    // After the structured-params refactoring `command` is just the action
+    // name (e.g. 'device-approve'), not the full CLI string. Derive the
+    // approve/deny decision from the structured parameters so every
+    // downstream label, comment, and pre-check works correctly.
+    const epmDecision = isEpmCommand ? parameters?.epmDecision : null;
+    const deviceDecision = isDeviceCommand ? parameters?.action : null;
+
     // Only add comment for main record creation, not for records created as references
     // Check if this is a main record creation (not just a reference record)
     // Records created as references will have skipComment: true parameter
     const isMainRecordCreation = !parameters.skipComment;
-    
-    if (isMainRecordCreation || isEpmCommand) {
+
+    if (isMainRecordCreation || isEpmCommand || isDeviceCommand) {
       // Get current user info for the comment
       const currentUser = await getCurrentUser();
       
@@ -1962,12 +2363,21 @@ resolver.define('executeKeeperAction', async (req) => {
       // Set command-specific messages
       // Handle EPM commands first
       if (isEpmCommand) {
-        if (command.includes('--approve')) {
+        if (epmDecision === 'approve') {
           actionMessage = `Endpoint privilege approval request has been approved`;
-          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
-        } else if (command.includes('--deny')) {
+          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters?.approvalUid || ''}`;
+        } else if (epmDecision === 'deny') {
           actionMessage = `Endpoint privilege approval request has been denied`;
-          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
+          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters?.approvalUid || ''}`;
+        }
+      } else if (isDeviceCommand) {
+        const target = parameters?.email || parameters?.deviceTarget || '';
+        if (deviceDecision === 'approve') {
+          actionMessage = 'Device admin approval request has been approved';
+          actionDescription = `Device Admin Approval: Approved ${target}`;
+        } else if (deviceDecision === 'deny') {
+          actionMessage = 'Device admin approval request has been denied';
+          actionDescription = `Device Admin Approval: Denied ${target}`;
         }
       } else {
         switch (command) {
@@ -2079,10 +2489,16 @@ resolver.define('executeKeeperAction', async (req) => {
       // Build ADF content with panel (matching save/reject request format)
       let panelTitle = 'Keeper Request Approved and Executed';
       if (isEpmCommand) {
-        if (command.includes('--approve')) {
+        if (epmDecision === 'approve') {
           panelTitle = 'Endpoint Privilege Approval Request - Approved';
-        } else if (command.includes('--deny')) {
+        } else if (epmDecision === 'deny') {
           panelTitle = 'Endpoint Privilege Approval Request - Denied';
+        }
+      } else if (isDeviceCommand) {
+        if (deviceDecision === 'approve') {
+          panelTitle = 'Device Admin Approval Request - Approved';
+        } else if (deviceDecision === 'deny') {
+          panelTitle = 'Device Admin Approval Request - Denied';
         }
       } else if (isShareInvitationPending) {
         panelTitle = 'Keeper Request - Share Invitation Sent';
@@ -2132,7 +2548,9 @@ resolver.define('executeKeeperAction', async (req) => {
       
       // Use different panel types for different scenarios
       let panelType = 'success';
-      if (isEpmCommand && command.includes('--deny')) {
+      if (isEpmCommand && epmDecision === 'deny') {
+        panelType = 'warning';
+      } else if (isDeviceCommand && deviceDecision === 'deny') {
         panelType = 'warning';
       } else if (isShareInvitationPending) {
         panelType = 'info';
@@ -2157,15 +2575,60 @@ resolver.define('executeKeeperAction', async (req) => {
         ]
       };
 
-      // For EPM commands, add appropriate label to ALL tickets with same request_uid
+      // For EPM commands, add appropriate label to the current ticket (always),
+      // and to any sibling tickets that share a `request-<uid>` label (legacy
+      // fan-out for environments that tagged tickets with the Keeper request UID).
       if (isEpmCommand) {
         try {
-          const newLabel = command.includes('--approve') ? 'epm-approved' : command.includes('--deny') ? 'epm-denied' : '';
+          const newLabel = epmDecision === 'approve'
+            ? 'epm-approved'
+            : epmDecision === 'deny'
+              ? 'epm-denied'
+              : '';
           if (newLabel) {
-            const requestUid = command.split(/\s+/).pop();
-            const sanitizedUid = (requestUid || '').replace(/[^a-zA-Z0-9_-]/g, '-');
-            const uidLabel = `request-${sanitizedUid}`;
-            if (sanitizedUid) {
+            const requestUid = parameters?.approvalUid || '';
+            const sanitizedUid = (requestUid).replace(/[^a-zA-Z0-9_-]/g, '-');
+            const uidLabel = sanitizedUid ? `request-${sanitizedUid}` : '';
+
+            const updatedKeys = new Set();
+
+            // 1. Always update the current ticket (covers ITSM-created tickets
+            //    that only carry `ITSM_approval-request-created` and do not
+            //    include `request-<uid>`).
+            try {
+              const currentLabelsResponse = await requestJiraAsAppWithRetry(
+                route`/rest/api/3/issue/${issueKey}?fields=labels`,
+                { method: 'GET', headers: { 'Accept': 'application/json' } },
+                'Fetch labels before EPM label update'
+              );
+              if (currentLabelsResponse.ok) {
+                const currentLabelsData = await currentLabelsResponse.json();
+                const currentLabels = currentLabelsData.fields?.labels || [];
+                const alreadyActioned =
+                  currentLabels.includes('epm-approved') ||
+                  currentLabels.includes('epm-denied') ||
+                  currentLabels.includes('epm-expired');
+                if (!alreadyActioned && !currentLabels.includes(newLabel)) {
+                  await requestJiraAsAppWithRetry(
+                    route`/rest/api/3/issue/${issueKey}`,
+                    {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        update: { labels: [{ add: newLabel }] }
+                      })
+                    },
+                    'Update EPM label on current ticket'
+                  );
+                }
+                updatedKeys.add(issueKey);
+              }
+            } catch (currentLabelErr) {
+              logger.error('Failed to add EPM label on current ticket', currentLabelErr);
+            }
+
+            // 2. Fan out to any other tickets that share `request-<uid>`.
+            if (uidLabel) {
               const searchResponse = await requestJiraAsAppWithRetry(
                 route`/rest/api/3/search/jql`,
                 {
@@ -2181,21 +2644,27 @@ resolver.define('executeKeeperAction', async (req) => {
               if (searchResponse.ok) {
                 const searchResults = await searchResponse.json();
                 const issuesToUpdate = (searchResults.issues || []).filter((issue) => {
+                  if (updatedKeys.has(issue.key)) return false;
                   const labels = issue.fields?.labels || [];
-                  return !labels.includes('epm-approved') && !labels.includes('epm-denied') && !labels.includes('epm-expired');
+                  return (
+                    !labels.includes('epm-approved') &&
+                    !labels.includes('epm-denied') &&
+                    !labels.includes('epm-expired')
+                  );
                 });
                 for (const issue of issuesToUpdate) {
-                  const currentLabels = issue.fields?.labels || [];
-                  const updatedLabels = [...currentLabels, newLabel];
                   await requestJiraAsAppWithRetry(
                     route`/rest/api/3/issue/${issue.key}`,
                     {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ fields: { labels: updatedLabels } })
+                      body: JSON.stringify({
+                        update: { labels: [{ add: newLabel }] }
+                      })
                     },
-                    'Update EPM label'
+                    'Update EPM label on sibling ticket'
                   );
+                  updatedKeys.add(issue.key);
                 }
               }
             }
@@ -2204,7 +2673,35 @@ resolver.define('executeKeeperAction', async (req) => {
           logger.error('Failed to add EPM label', labelErr);
         }
       }
-      
+
+      // For device admin approval commands, add `device-approved` / `device-denied`
+      // to the current ticket so future invocations are blocked and the panel
+      // can show the correct state on reload.
+      if (isDeviceCommand) {
+        try {
+          const newLabel = deviceDecision === 'approve'
+            ? 'device-approved'
+            : deviceDecision === 'deny'
+              ? 'device-denied'
+              : '';
+          if (newLabel) {
+            await requestJiraAsAppWithRetry(
+              route`/rest/api/3/issue/${issueKey}`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  update: { labels: [{ add: newLabel }] }
+                })
+              },
+              'Update device approval label'
+            );
+          }
+        } catch (labelErr) {
+          logger.error('Failed to add device approval label', labelErr);
+        }
+      }
+
       // Add comment back to Jira using ADF format (after label is set, with rate limit retry)
       await requestJiraAsAppWithRetry(
         route`/rest/api/3/issue/${issueKey}/comment`,
@@ -2267,7 +2764,43 @@ resolver.define('executeKeeperAction', async (req) => {
         { troubleshooting: ['Revoke existing access for this user first', 'Then grant the new access level'] }
       );
     }
-    
+
+    // EPM-specific: Keeper returns "Approval request does not exist or cannot
+    // be modified" when the underlying request was already actioned (in
+    // another session, the Admin Console, or via another integration). Treat
+    // this as "already processed outside Jira" — tag the ticket with the
+    // shared label, post an audit comment, and return a structured error so
+    // the panel can render a friendly resolved-state message instead of the
+    // raw Keeper error.
+    if (
+      command.startsWith('epm approval action') &&
+      isEpmRequestNotFoundError(errorMessage)
+    ) {
+      const requestUid =
+        parameters?.approvalUid ||
+        parameters?.request_uid ||
+        parameters?.approval_uid ||
+        command.split(/\s+/).pop();
+      try {
+        await markAlreadyProcessedOutsideJira(
+          issueKey,
+          requestUid,
+          formattedTimestamp,
+          'epm'
+        );
+      } catch (markErr) {
+        logger.warn('Failed to mark EPM ticket as processed-outside-jira', {
+          issueKey,
+          error: markErr.message
+        });
+      }
+      return epmError(
+        'processed_outside',
+        `EPM approval request "${requestUid}" is no longer pending in Keeper. ` +
+          'It looks like the request was already approved or denied outside Jira.'
+      );
+    }
+
     // Return Keeper error with automatic error type detection
     return keeperError(errorMessage, err);
   }
@@ -2544,182 +3077,7 @@ resolver.define('getUserRole', async (req) => {
   }
 });
 
-/**
- * Get web trigger URL using Forge SDK
- * Returns URL and token separately - token should be used in Authorization header
- */
-resolver.define('getWebTriggerUrl', async () => {
-  try {
-    const url = await webTrigger.getUrl('keeper-alert-trigger');
-    const config = await storage.get('webTriggerConfig');
-    
-    return {
-      success: true,
-      url: url,
-      hasToken: !!(config && config.webhookToken),
-      // Include token for display/copy in UI (to configure in Keeper webhook settings)
-      bearerToken: config?.webhookToken || null,
-      authHeader: config?.webhookToken ? `Bearer ${config.webhookToken}` : null
-    };
-  } catch (err) {
-    throw new Error(`Failed to get web trigger URL: ${err.message}`);
-  }
-});
 
-/**
- * Get web trigger configuration
- * Note: webhookToken is included so UI can show if token is configured
- */
-resolver.define('getWebTriggerConfig', async () => {
-  const config = await storage.get('webTriggerConfig');
-  if (!config) return {};
-  
-  // Return config with token presence indicator (not the actual token for security)
-  return {
-    projectKey: config.projectKey,
-    issueType: config.issueType,
-    hasWebhookToken: !!config.webhookToken,
-    webhookTokenPreview: config.webhookToken 
-      ? `${config.webhookToken.substring(0, 8)}...${config.webhookToken.substring(config.webhookToken.length - 4)}`
-      : null
-  };
-});
-
-/**
- * Save web trigger configuration
- */
-resolver.define('setWebTriggerConfig', async (req) => {
-  let payload = req?.payload?.payload || req?.payload || req;
-  
-  if (!payload) {
-    throw new Error('No payload provided');
-  }
-  
-  const projectKey = payload.projectKey;
-  const issueType = payload.issueType;
-  
-  logger.info('setWebTriggerConfig: Saving web trigger configuration', { projectKey, issueType });
-  
-  // Get existing config to preserve the token if not being changed
-  const existingConfig = await storage.get('webTriggerConfig') || {};
-  
-  const configToSave = { 
-    projectKey, 
-    issueType,
-    // Preserve existing token unless explicitly clearing it
-    webhookToken: existingConfig.webhookToken
-  };
-  
-  await storage.set('webTriggerConfig', configToSave);
-  
-  logger.info('setWebTriggerConfig: Web trigger configuration saved');
-  return { success: true, message: 'Web trigger configuration saved successfully' };
-});
-
-/**
- * Generate or regenerate webhook authentication token
- * This creates a new secure token that must be included in the Authorization header
- * Format: Authorization: Bearer <token>
- */
-resolver.define('generateWebhookToken', async (req) => {
-  logger.info('generateWebhookToken: Generating new webhook authentication token');
-  
-  try {
-    // Generate a new secure token
-    const newToken = generateWebhookToken();
-    
-    // Get existing config
-    const existingConfig = await storage.get('webTriggerConfig') || {};
-    
-    // Update config with new token
-    const updatedConfig = {
-      ...existingConfig,
-      webhookToken: newToken,
-      tokenGeneratedAt: new Date().toISOString()
-    };
-    
-    await storage.set('webTriggerConfig', updatedConfig);
-    
-    // Get the webhook URL
-    const webhookUrl = await webTrigger.getUrl('keeper-alert-trigger');
-    
-    logger.info('generateWebhookToken: Webhook token generated successfully');
-    
-    return {
-      success: true,
-      message: 'Webhook token generated successfully. Configure your Keeper webhook with the Authorization header.',
-      webhookUrl: webhookUrl,
-      bearerToken: newToken,
-      authHeader: `Bearer ${newToken}`,
-      tokenPreview: `${newToken.substring(0, 8)}...${newToken.substring(newToken.length - 4)}`,
-      generatedAt: updatedConfig.tokenGeneratedAt,
-      instructions: 'Add this header to your Keeper webhook configuration: Authorization: Bearer <token>'
-    };
-  } catch (err) {
-    logger.error('generateWebhookToken: Failed to generate webhook token', { error: err.message });
-    throw new Error(`Failed to generate webhook token: ${err.message}`);
-  }
-});
-
-/**
- * Revoke webhook token (disable token authentication)
- * WARNING: This makes the webhook URL accessible without authentication
- */
-resolver.define('revokeWebhookToken', async () => {
-  try {
-    // Get existing config
-    const existingConfig = await storage.get('webTriggerConfig') || {};
-    
-    // Remove token from config
-    const updatedConfig = {
-      projectKey: existingConfig.projectKey,
-      issueType: existingConfig.issueType
-      // Deliberately not including webhookToken
-    };
-    
-    await storage.set('webTriggerConfig', updatedConfig);
-    
-    return {
-      success: true,
-      message: 'Webhook token revoked. WARNING: The webhook URL is now accessible without authentication.',
-      warning: 'Token authentication disabled. Consider generating a new token for security.'
-    };
-  } catch (err) {
-    throw new Error(`Failed to revoke webhook token: ${err.message}`);
-  }
-});
-
-/**
- * Get webhook audit logs
- * Returns the last 100 webhook attempts for monitoring
- */
-resolver.define('getWebhookAuditLogs', async () => {
-  try {
-    const logs = await storage.get('webhook-audit-log') || [];
-    return {
-      success: true,
-      logs: logs,
-      count: logs.length
-    };
-  } catch (err) {
-    throw new Error(`Failed to get webhook audit logs: ${err.message}`);
-  }
-});
-
-/**
- * Clear webhook audit logs
- */
-resolver.define('clearWebhookAuditLogs', async () => {
-  try {
-    await storage.delete('webhook-audit-log');
-    return {
-      success: true,
-      message: 'Webhook audit logs cleared'
-    };
-  } catch (err) {
-    throw new Error(`Failed to clear webhook audit logs: ${err.message}`);
-  }
-});
 
 /**
  * Get current user's rate limit status
@@ -2739,615 +3097,123 @@ resolver.define('getRateLimitStatus', async (req) => {
   }
 });
 
-/**
- * Get all Jira projects
- */
-resolver.define('getJiraProjects', async () => {
-  try {
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/project`,
-      {},
-      'Get Jira projects'
-    );
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch projects: ${response.status}`);
-    }
-    
-    const projects = await response.json();
-    
-    return {
-      success: true,
-      projects: projects || []
-    };
-  } catch (err) {
-    throw new Error(`Failed to fetch Jira projects: ${err.message}`);
-  }
-});
 
 /**
- * Get issue types for a specific project
+ * Get ITSM ticket data from issue description.
+ * Tickets created by the JIRA ITSM Forge app embed the original alert payload
+ * as a JSON code block in the issue description. This resolver fetches that
+ * payload (and the ticket's labels) so the issue panel can render the right
+ * UI for each ITSM_<audit_event> label (e.g. EPM approval, SSO device approval).
  */
-resolver.define('getProjectIssueTypes', async (req) => {
-  let payload = req?.payload?.payload || req?.payload || req;
-  
-  if (!payload || !payload.projectKey) {
-    throw new Error('Project key is required');
-  }
-  
-  const { projectKey } = payload;
-  
-  try {
-    // Get project details which includes issue types (with rate limit retry)
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/project/${projectKey}`,
-      {},
-      'Get project issue types'
-    );
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch project: ${response.status}`);
-    }
-    
-    const project = await response.json();
-    
-    // Extract issue types from project
-    const issueTypes = project.issueTypes || [];
-    
-    return {
-      success: true,
-      issueTypes: issueTypes
-    };
-  } catch (err) {
-    throw new Error(`Failed to fetch issue types: ${err.message}`);
-  }
-});
-
-/**
- * Test web trigger by creating a test issue
- */
-resolver.define('testWebTrigger', async (req) => {
-  let payload = req?.payload?.payload || req?.payload || req;
-  
-  if (!payload) {
-    throw new Error('No payload provided');
-  }
-  
-  const { projectKey, issueType } = payload;
-  
-  if (!projectKey || !issueType) {
-    throw new Error('Project key and issue type are required');
-  }
-  
-  try {
-    // Create a test issue (with rate limit retry)
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            project: {
-              key: projectKey
-            },
-            summary: `Keeper Security Alert - Test Trigger [${new Date().toISOString()}]`,
-            description: {
-              type: 'doc',
-              version: 1,
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: 'This is a test issue created by the Keeper Security web trigger. This confirms that your web trigger configuration is working correctly.'
-                    }
-                  ]
-                }
-              ]
-            },
-            issuetype: {
-              name: issueType
-            },
-            labels: ['keeper-webhook', 'keeper-test']
-          }
-        })
-      },
-      'Create test issue'
-    );
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to create test issue: ${response.status} - ${errorText}`);
-    }
-    
-    const issue = await response.json();
-    
-    return {
-      success: true,
-      message: 'Test issue created successfully!',
-      issueKey: issue.key,
-      issueUrl: issue.self
-    };
-  } catch (err) {
-    throw new Error(`Failed to test web trigger: ${err.message}`);
-  }
-});
-
-/**
- * Test web trigger with full payload (simulating actual webhook call)
- */
-resolver.define('testWebTriggerWithPayload', async (req) => {
-  let payload = req?.payload?.payload || req?.payload || req;
-  
-  if (!payload) {
-    throw new Error('No payload provided');
-  }
-  
-  try {
-    // Get the web trigger configuration
-    const config = await storage.get('webTriggerConfig');
-    
-    if (!config || !config.projectKey || !config.issueType) {
-      throw new Error('Web trigger not configured. Please configure project and issue type first.');
-    }
-    
-    // Extract alert details from payload
-    const summary = payload.summary || payload.alert_name || payload.message || `Keeper Security Alert - ${new Date().toISOString()}`;
-    const description = payload.description || payload.message || 'A security alert was received from Keeper Security.';
-    const alertType = payload.alertType || payload.alert_type || 'security_alert';
-    const severity = payload.severity || 'medium';
-    const source = payload.source || 'keeper_security';
-    
-    // Build detailed description in ADF format
-    const adfDescription = {
-      type: 'doc',
-      version: 1,
-      content: [
-        {
-          type: 'paragraph',
-          content: [
-            {
-              type: 'text',
-              text: description
-            }
-          ]
-        },
-        {
-          type: 'paragraph',
-          content: [
-            {
-              type: 'text',
-              text: '\n\nAlert Details:',
-              marks: [{ type: 'strong' }]
-            }
-          ]
-        },
-        {
-          type: 'bulletList',
-          content: [
-            {
-              type: 'listItem',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: `Alert Type: ${alertType}`,
-                      marks: [{ type: 'strong' }]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              type: 'listItem',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: `Severity: ${severity.toUpperCase()}`,
-                      marks: [{ type: 'strong' }]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              type: 'listItem',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: `Source: ${source}`
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              type: 'listItem',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: `Timestamp: ${payload.timestamp || new Date().toISOString()}`
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    };
-    
-    // Add user information if present
-    if (payload.user || payload.username) {
-      const userEmail = payload.user?.email || payload.username || 'Unknown';
-      adfDescription.content.push({
-        type: 'paragraph',
-        content: [
-          {
-            type: 'text',
-            text: `\nUser: ${userEmail}`
-          }
-        ]
-      });
-    }
-    
-    // Add additional details if present
-    if (payload.details) {
-      adfDescription.content.push({
-        type: 'paragraph',
-        content: [
-          {
-            type: 'text',
-            text: '\n\nAdditional Information:',
-            marks: [{ type: 'strong' }]
-          }
-        ]
-      });
-      adfDescription.content.push({
-        type: 'codeBlock',
-        attrs: { language: 'json' },
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(payload.details, null, 2)
-          }
-        ]
-      });
-    }
-    
-    // Determine labels based on payload
-    const labels = ['keeper-webhook'];
-    if (payload.source === 'keeper_admin_test' || payload.details?.test) {
-      labels.push('keeper-webhook-test');
-    }
-    if (severity) {
-      labels.push(`severity-${severity.toLowerCase()}`);
-    }
-    if (alertType) {
-      labels.push(alertType.toLowerCase().replace(/_/g, '-'));
-    }
-    
-    // Create the Jira issue (with rate limit retry)
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            project: {
-              key: config.projectKey
-            },
-            summary: summary,
-            description: adfDescription,
-            issuetype: {
-              name: config.issueType
-            },
-            labels: labels
-          }
-        })
-      },
-      'Create webhook issue'
-    );
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to create issue: ${errorText}`);
-    }
-    
-    const issue = await response.json();
-    
-    // For EPM approval requests (test or real), assign to a project admin
-    if (payload.category === 'endpoint_privilege_manager' && payload.audit_event === 'approval_request_created') {
-      try {
-        // Get project admins
-        const projectKey = config.projectKey;
-        
-        // Get project roles (with rate limit retry)
-        const rolesResponse = await requestJiraAsAppWithRetry(
-          route`/rest/api/3/project/${projectKey}/role`,
-          {},
-          'Get project roles for assignment'
-        );
-        const roles = await rolesResponse.json();
-        
-        // Find admin role
-        let adminRoleUrl = null;
-        const possibleAdminRoleNames = ['Administrators', 'Administrator', 'Admins', 'Project Administrators', 'administrators'];
-        
-        for (const roleName of possibleAdminRoleNames) {
-          if (roles && roles[roleName]) {
-            adminRoleUrl = roles[roleName];
-            break;
-          }
-        }
-        
-        if (adminRoleUrl) {
-          // Extract role ID
-          const roleIdMatch = adminRoleUrl.match(/role\/(\d+)/);
-          if (roleIdMatch) {
-            const roleId = roleIdMatch[1];
-            
-            // Get role details with actors (with rate limit retry)
-            const roleDetailsResponse = await requestJiraAsAppWithRetry(
-              route`/rest/api/3/project/${projectKey}/role/${roleId}`,
-              {},
-              'Get role details for assignment'
-            );
-            const roleDetails = await roleDetailsResponse.json();
-            
-            // Find first active admin user
-            if (roleDetails && roleDetails.actors && roleDetails.actors.length > 0) {
-              let assigneeAccountId = null;
-              
-              for (const actor of roleDetails.actors) {
-                if (actor.actorUser && actor.actorUser.accountId) {
-                  assigneeAccountId = actor.actorUser.accountId;
-                  break;
-                } else if (actor.id) {
-                  assigneeAccountId = actor.id;
-                  break;
-                } else if (actor.accountId) {
-                  assigneeAccountId = actor.accountId;
-                  break;
-                }
-              }
-              
-              // Assign ticket to admin (with rate limit retry)
-              if (assigneeAccountId) {
-                await requestJiraAsAppWithRetry(
-                  route`/rest/api/3/issue/${issue.key}`,
-                  {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      fields: {
-                        assignee: {
-                          accountId: assigneeAccountId
-                        }
-                      }
-                    })
-                  },
-                  'Assign EPM ticket to admin'
-                );
-                logger.info('Assigned EPM ticket to project admin', { issueKey: issue.key });
-              }
-            }
-          }
-        }
-      } catch (assignError) {
-        logger.error('Failed to assign ticket to project admin', assignError);
-        // Don't fail the entire test if assignment fails
-      }
-    }
-    
-    return {
-      success: true,
-      message: 'Issue created successfully via webhook test',
-      issueKey: issue.key,
-      issueId: issue.id,
-      labels: labels
-    };
-    
-  } catch (error) {
-    throw new Error(`Failed to test web trigger: ${error.message}`);
-  }
-});
-
-/**
- * Fetch tickets created by webhook (with keeper-webhook label)
- */
-resolver.define('getWebhookTickets', async (req) => {
-  try {
-    const config = await storage.get('webTriggerConfig');
-    
-    if (!config || !config.projectKey) {
-      return {
-        success: false,
-        message: 'Web trigger not configured',
-        issues: []
-      };
-    }
-    
-    // Build JQL to find issues with keeper-webhook label in configured project
-    const jql = `project = ${config.projectKey} AND labels = keeper-webhook ORDER BY created DESC`;
-    
-    // Fetch issues using the new JQL enhanced search API (with rate limit retry)
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/search/jql`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jql: jql,
-          maxResults: 100,
-          fields: ['summary', 'created', 'description', 'status', 'labels', 'key', 'issuetype']
-        })
-      },
-      'Search webhook tickets'
-    );
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to fetch webhook tickets: ${errorText}`);
-    }
-    
-    const data = await response.json();
-    
-    // Format the issues for frontend consumption
-    const issues = data.issues.map(issue => {
-      // Extract JSON payload from description if it exists
-      let jsonPayload = null;
-      try {
-        // The description is in ADF format, look for codeBlock with JSON
-        const description = issue.fields.description;
-        if (description && description.content) {
-          const codeBlock = description.content.find(
-            block => block.type === 'codeBlock' && block.attrs?.language === 'json'
-          );
-          if (codeBlock && codeBlock.content && codeBlock.content[0]?.text) {
-            jsonPayload = JSON.parse(codeBlock.content[0].text);
-          }
-        }
-      } catch (e) {
-        logger.error('Failed to parse JSON from description', e);
-      }
-      
-      // Extract request UID - check multiple possible field names
-      // 1. Basic webhook payload uses: request_uid
-      // 2. Enriched EPM data uses: approval_uid
-      // 3. Fallback: extract from labels (format: request-<uid>)
-      let requestUid = jsonPayload?.request_uid || jsonPayload?.approval_uid || null;
-      if (!requestUid) {
-        const labels = issue.fields.labels || [];
-        const requestLabel = labels.find(label => label.startsWith('request-'));
-        if (requestLabel) {
-          requestUid = requestLabel.replace('request-', '');
-        }
-      }
-      
-      // Extract username - check multiple possible field names
-      // 1. Basic webhook payload uses: username
-      // 2. Enriched EPM data uses: account_info.Username
-      let username = jsonPayload?.username || 
-                     jsonPayload?.account_info?.Username || 
-                     null;
-      
-      // If this is enriched EPM data, try to get additional info
-      const isEpmEnriched = !!jsonPayload?.approval_uid || !!jsonPayload?.account_info;
-      
-      // For description, prefer specific fields over summary
-      let ticketDescription = issue.fields.summary;
-      if (jsonPayload) {
-        if (jsonPayload.description) {
-          ticketDescription = jsonPayload.description;
-        } else if (isEpmEnriched && jsonPayload.approval_type) {
-          // For EPM tickets, create a meaningful description
-          ticketDescription = `${jsonPayload.approval_type || 'EPM'} Request - ${requestUid || 'Unknown'}`;
-          if (username) {
-            ticketDescription = `${username} - ${ticketDescription}`;
-          }
-        }
-      }
-      
-      return {
-        key: issue.key,
-        id: issue.id,
-        summary: issue.fields.summary,
-        created: issue.fields.created,
-        status: issue.fields.status?.name || 'Unknown',
-        labels: issue.fields.labels || [],
-        issueType: issue.fields.issuetype?.name || 'Unknown',
-        description: ticketDescription,
-        requestUid: requestUid,
-        agentUid: jsonPayload?.agent_uid || jsonPayload?.account_info?.agent_uid || null,
-        username: username,
-        category: jsonPayload?.category || (isEpmEnriched ? 'endpoint_privilege_manager' : null),
-        auditEvent: jsonPayload?.audit_event || (isEpmEnriched ? 'approval_request_created' : null),
-        alertName: jsonPayload?.alert_name || (isEpmEnriched ? 'EPM Approval Request' : null)
-      };
-    });
-    
-    return {
-      success: true,
-      issues: issues,
-      total: data.total
-    };
-    
-  } catch (error) {
-    logger.error('Error fetching webhook tickets', error);
-    throw new Error(`Failed to fetch webhook tickets: ${error.message}`);
-  }
-});
-
-/**
- * Get webhook payload data from current issue description
- */
-resolver.define('getWebhookPayload', async (req) => {
+resolver.define('getItsmTicketData', async (req) => {
   const issueKey = req.payload?.issueKey;
-  
+
   if (!issueKey) {
     throw new Error('Issue key is required');
   }
-  
+
   try {
-    // Fetch the issue with description field (with rate limit retry)
     const response = await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}?fields=description,labels`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       },
-      'Get webhook payload'
+      'Get ITSM ticket data'
     );
-    
+
     if (!response.ok) {
       throw new Error(`Failed to fetch issue: ${response.statusText}`);
     }
-    
+
     const issue = await response.json();
     const description = issue.fields?.description;
     const labels = issue.fields?.labels || [];
-    
-    // Extract JSON payload from description
-    let webhookPayload = null;
+
+    let payload = null;
     if (description && description.content) {
       const codeBlock = description.content.find(
         block => block.type === 'codeBlock' && block.attrs?.language === 'json'
       );
       if (codeBlock && codeBlock.content && codeBlock.content[0]?.text) {
         try {
-          webhookPayload = JSON.parse(codeBlock.content[0].text);
+          payload = JSON.parse(codeBlock.content[0].text);
         } catch (e) {
-          logger.error('Failed to parse webhook payload', e);
+          logger.error('Failed to parse ITSM ticket payload', e);
         }
       }
     }
-    
+
     return {
       success: true,
-      payload: webhookPayload,
-      labels: labels
+      payload,
+      labels
     };
-    
+
   } catch (error) {
-    logger.error('Error fetching webhook payload', error);
-    throw new Error(`Failed to fetch webhook payload: ${error.message}`);
+    logger.error('Error fetching ITSM ticket data', error);
+    throw new Error(`Failed to fetch ITSM ticket data: ${error.message}`);
   }
 });
+
+function redactEpmApprovalDetails(value) {
+  if (Array.isArray(value)) {
+    return value.map(redactEpmApprovalDetails);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return Object.entries(value).reduce((acc, [key, entryValue]) => {
+    if (/filehash/i.test(key)) {
+      acc[key] = ['[REDACTED]'];
+      return acc;
+    }
+
+    if (/commandline/i.test(key) && typeof entryValue === 'string') {
+      acc[key] = entryValue.replace(/\s+.+$/, ' [ARGS REDACTED]');
+      return acc;
+    }
+
+    acc[key] = redactEpmApprovalDetails(entryValue);
+    return acc;
+  }, {});
+}
+
+resolver.define('getEpmApprovalDetails', async (req) => {
+  const requestUid = req.payload?.requestUid;
+
+  if (!requestUid) {
+    return { success: false, message: 'Request UID is required' };
+  }
+
+  try {
+    const details = await fetchEpmApprovalDetails(requestUid);
+    if (!details) {
+      return {
+        success: false,
+        message: 'EPM approval details were not available from Keeper Commander'
+      };
+    }
+
+    return {
+      success: true,
+      details,
+      redactedDetails: redactEpmApprovalDetails(details)
+    };
+  } catch (error) {
+    logger.warn('Failed to fetch EPM approval details', {
+      requestUid,
+      error: error.message
+    });
+    return {
+      success: false,
+      message: 'Failed to fetch EPM approval details'
+    };
+  }
+});
+
 
 /**
  * Check if EPM request is already expired (has the issue property)
@@ -3450,6 +3316,17 @@ resolver.define('checkEpmActionTaken', async (req) => {
         message: 'Request already expired'
       };
     }
+
+    if (labels.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
+      return {
+        success: true,
+        actionTaken: true,
+        action: 'processed_outside',
+        message:
+          'This EPM approval request was already processed outside Jira ' +
+          '(no longer pending in Keeper).'
+      };
+    }
     
     // No action label found
     return { 
@@ -3467,6 +3344,172 @@ resolver.define('checkEpmActionTaken', async (req) => {
       action: null,
       message: err.message 
     };
+  }
+});
+
+/**
+ * Check if a device admin approval action was already taken on this ticket.
+ * Looks for the `device-approved` / `device-denied` labels added by the
+ * executeKeeperAction resolver after a successful Commander call.
+ */
+resolver.define('checkDeviceActionTaken', async (req) => {
+  const { issueKey } = req.payload;
+
+  if (!issueKey) {
+    throw new Error('Issue key is required');
+  }
+
+  try {
+    const issueResponse = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}?fields=labels`,
+      {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      },
+      'Check device action labels'
+    );
+
+    if (!issueResponse.ok) {
+      throw new Error('Failed to fetch issue details');
+    }
+
+    const issueData = await issueResponse.json();
+    const labels = issueData.fields?.labels || [];
+
+    if (labels.includes('device-approved')) {
+      return {
+        success: true,
+        actionTaken: true,
+        action: 'approved',
+        message: 'Device request already approved'
+      };
+    }
+
+    if (labels.includes('device-denied')) {
+      return {
+        success: true,
+        actionTaken: true,
+        action: 'denied',
+        message: 'Device request already denied'
+      };
+    }
+
+    if (labels.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
+      return {
+        success: true,
+        actionTaken: true,
+        action: 'processed_outside',
+        message:
+          'This device approval request was already processed outside Jira ' +
+          '(no longer in Keeper\'s pending list).'
+      };
+    }
+
+    return {
+      success: true,
+      actionTaken: false,
+      action: null,
+      message: 'No action taken yet'
+    };
+
+  } catch (err) {
+    logger.error('Error checking device action', err);
+    return {
+      success: false,
+      actionTaken: false,
+      action: null,
+      message: err.message
+    };
+  }
+});
+
+/**
+ * Check whether the device referenced by this ticket is still in Keeper's
+ * pending device-approval list. Called by DeviceApprovalPanel on load so we
+ * can skip the Approve/Deny buttons (and tag the ticket) if an admin already
+ * actioned the request outside Jira
+ */
+resolver.define('checkDevicePendingStatus', async (req) => {
+  const userId = req?.context?.accountId;
+  const issueKey = req.payload?.issueKey;
+
+  if (!issueKey) {
+    return { success: false, message: 'Issue key is required' };
+  }
+
+  try {
+    // Reuse the same description-payload extraction the panel uses.
+    const issueResp = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}?fields=description,labels`,
+      { method: 'GET', headers: { Accept: 'application/json' } },
+      'Get ITSM ticket data for device pending check'
+    );
+    if (!issueResp.ok) {
+      return { success: false, message: `Failed to fetch issue: ${issueResp.statusText}` };
+    }
+    const issue = await issueResp.json();
+    const description = issue.fields?.description;
+
+    let payload = null;
+    if (description?.content) {
+      const codeBlock = description.content.find(
+        (b) => b.type === 'codeBlock' && b.attrs?.language === 'json'
+      );
+      if (codeBlock?.content?.[0]?.text) {
+        try {
+          payload = JSON.parse(codeBlock.content[0].text);
+        } catch (e) {
+          logger.warn('Failed to parse ITSM payload for pending check', { issueKey });
+        }
+      }
+    }
+
+    if (!payload) {
+      return { success: false, message: 'No ITSM payload found on this ticket' };
+    }
+
+    // Same precedence as DeviceApprovalPanel.getDeviceTarget().
+    const target =
+      payload.username ||
+      payload.email ||
+      payload.user?.email ||
+      payload.account_info?.Username ||
+      payload.device_id ||
+      payload.deviceId ||
+      payload.device_uid ||
+      payload.encrypted_device_token ||
+      payload.device_token ||
+      null;
+
+    if (!target) {
+      return {
+        success: false,
+        message: 'Could not resolve a user email or device ID from the ticket payload'
+      };
+    }
+
+    const pending = await fetchPendingDeviceApprovals(userId);
+    const isPending = isTargetPending(pending, target);
+
+    if (!isPending) {
+      // Persist the resolved state on the ticket so subsequent loads short-circuit
+      // via checkDeviceActionTaken instead of hitting Keeper again.
+      await markAlreadyProcessedOutsideJira(issueKey, target, null, 'device');
+      return {
+        success: true,
+        pending: false,
+        target,
+        alreadyProcessed: true,
+        message:
+          `${target} is no longer in Keeper's pending device-approval list. ` +
+          'The request was already processed outside Jira.'
+      };
+    }
+
+    return { success: true, pending: true, target };
+  } catch (err) {
+    logger.error('Error checking device pending status', err);
+    return { success: false, message: err.message };
   }
 });
 
@@ -4246,24 +4289,6 @@ resolver.define('clearStoredRequestData', async (req) => {
   }
 });
 
-
-/**
- * Web trigger handler - modularized implementation
- * 
- * Enhanced with API integration for fetching EPM approval details
- * See: modules/webhookHandler.js for full implementation
- * 
- * Features:
- * - Fetches detailed approval data from Keeper API
- * - Auto-sync fallback (epm sync-down) if data doesn't exist
- * - Creates enriched tickets with detailed information
- * - Graceful fallback to webhook payload if API unavailable
- * - Auto-assigns to project admin
- */
-export { webTriggerHandler };
-
-// Export resolver for frontend calls
-// Note: webTriggerHandler now imported from modules/webhookHandler.js
 export const handler = resolver.getDefinitions();
 
 // Export same resolver for issue panel - they can share the same functions

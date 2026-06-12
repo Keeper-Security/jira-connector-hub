@@ -1,7 +1,7 @@
 {
   "files": {
     "main.css": "./static/css/main.0373e8ee.css",
-    "main.js": "./static/js/main.c4a739e6.js",
+    "main.js": "./static/js/main.611430d8.js",
     "@atlaskit-internal_atlassian-custom-theme.js": "./static/js/@atlaskit-internal_atlassian-custom-theme.758145aa.chunk.js",
     "@atlaskit-internal_atlassian-light.js": "./static/js/@atlaskit-internal_atlassian-light.e2c222c8.chunk.js",
     "@atlaskit-internal_atlassian-light-future.js": "./static/js/@atlaskit-internal_atlassian-light-future.896b6928.chunk.js",
@@ -16,6 +16,6 @@
   },
   "entrypoints": [
     "static/css/main.0373e8ee.css",
-    "static/js/main.c4a739e6.js"
+    "static/js/main.611430d8.js"
   ]
 }

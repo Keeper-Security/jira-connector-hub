@@ -5,14 +5,12 @@ import React from 'react';
 import SettingsIcon from "@atlaskit/icon/glyph/settings";
 import InfoIcon from "@atlaskit/icon/glyph/info";
 import BookIcon from "@atlaskit/icon/glyph/book";
-import ListIcon from "@atlaskit/icon/glyph/list";
 import { TABS } from '../../constants';
 import '../../styles/TabBar.css';
 
 const TabBar = ({ activeTab, onTabChange, isAdmin }) => {
   const tabs = [
     { id: TABS.CONFIG, label: "Configuration", icon: SettingsIcon, requiresAdmin: true },
-    { id: TABS.EPM, label: "Endpoint Privilege Manager", icon: ListIcon, requiresAdmin: false },
     { id: TABS.PREREQ, label: "Prerequisites", icon: BookIcon, requiresAdmin: false },
     { id: TABS.ABOUT, label: "About", icon: InfoIcon, requiresAdmin: false }
   ];

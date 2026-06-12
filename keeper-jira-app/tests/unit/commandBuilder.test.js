@@ -269,11 +269,11 @@ describe('validateCommandParameters', () => {
     expect(result.errors.length).toBeGreaterThanOrEqual(2);
   });
 
-  test('passes cliCommand without validation', () => {
-    const result = validateCommandParameters('any-action', {
-      cliCommand: 'some pre-built command'
+  test('cliCommand field does not bypass validation', () => {
+    const result = validateCommandParameters('share-record', {
+      cliCommand: 'get someRecordUid --format=json'
     });
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
   });
 });
 
@@ -411,14 +411,74 @@ describe('buildKeeperCommand', () => {
     });
   });
 
-  describe('pre-formatted commands', () => {
-    test('returns cliCommand as-is', () => {
-      const prebuilt = 'epm approval action --approve abc123';
+  describe('device-approve', () => {
+    test('builds unquoted email then flag (matches interactive shell)', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: 'mnaqvi@keepersecurity.com', action: 'approve' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve mnaqvi@keepersecurity.com --approve');
+    });
+
+    test('builds deny variant', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: 'user@example.com', action: 'deny' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve user@example.com --deny');
+    });
+
+    test('trims email whitespace', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: '  user@example.com  ', action: 'approve' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve user@example.com --approve');
+    });
+
+    test('double-quotes email when token needs it', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: 'user!name@example.com', action: 'approve' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve "user\\!name@example.com" --approve');
+    });
+  });
+
+  describe('EPM approval action', () => {
+    test('builds approve command from structured params', () => {
       const command = buildKeeperCommand('epm approval action', {
-        cliCommand: prebuilt
+        epmDecision: 'approve',
+        approvalUid: 'abc123'
       }, 'TEST-1');
-      
-      expect(command).toBe(prebuilt);
+      expect(command).toBe('epm approval action --approve abc123');
+    });
+
+    test('builds deny command from structured params', () => {
+      const command = buildKeeperCommand('epm approval action', {
+        epmDecision: 'deny',
+        approvalUid: 'xyz789'
+      }, 'TEST-1');
+      expect(command).toBe('epm approval action --deny xyz789');
+    });
+
+    test('rejects missing decision', () => {
+      expect(() => {
+        buildKeeperCommand('epm approval action', { approvalUid: 'abc123' }, 'TEST-1');
+      }).toThrow('Input validation failed');
+    });
+
+    test('rejects invalid UID characters', () => {
+      expect(() => {
+        buildKeeperCommand('epm approval action', {
+          epmDecision: 'approve',
+          approvalUid: 'abc; enterprise-info'
+        }, 'TEST-1');
+      }).toThrow('invalid characters');
     });
   });
 });

@@ -55,8 +55,15 @@ const ERROR_CODES = {
   // EPM-specific Errors (Endpoint Privilege Manager)
   EPM_ALREADY_APPROVED: 'EPM_ALREADY_APPROVED',
   EPM_ALREADY_DENIED: 'EPM_ALREADY_DENIED',
+  EPM_ALREADY_PROCESSED_OUTSIDE_JIRA: 'EPM_ALREADY_PROCESSED_OUTSIDE_JIRA',
   EPM_EXPIRED: 'EPM_EXPIRED',
   EPM_INVALID_UID: 'EPM_INVALID_UID',
+
+  // Device admin approval errors (label: ITSM_device_admin_approval_requested)
+  DEVICE_ALREADY_APPROVED: 'DEVICE_ALREADY_APPROVED',
+  DEVICE_ALREADY_DENIED: 'DEVICE_ALREADY_DENIED',
+  DEVICE_ALREADY_PROCESSED_OUTSIDE_JIRA: 'DEVICE_ALREADY_PROCESSED_OUTSIDE_JIRA',
+  DEVICE_INVALID_UID: 'DEVICE_INVALID_UID',
   
   // Jira API Errors
   JIRA_API_ERROR: 'JIRA_API_ERROR',
@@ -67,12 +74,7 @@ const ERROR_CODES = {
   // Storage Errors
   STORAGE_ERROR: 'STORAGE_ERROR',
   STORAGE_NOT_FOUND: 'STORAGE_NOT_FOUND',
-  
-  // Webhook Errors
-  WEBHOOK_NOT_CONFIGURED: 'WEBHOOK_NOT_CONFIGURED',
-  WEBHOOK_INVALID_TOKEN: 'WEBHOOK_INVALID_TOKEN',
-  WEBHOOK_RATE_LIMITED: 'WEBHOOK_RATE_LIMITED',
-  
+
   // Generic Errors
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   UNKNOWN_ERROR: 'UNKNOWN_ERROR'
@@ -199,14 +201,7 @@ const TROUBLESHOOTING = {
     'You may not have permission to access this resource',
     'Check your Jira project permissions'
   ],
-  
-  // Webhook
-  [ERROR_CODES.WEBHOOK_NOT_CONFIGURED]: [
-    'Configure the webhook in Global Settings > Webhook Configuration',
-    'Set the target project and issue type',
-    'Generate an authentication token'
-  ],
-  
+
   // Generic
   [ERROR_CODES.INTERNAL_ERROR]: [
     'An unexpected error occurred',
@@ -388,18 +383,48 @@ function epmError(type, message = null) {
   const codeMap = {
     approved: ERROR_CODES.EPM_ALREADY_APPROVED,
     denied: ERROR_CODES.EPM_ALREADY_DENIED,
-    expired: ERROR_CODES.EPM_EXPIRED
+    expired: ERROR_CODES.EPM_EXPIRED,
+    processed_outside: ERROR_CODES.EPM_ALREADY_PROCESSED_OUTSIDE_JIRA
   };
   
   const messageMap = {
     approved: 'This approval request has already been approved',
     denied: 'This approval request has already been denied',
-    expired: 'This approval request has expired and can no longer be processed'
+    expired: 'This approval request has expired and can no longer be processed',
+    processed_outside:
+      'This EPM approval request was already processed outside Jira ' +
+      '(no longer pending in Keeper).'
   };
   
   const code = codeMap[type] || ERROR_CODES.INTERNAL_ERROR;
   const defaultMessage = messageMap[type] || 'Unknown EPM error';
   
+  return errorResponse(code, message || defaultMessage);
+}
+
+/**
+ * Create a device-admin-approval-specific error response.
+ * @param {string} type - 'approved' or 'denied'
+ * @param {string} message - Optional custom message
+ */
+function deviceError(type, message = null) {
+  const codeMap = {
+    approved: ERROR_CODES.DEVICE_ALREADY_APPROVED,
+    denied: ERROR_CODES.DEVICE_ALREADY_DENIED,
+    processed_outside: ERROR_CODES.DEVICE_ALREADY_PROCESSED_OUTSIDE_JIRA
+  };
+
+  const messageMap = {
+    approved: 'This device approval request has already been approved',
+    denied: 'This device approval request has already been denied',
+    processed_outside:
+      'This device approval request was already processed outside Jira ' +
+      '(no longer in Keeper\'s pending list).'
+  };
+
+  const code = codeMap[type] || ERROR_CODES.INTERNAL_ERROR;
+  const defaultMessage = messageMap[type] || 'Unknown device approval error';
+
   return errorResponse(code, message || defaultMessage);
 }
 
@@ -490,6 +515,7 @@ module.exports = {
   connectionError,
   keeperError,
   epmError,
+  deviceError,
   withErrorHandling,
   errorFromException
 };

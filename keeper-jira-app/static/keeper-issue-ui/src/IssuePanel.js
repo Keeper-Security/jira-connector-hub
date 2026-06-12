@@ -15,6 +15,7 @@ import * as api from "./services/api";
 import { handleApiError as handleApiErrorUtil, isStructuredError, getErrorCode } from "./utils/errorHandler";
 import { formatWithUid, filterByTitleOrUid } from "./utils/formatters";
 import EpmApprovalPanel from "./components/issue/EpmApprovalPanel";
+import DeviceApprovalPanel from "./components/issue/DeviceApprovalPanel";
 import "./styles/IssuePanel.css";
 
 // Keeper action options - using imported constant
@@ -86,9 +87,15 @@ const IssuePanel = () => {
   const [storedRequestData, setStoredRequestData] = useState(null); // Store user's saved request
   const [hasStoredData, setHasStoredData] = useState(false); // Track if data has been stored
   const [isUpdating, setIsUpdating] = useState(false); // Track update operation
-  const [isRestrictedWebhookTicket, setIsRestrictedWebhookTicket] = useState(false); // Track if ticket is admin-only webhook ticket
-  
-  
+  // ITSM-driven approval ticket type: 'epm' | 'device' | null.
+  // Adding a new ITSM workflow requires only a new entry in this map.
+  const ITSM_LABEL_HANDLERS = {
+    'ITSM_approval_request_created': 'epm',
+    'ITSM_device_admin_approval_requested': 'device',
+  };
+  const [itsmKind, setItsmKind] = useState(null);
+
+
   // Expiration warning modal for share-record action
   const [showExpirationWarningModal, setShowExpirationWarningModal] = useState(false);
   const [pendingExpirationValue, setPendingExpirationValue] = useState(null);
@@ -3844,12 +3851,12 @@ const IssuePanel = () => {
       .then((context) => {
         setIssueContext(context);
         
-        // Check if this is a restricted webhook ticket (endpoint_privilege_manager + approval_request_created)
+        // The companion JIRA ITSM Forge app prefixes the audit_event with "ITSM_"
+        // when adding it as a Jira label. Detect each ITSM-driven workflow we
+        // know how to render so we can route to the right admin panel below.
         const labels = context.labels || [];
-        const hasEndpointPrivilegeLabel = labels.includes('endpoint-privilege-manager');
-        const hasApprovalRequestLabel = labels.includes('approval-request-created');
-        const isRestricted = hasEndpointPrivilegeLabel && hasApprovalRequestLabel;
-        setIsRestrictedWebhookTicket(isRestricted);
+        const matchedLabel = labels.find(l => ITSM_LABEL_HANDLERS[l]);
+        setItsmKind(matchedLabel ? ITSM_LABEL_HANDLERS[matchedLabel] : null);
         
         // Clear any previous stored data to ensure fresh start for new ticket
         setStoredRequestData(null);
@@ -4368,9 +4375,13 @@ const IssuePanel = () => {
     );
   }
 
-  // Restrict access for webhook-created tickets (endpoint_privilege_manager + approval_request_created)
-  // Only admins can access the panel for these tickets
-  if (isRestrictedWebhookTicket && !isAdmin) {
+ // Restrict access for ITSM-driven approval tickets (EPM + device admin).
+  // Only admins can act on these; everyone else gets the same locked-out
+  // message regardless of which specific ITSM workflow created the ticket.
+  if (itsmKind && !isAdmin) {
+    const restrictedSubject = itsmKind === 'device'
+      ? 'a device admin approval request'
+      : 'an Endpoint Privilege Manager approval request';
     return (
       <div className="issue-panel-container">
         <div className="panel-header">
@@ -4386,7 +4397,7 @@ const IssuePanel = () => {
         <div className="panel-body">
           <SectionMessage appearance="warning" title="Administrator Access Required">
             <p>
-              This ticket was automatically created from a Keeper Security Endpoint Privilege Manager approval request. 
+              This ticket was created by the Keeper Security ITSM integration for {restrictedSubject}.
               Access to the Keeper integration panel for these tickets is restricted to Jira Administrators and Project Administrators only.
             </p>
             <p style={{ marginTop: '12px' }}>
@@ -4398,9 +4409,13 @@ const IssuePanel = () => {
     );
   }
 
-  // Show custom EPM UI for webhook-created tickets when user is admin
-  if (isRestrictedWebhookTicket && isAdmin) {
+  // Admin-facing routing: dispatch to the dedicated panel for each ITSM
+  // workflow we recognise via labels.
+  if (itsmKind === 'epm' && isAdmin) {
     return <EpmApprovalPanel issueContext={issueContext} />;
+  }
+  if (itsmKind === 'device' && isAdmin) {
+    return <DeviceApprovalPanel issueContext={issueContext} />;
   }
 
   const rootClassName = `app-root ${
