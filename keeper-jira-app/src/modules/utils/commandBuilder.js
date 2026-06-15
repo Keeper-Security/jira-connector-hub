@@ -69,6 +69,27 @@ const VALIDATION_PATTERNS = {
 };
 
 // ============================================================================
+// Keeper Command Constants
+// ============================================================================
+
+const KEEPER_ACTIONS = Object.freeze({
+  APPROVE: 'approve',
+  DENY:    'deny',
+});
+
+const KEEPER_FLAGS = Object.freeze({
+  APPROVE: '--approve',
+  DENY:    '--deny',
+});
+
+// Allowed characters for a device-approve target (email or device ID) when
+// passed unquoted to the shell.
+const SAFE_DEVICE_TARGET_PATTERN = /^[a-zA-Z0-9._+\-@]+$/;
+
+// EPM approval UIDs must be strictly alphanumeric + hyphens/underscores.
+const SAFE_EPM_UID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+// ============================================================================
 // Validation Functions
 // ============================================================================
 
@@ -297,7 +318,7 @@ function validateCommandParameters(action, parameters) {
     }
     
     case 'epm approval action': {
-      if (!parameters.epmDecision || !['approve', 'deny'].includes(parameters.epmDecision)) {
+      if (!parameters.epmDecision || !Object.values(KEEPER_ACTIONS).includes(parameters.epmDecision)) {
         errors.push('EPM approval decision must be "approve" or "deny"');
       }
       if (!parameters.approvalUid || !String(parameters.approvalUid).trim()) {
@@ -307,7 +328,7 @@ function validateCommandParameters(action, parameters) {
     }
 
     case 'device-approve': {
-      if (!parameters.action || (parameters.action !== 'approve' && parameters.action !== 'deny')) {
+      if (!parameters.action || !Object.values(KEEPER_ACTIONS).includes(parameters.action)) {
         errors.push('Action must be "approve" or "deny" for device-approve');
       }
       // Target may be a user email or a Keeper device ID (matches index.js behaviour).
@@ -523,14 +544,14 @@ function buildKeeperCommand(action, parameters, issueKey) {
     case 'epm approval action': {
       const decision = parameters.epmDecision;
       const uid = String(parameters.approvalUid || '').trim();
-      if (!decision || !['approve', 'deny'].includes(decision)) {
+      if (!decision || !Object.values(KEEPER_ACTIONS).includes(decision)) {
         throw new Error('EPM approval decision must be "approve" or "deny"');
       }
       if (!uid) {
         throw new Error('EPM approval UID is required');
       }
       // Strict charset — prevent shell injection via the UID.
-      if (!/^[A-Za-z0-9_-]+$/.test(uid)) {
+      if (!SAFE_EPM_UID_PATTERN.test(uid)) {
         throw new Error('EPM approval UID contains invalid characters');
       }
       command += ` --${decision} ${uid}`;
@@ -543,12 +564,11 @@ function buildKeeperCommand(action, parameters, issueKey) {
       if (!rawTarget) {
         throw new Error('Email or device ID is required for device-approve command');
       }
-      if (!parameters.action || (parameters.action !== 'approve' && parameters.action !== 'deny')) {
+      if (!parameters.action || !Object.values(KEEPER_ACTIONS).includes(parameters.action)) {
         throw new Error('Action must be "approve" or "deny" for device-approve command');
       }
-      const flag = parameters.action === 'approve' ? '--approve' : '--deny';
-      const safeToken = /^[a-zA-Z0-9._+\-@]+$/;
-      if (safeToken.test(rawTarget)) {
+      const flag = parameters.action === KEEPER_ACTIONS.APPROVE ? KEEPER_FLAGS.APPROVE : KEEPER_FLAGS.DENY;
+      if (SAFE_DEVICE_TARGET_PATTERN.test(rawTarget)) {
         command += ` ${rawTarget} ${flag}`;
       } else {
         command += ` "${escapeForDoubleQuotes(rawTarget)}" ${flag}`;
@@ -572,6 +592,10 @@ module.exports = {
   // Configuration
   VALIDATION_LIMITS,
   VALIDATION_PATTERNS,
+  KEEPER_ACTIONS,
+  KEEPER_FLAGS,
+  SAFE_DEVICE_TARGET_PATTERN,
+  SAFE_EPM_UID_PATTERN,
   
   // Validation functions
   validateField,
