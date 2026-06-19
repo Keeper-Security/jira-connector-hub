@@ -73,7 +73,7 @@ function appendEmails(command, userField) {
  */
 function appendAction(command, action) {
   if (!action) return command;
-  return `${command} -a ${action}`;
+  return `${command} -a '${escapeForSingleQuotes(action)}'`;
 }
 
 /**
@@ -93,7 +93,7 @@ function appendRole(command, parameters, action) {
   // Skip for `remove` (nsf-share-folder) and `owner` (nsf-share-record) where
   // role is not meaningful per Commander docs.
   if (action === 'remove' || action === 'owner') return command;
-  return `${command} -r ${role}`;
+  return `${command} -r '${escapeForSingleQuotes(role)}'`;
 }
 
 /**

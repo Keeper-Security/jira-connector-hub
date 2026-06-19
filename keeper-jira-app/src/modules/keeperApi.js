@@ -211,28 +211,10 @@ async function fetchWithRetry(url, options = {}, operationName = 'Keeper API') {
 // Rate Limiting Functions
 // ============================================================================
 
-// Verbs considered read-only / idempotent. Anything else is treated as a
-// write. Match is case-insensitive on the first whitespace-delimited token.
-// Keep in sync with ALLOWED_COMMAND_PREFIXES in src/index.js.
-const READ_ONLY_COMMAND_VERBS = new Set([
-  'list', 'ls', 'get', 'search', 'tree', 'cd',
-  'nsf-list', 'nsf-get',
-  'record-type-info', 'rti',
-  'service-status',
-  'enterprise-info', 'ei', 'enterprise-role', 'enterprise-user',
-]);
-
-/**
- * Classify a Keeper Commander command string into a rate-limit bucket.
- * Used by executeKeeperCommand so resolvers don't need to know about buckets.
- * @param {string} command - Full command, e.g. "nsf-list --records --format=json"
- * @returns {'read'|'write'}
- */
-function getRateLimitBucketForCommand(command) {
-  if (typeof command !== 'string' || !command.trim()) return 'write';
-  const verb = command.trim().split(/\s+/)[0].toLowerCase();
-  return READ_ONLY_COMMAND_VERBS.has(verb) ? 'read' : 'write';
-}
+// Rate-limit bucket classification is extracted into a standalone CJS module
+// (utils/rateLimitBucket.js) so it can be unit-tested without Forge ESM.
+import { getRateLimitBucketForCommand, READ_ONLY_COMMAND_VERBS } from './utils/rateLimitBucket.js';
+export { getRateLimitBucketForCommand, READ_ONLY_COMMAND_VERBS };
 
 /**
  * Load per-bucket rate-limit window counts from Forge storage.

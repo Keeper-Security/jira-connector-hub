@@ -914,6 +914,18 @@ function validateCommandParameters(action, parameters, options = {}) {
       } else if (parameters.action !== 'cancel') {
         errors.push('User email is required for share operations');
       }
+
+      // Action allow-list check
+      if (parameters.action) {
+        const validShareActions = isNsfMode
+          ? ['grant', 'revoke', 'remove', 'owner']
+          : ['grant', 'revoke', 'cancel'];
+        if (!validShareActions.includes(parameters.action)) {
+          errors.push(
+            `Invalid action "${parameters.action}". Must be one of: ${validShareActions.join(', ')}`
+          );
+        }
+      }
       
       // Expiration validation
       if (parameters.expire_in) {
@@ -1939,7 +1951,7 @@ resolver.define('executeKeeperCommand', async (req) => {
   }
 
   try {
-    const result = await executeKeeperApiCommand(sanitizedCommand, { userId });
+    const result = await executeKeeperApiCommand(sanitizedCommand, { userId, forgeSafe: true });
     return result;
   } catch (err) {
     // Check for rate limit error

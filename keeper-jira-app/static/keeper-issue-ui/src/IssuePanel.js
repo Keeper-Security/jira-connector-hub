@@ -127,8 +127,8 @@ const IssuePanel = () => {
   // Email validation state
   const [emailValidationError, setEmailValidationError] = useState(null);
 
-  // Vault mode: NSF by default; Classic when user opts in via checkbox.
-  const [isNsfMode, setIsNsfMode] = useState(true);
+  // Vault mode: Classic by default; NSF when user opts in via checkbox.
+  const [isNsfMode, setIsNsfMode] = useState(false);
 
   // Pagination settings
   const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
@@ -988,7 +988,7 @@ const IssuePanel = () => {
     setSelectedAction(data.selectedAction);
     setFormData(data.formData || {});
 
-    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : true;
+    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : false;
     setIsNsfMode(nsfEnabled);
 
     if (data.formData?.addressRef?.startsWith('temp_addr_')) {
@@ -4608,7 +4608,7 @@ const IssuePanel = () => {
                     Required Information:
                   </div>
 
-                  {selectedAction.value === 'record-update' && renderClassicModeCheckbox()}
+                  {['record-update', 'share-record', 'share-folder', 'record-permission'].includes(selectedAction.value) && renderClassicModeCheckbox()}
 
                   {/* Records Selector for record-update action only */}
                   {selectedAction.value === 'record-update' && (
@@ -5642,7 +5642,6 @@ const IssuePanel = () => {
 
                       return (
                         <React.Fragment key={field.name}>
-                          {field.name === 'action' && renderClassicModeCheckbox()}
                           <FormField
                             hideLabel={field.type === 'phoneEntries'}
                             label={field.label}
