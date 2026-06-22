@@ -8,6 +8,10 @@
 const {
   VALIDATION_LIMITS,
   VALIDATION_PATTERNS,
+  KEEPER_ACTIONS,
+  KEEPER_FLAGS,
+  SAFE_DEVICE_TARGET_PATTERN,
+  SAFE_EPM_UID_PATTERN,
   validateField,
   validateEmails,
   validatePhoneEntry,
@@ -446,6 +450,21 @@ describe('buildKeeperCommand', () => {
         'TEST-1'
       );
       expect(command).toBe('device-approve "user\\!name@example.com" --approve');
+    });
+
+    test('accepts a device ID (non-email token) as target', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { email: 'ABC123_device-id', action: 'approve' },
+        'TEST-1'
+      );
+      expect(command).toBe('device-approve ABC123_device-id --approve');
+    });
+
+    test('throws with correct message when target is missing', () => {
+      expect(() => {
+        buildKeeperCommand('device-approve', { action: 'approve' }, 'TEST-1');
+      }).toThrow('Email or device ID is required');
     });
   });
 

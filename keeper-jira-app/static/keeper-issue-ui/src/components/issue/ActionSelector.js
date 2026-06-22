@@ -1,89 +1,105 @@
-/**
- * ActionSelector component - dropdown for selecting Keeper actions
- */
-import React, { useState } from 'react';
-import { KEEPER_ACTION_OPTIONS } from '../../constants';
-import '../../styles/ActionSelector.css';
+import React from 'react';
+import PaginationFooter from './PaginationFooter';
+import SearchHint from './SearchHint';
 
-const ActionSelector = ({ selectedAction, onActionSelect, disabled = false }) => {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [showDropdown, setShowDropdown] = useState(false);
+// Full action dropdown with search, pagination, and description box.
+const ActionSelector = ({
+  selectedAction,
+  onActionSelect,
+  disabled,
+  searchTerm,
+  onSearchChange,
+  showDropdown,
+  onToggleDropdown,
+  onCloseDropdown,
+  onFocusInput,
+  paginatedOptions,
+  filteredCount,
+  currentPage,
+  totalPages,
+  onPrevPage,
+  onNextPage,
+}) => (
+  <div className="mb-12">
+    <label className="label-block">Select Keeper Action:</label>
 
-  const filteredActions = KEEPER_ACTION_OPTIONS.filter(action =>
-    action.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    action.description.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    <div className="relative z-1001">
+      <input
+        id="keeper-action-input"
+        type="text"
+        disabled={disabled}
+        placeholder={
+          disabled
+            ? 'Form disabled after successful execution...'
+            : showDropdown
+              ? 'Type to search actions...'
+              : (selectedAction ? selectedAction.label : 'Click to select action...')
+        }
+        value={showDropdown ? searchTerm : (selectedAction ? selectedAction.label : '')}
+        onChange={(e) => { if (!disabled) onSearchChange(e.target.value); }}
+        onClick={() => { if (!disabled) onToggleDropdown(); }}
+        onFocus={() => { if (!disabled) onFocusInput(); }}
+        className={`action-select-input ${disabled ? 'action-select-input-disabled' : (showDropdown ? 'action-select-input-focused' : 'action-select-input-default')}`}
+      />
 
-  const handleActionClick = (action) => {
-    onActionSelect(action);
-    setShowDropdown(false);
-    setSearchTerm("");
-  };
-
-  return (
-    <div className="action-selector-wrapper">
-      <label className="action-selector-label">
-        Select Keeper Action <span className="required-mark">*</span>
-      </label>
-      
-      <div className="dropdown-wrapper">
-        <button
-          className="action-selector-button"
-          onClick={() => !disabled && setShowDropdown(!showDropdown)}
-          disabled={disabled}
-        >
-          {selectedAction ? selectedAction.label : "Choose an action..."}
-          <span className="action-selector-arrow">{showDropdown ? "▲" : "▼"}</span>
-        </button>
-
-        {showDropdown && (
-          <>
-            <div
-              className="dropdown-backdrop"
-              onClick={() => setShowDropdown(false)}
-            />
-            
-            <div className="action-selector-dropdown">
-              <input
-                type="text"
-                className="action-selector-search"
-                placeholder="Search actions..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                autoFocus
-              />
-
-              <div className="action-selector-items">
-                {filteredActions.length === 0 ? (
-                  <div className="action-selector-empty">No actions found</div>
-                ) : (
-                  filteredActions.map((action) => (
-                    <div
-                      key={action.value}
-                      className={`action-selector-item ${selectedAction?.value === action.value ? 'selected' : ''}`}
-                      onClick={() => handleActionClick(action)}
-                    >
-                      <div className="action-selector-item-title">{action.label}</div>
-                      <div className="action-selector-item-description">{action.description}</div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </>
-        )}
+      <div
+        onClick={() => { if (!disabled) onToggleDropdown(); }}
+        className={`dropdown-arrow-pos ${disabled ? 'dropdown-arrow-pos-disabled' : 'dropdown-arrow-pos-enabled'}`}
+      >
+        ▼
       </div>
 
-      {selectedAction && (
-        <div className="action-selector-info">
-          <div className="action-selector-info-title">Selected Action:</div>
-          <div className="action-selector-info-description">{selectedAction.description}</div>
+      {showDropdown && !disabled && (
+        <div className="action-dropdown-menu">
+          {!searchTerm && <SearchHint size="lg" />}
+
+          {paginatedOptions.length > 0 ? (
+            <>
+              {paginatedOptions.map((option) => (
+                <div
+                  key={option.value}
+                  onClick={() => onActionSelect(option)}
+                  className={`action-option-item ${selectedAction?.value === option.value ? 'selected' : ''}`}
+                >
+                  <div className="dropdown-option-title">{option.label}</div>
+                  <div className="dropdown-option-description">{option.description}</div>
+                </div>
+              ))}
+
+              <PaginationFooter
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPrev={onPrevPage}
+                onNext={onNextPage}
+                itemCount={filteredCount}
+                itemLabel="items"
+                variant="compact"
+              />
+            </>
+          ) : (
+            <div className="no-results-message">
+              No actions found matching &quot;{searchTerm}&quot;
+            </div>
+          )}
         </div>
       )}
+
+      {showDropdown && (
+        <div className="fixed-overlay" onClick={onCloseDropdown} />
+      )}
     </div>
-  );
-};
+
+    {selectedAction && (
+      <div className="action-description-box">
+        <strong>{selectedAction.label}:</strong> {selectedAction.description}
+        {selectedAction.value === 'record-update' && (
+          <div className="action-note">
+            Note: Form fields will be blank. Only fill in the fields you want to update - empty fields will be ignored.
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+);
 
 export default ActionSelector;
-
-

@@ -10,7 +10,8 @@ A powerful Atlassian Forge application that integrates Keeper Security's vault m
 - **Update Records** - Modify existing vault records including passwords, usernames, and custom fields
 - **Share Records** - Grant or revoke user access to individual records with configurable permissions and expiration
 - **Share Folders** - Manage folder-level access and permissions for users or teams
-- **Record Permissions** - Control granular permissions within shared folders
+- **Record Permissions** - Control granular permissions within folders
+- **Two permission models** - All five vault actions support both the **new shared folder** model and the **classic** model. The new shared folder model uses role-based access control (viewer, share-manager, content-manager, content-and-share-manager, full-manager). Toggle between models via the "Use classic permission model" checkbox in the issue panel
 
 ### Endpoint Privilege Manager (EPM)
 
@@ -35,7 +36,8 @@ A powerful Atlassian Forge application that integrates Keeper Security's vault m
 
 ### Rate Limiting
 
-- **Keeper Commands**: 5 per minute, 50 per hour (per user)
+- **Read commands** (list, get, record-type-info): 30 per minute, 300 per hour (per user)
+- **Write commands** (record-add, share-record, etc.): 5 per minute, 50 per hour (per user)
 
 ## Architecture
 
@@ -69,7 +71,7 @@ A powerful Atlassian Forge application that integrates Keeper Security's vault m
 ### Keeper Security
 
 - Keeper Enterprise account with Commander CLI access
-- Commander CLI version 17.1.7 or later (for API v2 async queue support)
+- Commander CLI version 18.0.0 or later (required for the new shared folder model; 17.1.7+ for classic-only)
 - Commander CLI running in Service Mode with queue enabled (`-q y`)
 
 ### Tunneling
@@ -117,7 +119,7 @@ this-device timeout 30d
 ```bash
 keeper service-create \
   -p=9009 \
-  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" \
+  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,device-approve,enterprise-info,ei,service-status,one-time-share,rm,sync-down,search,tree,cd,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission" \
   -rm="foreground" \
   -q=y \
   -f=json
@@ -128,7 +130,7 @@ keeper service-create \
 ```bash
 keeper service-create \
   -p=9009 \
-  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" \
+  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,device-approve,enterprise-info,ei,service-status,one-time-share,rm,sync-down,search,tree,cd,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission" \
   -rm="foreground" \
   -q=y \
   -ng="<ngrok-auth-token>" \
@@ -143,7 +145,7 @@ keeper service-create \
 ```bash
 keeper service-create \
   -p=9009 \
-  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" \
+  -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,device-approve,enterprise-info,ei,service-status,one-time-share,rm,sync-down,search,tree,cd,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission" \
   -rm="foreground" \
   -q=y \
   -cf="<cloudflare-tunnel-token>" \
@@ -181,12 +183,12 @@ This integration uses **Keeper Commander API v2** (async queue mode), which prov
 **Required Service Configuration:**
 
 
-| Setting       | Value                                                                                                                      |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Commands List | `record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status` |
-| Queue System  | `-q y` (Required for API v2)                                                                                               |
-| Run Mode      | `-rm foreground`                                                                                                           |
-| Output Format | `-f json`                                                                                                                  |
+| Setting       | Value                                                            |
+| ------------- | ---------------------------------------------------------------- |
+| Commands List | See the full `-c` allowlist in the service-create examples above |
+| Queue System  | `-q y` (Required for API v2)                                     |
+| Run Mode      | `-rm foreground`                                                 |
+| Output Format | `-f json`                                                        |
 
 
 ## Permissions
@@ -215,23 +217,36 @@ This integration uses **Keeper Commander API v2** (async queue mode), which prov
 keeper-jira-app/
 ├── manifest.yml                  # Forge app manifest
 ├── src/
-│   ├── index.js                  # Forge resolvers (global + issue panel; ~22 handlers)
+│   ├── index.js                  # Forge resolvers (global + issue panel)
 │   └── modules/
-│       ├── keeperApi.js          # Keeper API v2 integration with rate limiting
+│       ├── keeperApi.js          # Keeper API v2 integration with read/write rate limiting
 │       └── utils/
-│           ├── logger.js         # Simple logger with sensitive data redaction
+│           ├── logger.js         # Logger with sensitive data redaction
 │           ├── errorResponse.js  # Structured error responses
 │           ├── jiraApiRetry.js   # Jira API retry with exponential backoff
-│           └── commandBuilder.js # Keeper CLI command construction
+│           ├── commandBuilder.js # Keeper CLI command construction
+│           ├── nsfParser.js       # Shared folder list parsing (folders + records)
+│           └── nsfShareCommands.js # Shared folder share/permission command builders
+├── tests/
+│   ├── unit/                     # commandBuilder, nsfParser, nsfShareCommands, errorResponse
+│   ├── integration/              # webhookStatusChange
+│   └── security/                 # injectionPayloads
 └── static/
     ├── keeper-ui/                # Global settings page (React)
     │   └── src/components/
     │       ├── config/           # ConfigTab, ConfigForm
     │       └── common/           # Loading, StatusMessage, TabBar
     └── keeper-issue-ui/          # Issue panel (React)
-        └── src/components/
-            ├── issue/            # ActionSelector, EpmApprovalPanel, DeviceApprovalPanel
-            └── common/           # Dropdown, Loading, Modal, StatusMessage
+        └── src/
+            ├── IssuePanel.js     # Main issue panel component
+            ├── constants/        # Action definitions, shared folder roles, pagination
+            ├── services/         # api.js (Forge invoke wrappers)
+            ├── utils/            # errorHandler, formatters, validators
+            ├── styles/           # IssuePanel.css and component styles
+            └── components/
+                └── issue/        # ActionSelector, EpmApprovalPanel, DeviceApprovalPanel,
+                                  # FormField, RequirementsBlock, SearchHint,
+                                  # SelectedItemChip, LoadingPlaceholder,PaginationFooter
 ```
 
 ### Building
@@ -281,12 +296,13 @@ forge logs -f
 ### Common Errors
 
 
-| Error                 | Cause                               | Solution                                                  |
-| --------------------- | ----------------------------------- | --------------------------------------------------------- |
-| `Connection failed`   | Tunnel not running or URL incorrect | Start ngrok/Cloudflare tunnel, verify API URL in settings |
-| `Rate limit exceeded` | Too many commands in time window    | Wait for rate limit to reset (shown in error message)     |
-| `Queue is full`       | Commander queue capacity reached    | Wait for pending requests to complete                     |
-| `Request expired`     | EPM approval request timed out      | User must submit a new access request                     |
+| Error                               | Cause                                                           | Solution                                                                                                  |
+| ----------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `Connection failed`                 | Tunnel not running or URL incorrect                             | Start ngrok/Cloudflare tunnel, verify API URL in settings                                                 |
+| `Rate limit exceeded`               | Too many commands in time window                                | Wait for rate limit to reset (shown in error message)                                                     |
+| `Queue is full`                     | Commander queue capacity reached                                | Wait for pending requests to complete                                                                     |
+| `Request expired`                   | EPM approval request timed out                                  | User must submit a new access request                                                                     |
+| `Shared folder not available (403)` | Missing `nsf-*` verbs on service allowlist or Commander < 18.0.0 | Add all `nsf-*` commands to the `-c` allowlist (see service-create examples), upgrade Commander to 18.0.0+ |
 
 
 ### Tunnel Troubleshooting

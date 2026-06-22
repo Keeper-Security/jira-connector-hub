@@ -51,6 +51,7 @@ const ERROR_CODES = {
   KEEPER_PERMISSION_DENIED: 'KEEPER_PERMISSION_DENIED',
   KEEPER_QUEUE_FULL: 'KEEPER_QUEUE_FULL',
   KEEPER_TIMEOUT: 'KEEPER_TIMEOUT',
+  KEEPER_NSF_NOT_AVAILABLE: 'KEEPER_NSF_NOT_AVAILABLE',
   
   // EPM-specific Errors (Endpoint Privilege Manager)
   EPM_ALREADY_APPROVED: 'EPM_ALREADY_APPROVED',
@@ -79,6 +80,10 @@ const ERROR_CODES = {
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   UNKNOWN_ERROR: 'UNKNOWN_ERROR'
 };
+
+/** Commander verbs required on the Keeper Service allowlist when NSF mode is used. */
+const KEEPER_NSF_SERVICE_ALLOWLIST =
+  'nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission';
 
 // ========================================================================
 // Troubleshooting Steps by Error Code
@@ -175,6 +180,13 @@ const TROUBLESHOOTING = {
     'The Keeper Commander queue is full (max 100 requests)',
     'Wait for pending requests to complete',
     'Try again in a few moments'
+  ],
+  [ERROR_CODES.KEEPER_NSF_NOT_AVAILABLE]: [
+    'On the Keeper Service host (not only your laptop), run `keeper version` — need 18.0.0+.',
+    'On that same host run `keeper nsf-list --folders` and confirm it succeeds.',
+    `Restart the service with -c allowlist including: ${KEEPER_NSF_SERVICE_ALLOWLIST}`,
+    'Confirm Nested Share Subfolders is enabled for the vault the service logs into.',
+    'Until fixed, leave "Use Nested Share Subfolders" off — Classic mode still works.'
   ],
   
   // EPM (Endpoint Privilege Manager)
@@ -501,6 +513,69 @@ function errorFromException(error) {
   return errorResponse(ERROR_CODES.INTERNAL_ERROR, message);
 }
 
+/**
+ * Detect whether a Keeper Commander error indicates that Nested Share Subfolders (NSF) is not
+ * enabled on the customer's vault. Nested Share Subfolders (NSF) is
+ * invitation-only / feature-flagged on the vault. When the flag is off,
+ * Commander rejects `nsf-*` commands with messages like "unknown command",
+ * "command not found", or "not enabled". This helper centralizes that
+ * heuristic so the resolvers can return a structured nsf_not_available error
+ * for the UI to surface a friendly inline message and revert the toggle.
+ *
+ * @param {Error|string} errorOrMessage - Error object or raw message string.
+ * @returns {boolean}
+ */
+function isKeeperNsfUnavailableError(errorOrMessage) {
+  const raw = (errorOrMessage && (errorOrMessage.message || errorOrMessage)) || '';
+  const message = String(raw).toLowerCase();
+  if (!message) return false;
+  // Match common Commander unknown-command / feature-disabled / allowlist phrasings.
+  return (
+    message.includes('unknown command') ||
+    message.includes('command not found') ||
+    message.includes('no such command') ||
+    message.includes('invalid command') ||
+    message.includes('unrecognized command') ||
+    message.includes('not permitted') ||
+    ((message.includes('keeper drive') || message.includes('nested share')) && (
+      message.includes('not enabled') ||
+      message.includes('not available') ||
+      message.includes('disabled') ||
+      message.includes('not supported')
+    )) ||
+    (message.includes('nsf-list') && message.includes('not')) ||
+    message.includes('feature flag')
+  );
+}
+
+/**
+ * Create a structured "Nested Share Subfolders not enabled" error response. Used by the
+ * `getKeeperRecords`, `getKeeperFolders`, and create/update resolvers when NSF
+ * mode was requested but the customer's Commander does not have the feature
+ * flag enabled. The frontend reads `errorCode === 'nsf_not_available'` and
+ * reverts the panel toggle to Classic with an inline message.
+ */
+function nsfNotAvailableError(originalMessage = null) {
+  let message =
+    'Nested Share Subfolders is not available on the Keeper Service that Jira connects to (not your local CLI). ' +
+    'The service host needs Commander 18.0.0+, Nested Share Subfolders (NSF) enabled on that vault, and these commands on the service allowlist: ' +
+    KEEPER_NSF_SERVICE_ALLOWLIST + '.';
+  if (originalMessage) {
+    const trimmed = String(originalMessage).trim();
+    if (trimmed && !message.includes(trimmed)) {
+      message += ` Commander reported: ${trimmed}`;
+    }
+  }
+  const response = errorResponse(ERROR_CODES.KEEPER_NSF_NOT_AVAILABLE, message, {
+    troubleshooting: TROUBLESHOOTING[ERROR_CODES.KEEPER_NSF_NOT_AVAILABLE],
+    details: originalMessage ? { originalMessage: String(originalMessage).trim() } : null
+  });
+  // Duplicate the code on a top-level `errorCode` field for easy detection
+  // by frontend code that does not unpack the structured `error` field.
+  response.errorCode = 'nsf_not_available';
+  return response;
+}
+
 // ========================================================================
 // Module Exports
 // ========================================================================
@@ -517,5 +592,8 @@ module.exports = {
   epmError,
   deviceError,
   withErrorHandling,
-  errorFromException
+  errorFromException,
+  isKeeperNsfUnavailableError,
+  nsfNotAvailableError,
+  KEEPER_NSF_SERVICE_ALLOWLIST
 };

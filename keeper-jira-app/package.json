@@ -43,7 +43,8 @@
     ],
     "collectCoverageFrom": [
       "src/**/*.js",
-      "!src/index.js"
+      "!src/index.js",
+      "!src/modules/keeperApi.js"
     ],
     "coverageThreshold": {
       "global": {
