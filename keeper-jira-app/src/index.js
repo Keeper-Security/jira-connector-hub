@@ -22,7 +22,8 @@ import {
   NSF_ROLES,
   buildNsfShareFolderArgs,
   buildNsfShareRecordArgs,
-  buildNsfRecordPermissionArgs
+  buildNsfRecordPermissionArgs,
+  sanitizeNsfDuration
 } from './modules/utils/nsfShareCommands.js';
 import {
   escapeForSingleQuotes,
@@ -566,8 +567,8 @@ const VALIDATION_PATTERNS = {
   // Date: ISO format YYYY-MM-DD or Unix timestamp
   date: /^(\d{4}-\d{2}-\d{2}|\d{10,13})$/,
   
-  // Expiration duration: Number with time unit (e.g., 30d, 24h, 60m)
-  duration: /^\d+[dhms]?$/i,
+  // Expiration duration: Number with time unit (e.g., 30d, 24h, 60mi, 6mo, 1y)
+  duration: /^\d+(mi|mo|d|h|m|s|y)$/i,
 };
 
 /**
@@ -936,10 +937,20 @@ function validateCommandParameters(action, parameters, options = {}) {
       }
       
       if (parameters.expire_at) {
-        // Basic datetime validation
         const expireAt = parameters.expire_at;
         if (typeof expireAt === 'string' && expireAt.length > 30) {
           errors.push('Expiration date exceeds maximum length');
+        }
+      }
+
+      // rotate_on_expiration requires a valid expiration window.
+      if (parameters.rotate_on_expiration === true) {
+        if (!parameters.expiration_type || parameters.expiration_type === 'none') {
+          errors.push('Expiration is required when rotate-on-expiration is enabled');
+        } else if (parameters.expiration_type === 'expire-at' && !parameters.expire_at) {
+          errors.push('Expire-at value is required when rotate-on-expiration is enabled');
+        } else if (parameters.expiration_type === 'expire-in' && !parameters.expire_in) {
+          errors.push('Expire-in value is required when rotate-on-expiration is enabled');
         }
       }
       break;
@@ -1375,8 +1386,6 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
               break;
               
             case 'passphrase':
-              // Passphrase is a password-type field with label "passphrase"
-              // Keeper CLI format: password.label='value'
               if (value === '$GEN' || value === 'generate') {
                 command += ` password.passphrase=$GEN`;
               } else {
@@ -1579,17 +1588,17 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
         }
         // Add expiration options
         if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
-          // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
           const expireAtFormatted = parameters.expire_at.replace('T', ' ');
           command += ` --expire-at "${escapeForDoubleQuotes(expireAtFormatted)}"`;
         } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-          // expire_in is expected to be a numeric duration, validate it's safe
-          const expireInValue = String(parameters.expire_in).replace(/[^0-9dhms]/gi, '');
-          command += ` --expire-in ${expireInValue}`;
+          const expireInValue = sanitizeNsfDuration(parameters.expire_in);
+          if (expireInValue) command += ` --expire-in ${expireInValue}`;
+        }
+        if (parameters.rotate_on_expiration === true) {
+          command += ' --rotate-on-expiration';
         }
       }
       
-      // Add force flag at the end
       command += ` -f`;
       break;
       
@@ -1623,17 +1632,16 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
       command += ` -o ${parameters.manage_users === true ? 'on' : 'off'}`;    // User permission: Can manage users
       command += ` -s ${parameters.can_share === true ? 'on' : 'off'}`;       // Record permission: Can be shared
       command += ` -d ${parameters.can_edit === true ? 'on' : 'off'}`;        // Record permission: Can be modified
-      // Add expiration options
       if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
-        // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
         const expireAtFormatted = parameters.expire_at.replace('T', ' ');
         command += ` --expire-at "${escapeForDoubleQuotes(expireAtFormatted)}"`;
       } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-        // expire_in is expected to be a numeric duration, validate it's safe
-        const expireInValue = String(parameters.expire_in).replace(/[^0-9dhms]/gi, '');
-        command += ` --expire-in ${expireInValue}`;
+        const expireInValue = sanitizeNsfDuration(parameters.expire_in);
+        if (expireInValue) command += ` --expire-in ${expireInValue}`;
       }
-      // Add force flag at the end
+      if (parameters.rotate_on_expiration === true) {
+        command += ' --rotate-on-expiration';
+      }
       command += ` --force`;
       break;
 
@@ -1778,7 +1786,7 @@ resolver.define('getKeeperFolders', async (req) => {
   const mode = resolveVaultMode(req?.payload);
   const command = mode === 'nsf'
     ? 'nsf-list --folders --format=json'
-    : 'ls -f --format=json';
+    : 'ls -f -R --format=json';
 
   try {
     const result = await executeKeeperApiCommand(command, { userId, forgeSafe: true });
@@ -1816,7 +1824,8 @@ resolver.define('getKeeperFolders', async (req) => {
           return rawSource === 'legacy';
         });
 
-        folders = classicRawFolders.map((folder, index) => {
+        // First pass: normalize each folder row.
+        const normalized = classicRawFolders.map((folder, index) => {
           let cleanName = folder.name || '';
           cleanName = cleanName.replace(/\[?\d+m/g, '');
 
@@ -1832,6 +1841,8 @@ resolver.define('getKeeperFolders', async (req) => {
               parentUid = parentMatch[1].trim();
             }
           }
+          // "/" means root level — treat as no parent.
+          if (parentUid === '/') parentUid = '';
 
           return {
             number: index + 1,
@@ -1839,7 +1850,6 @@ resolver.define('getKeeperFolders', async (req) => {
             uid: folder.uid,
             name: cleanName,
             title: cleanName,
-            path: cleanName,
             flags: flags,
             parent_uid: parentUid,
             shared: !!(flags && flags.includes('S')),
@@ -1847,6 +1857,37 @@ resolver.define('getKeeperFolders', async (req) => {
             raw_data: folder
           };
         });
+
+        // Second pass: build nested paths from parent_uid chains (same algorithm as buildNsfFolderPaths).
+        const byUid = new Map();
+        for (const f of normalized) {
+          if (f && f.uid) byUid.set(f.uid, f);
+        }
+        const pathCache = new Map();
+        const resolvePath = (uid, visiting = new Set()) => {
+          if (!uid) return '';
+          if (pathCache.has(uid)) return pathCache.get(uid);
+          if (visiting.has(uid)) return byUid.get(uid)?.name || '';
+          const f = byUid.get(uid);
+          if (!f) return '';
+          visiting.add(uid);
+          const name = f.name || '';
+          const pUid = f.parent_uid || '';
+          let path = name;
+          if (pUid && byUid.has(pUid)) {
+            const parentPath = resolvePath(pUid, visiting);
+            path = parentPath ? `${parentPath} / ${name}` : name;
+          }
+          visiting.delete(uid);
+          pathCache.set(uid, path);
+          return path;
+        };
+
+        folders = normalized.map((f) => ({
+          ...f,
+          path: resolvePath(f.uid) || f.name || '',
+          folderPath: resolvePath(f.uid) || f.name || ''
+        }));
       }
     } catch (parseError) {
       return keeperError('Failed to parse folders data from Keeper API');
@@ -1909,6 +1950,64 @@ resolver.define('getKeeperRecordDetails', async (req) => {
 });
 
 /**
+ * Core ROE eligibility check shared by the checkRotationEligibility resolver
+ * and the server-side guard inside executeKeeperAction.
+ *
+ * Returns { eligible: boolean, recordType?: string, roeResponse?: array }.
+ * Propagates rate-limit errors as-thrown so callers can handle them.
+ */
+async function checkRoeEligibility(userId, type, uid) {
+  if (type === 'record') {
+    const result = await executeKeeperApiCommand(
+      `get "${uid}" --format=json`,
+      { userId, skipRateLimit: true, forgeSafe: true }
+    );
+    let details = {};
+    if (result.data?.data) {
+      details = typeof result.data.data === 'string'
+        ? JSON.parse(result.data.data)
+        : result.data.data;
+    }
+    const recordType = details.record_type || details.type || '';
+    return { eligible: recordType.toLowerCase() === 'pamuser', recordType };
+  }
+
+  // Folder: list-sf <uid> --roe-eligible --format=json
+  const result = await executeKeeperApiCommand(
+    `list-sf "${uid}" --roe-eligible --format=json`,
+    { userId, skipRateLimit: true, forgeSafe: true }
+  );
+  let rows = result.data?.data ?? [];
+  if (typeof rows === 'string') rows = JSON.parse(rows);
+  if (!Array.isArray(rows)) rows = [];
+  return { eligible: rows.some(r => r.shared_folder_uid === uid), roeResponse: rows };
+}
+
+// Check if a record is pamUser or a folder is rotation-on-expiration eligible.
+// Used by the issue panel to decide whether to show the "Rotate password upon
+// expiration" checkbox on share-record / share-folder.
+resolver.define('checkRotationEligibility', async (req) => {
+  const userId = req?.context?.accountId;
+  const { type, uid } = req?.payload || {};
+
+  if (!uid) return validationError('uid', 'UID is required');
+  if (type !== 'record' && type !== 'folder') {
+    return validationError('type', 'type must be "record" or "folder"');
+  }
+
+  try {
+    const eligibility = await checkRoeEligibility(userId, type, uid);
+    return successResponse(eligibility);
+  } catch (err) {
+    if (err.rateLimited) {
+      return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
+    }
+    logger.error('checkRotationEligibility failed', { type, uid, error: err.message });
+    return successResponse({ eligible: false, error: err.message });
+  }
+});
+
+/**
  * Execute a simple Keeper command (called from config page for EPM, etc.)
  */
 resolver.define('executeKeeperCommand', async (req) => {
@@ -1930,7 +2029,7 @@ resolver.define('executeKeeperCommand', async (req) => {
   // KJ-26-05: Validate command against an allowlist and strip control characters
   // to prevent log injection via crafted "command" values.
   const ALLOWED_COMMAND_PREFIXES = [
-    'list', 'ls', 'get', 'search',
+    'list', 'list-sf', 'ls', 'get', 'search',
     'record-add', 'record-update', 'record-permission',
     'share-record', 'share-folder',
     // NSF sharing/permission variants (see NSF_COMMAND_NAME_MAP).
@@ -2415,6 +2514,42 @@ resolver.define('executeKeeperAction', async (req) => {
     }
   }
 
+  // Re-check rotation eligibility server-side before building the command.
+  // Any invoke() caller can pass rotate_on_expiration; we verify it here
+  // using the same checkRoeEligibility helper as the UI-facing resolver.
+  if (parameters?.rotate_on_expiration === true &&
+      (command === 'share-record' || command === 'share-folder')) {
+    const roeType = (command === 'share-record' && parameters.record) ? 'record' : 'folder';
+    const roeUid = roeType === 'record'
+      ? parameters.record
+      : (parameters.folder || parameters.sharedFolder);
+
+    if (roeUid) {
+      try {
+        const { eligible } = await checkRoeEligibility(userId, roeType, roeUid);
+        if (!eligible) {
+          return errorResponse(
+            ERROR_CODES.VALIDATION_INVALID_FORMAT,
+            'rotate-on-expiration is not supported for this record or folder',
+            { uid: roeUid, type: roeType, reason: 'not_roe_eligible' }
+          );
+        }
+      } catch (roeCheckErr) {
+        if (roeCheckErr.rateLimited) {
+          return rateLimitError(roeCheckErr.limitType || 'minute', roeCheckErr.retryAfter || 60);
+        }
+        logger.warn('executeKeeperAction: ROE eligibility re-check failed, rejecting to be safe', {
+          roeType, roeUid, error: roeCheckErr.message
+        });
+        return errorResponse(
+          ERROR_CODES.VALIDATION_INVALID_FORMAT,
+          'Could not verify rotation eligibility. Please try again.',
+          { uid: roeUid, type: roeType, reason: 'eligibility_check_failed' }
+        );
+      }
+    }
+  }
+
   try {
     // Build dynamic command based on action and parameters
     // This is inside try block so validation errors are properly caught
@@ -2551,11 +2686,13 @@ resolver.define('executeKeeperAction', async (req) => {
               actionMessage += ` - Permissions: ${recordPerms.join(', ')}`;
             }
             
-            // Add expiration info
             if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
               actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
             } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
               actionMessage += ` - Expires in: ${parameters.expire_in}`;
+            }
+            if (parameters.rotate_on_expiration) {
+              actionMessage += ' | Password will auto-rotate upon expiration';
             }
           }
           break;
@@ -2597,11 +2734,13 @@ resolver.define('executeKeeperAction', async (req) => {
               actionMessage += ` - Permissions: ${folderPerms.join(', ')}`;
             }
             
-            // Add expiration info
             if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
               actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
             } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
               actionMessage += ` - Expires in: ${parameters.expire_in}`;
+            }
+            if (parameters.rotate_on_expiration) {
+              actionMessage += ' | Password will auto-rotate upon expiration';
             }
           }
           break;
@@ -2896,6 +3035,25 @@ resolver.define('executeKeeperAction', async (req) => {
         ERROR_CODES.KEEPER_PERMISSION_DENIED,
         'Cannot grant access - permission conflict. The user may already have different access to this record. Please revoke their existing access first, then try again.',
         { troubleshooting: ['Revoke existing access for this user first', 'Then grant the new access level'] }
+      );
+    }
+
+    // Rotation-on-expiration: Commander rejects the flag when the target record
+    // is not a pamUser with rotation fully configured. The CLI shows
+    // "rotate-on-expiration requires a pamUser record..." but the HTTP API
+    // returns a generic 500 with just the record UID. Catch both cases.
+    if (errorMessage && (
+      errorMessage.includes('rotate-on-expiration requires a pamUser record with rotation configured') ||
+      (command && command.includes('--rotate-on-expiration') && errorMessage.includes('500'))
+    )) {
+      return errorResponse(
+        ERROR_CODES.KEEPER_PERMISSION_DENIED,
+        'Rotate-on-expiration failed — the target record requires a fully configured PAM User with rotation enabled (linked PAM config/resource, enabled state, and an active Gateway).',
+        { troubleshooting: [
+          'Verify the record is of type pamUser',
+          'Ensure rotation is enabled for that record (pam rotation edit)',
+          'Check that a Keeper Gateway is active and connected'
+        ] }
       );
     }
 

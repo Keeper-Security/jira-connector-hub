@@ -86,6 +86,11 @@ export const executeKeeperAction = async (issueKey, command, commandDescription,
   return await invoke("executeKeeperAction", payload);
 };
 
+// Check if a record (pamUser) or folder (ROE-eligible) supports rotate-on-expiration.
+export const checkRotationEligibility = async (type, uid) => {
+  return await invoke("checkRotationEligibility", { type, uid });
+};
+
 // Reject keeper request
 export const rejectKeeperRequest = async (issueKey, rejectionReason) => {
   return await invoke("rejectKeeperRequest", {

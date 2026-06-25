@@ -130,6 +130,11 @@ const IssuePanel = () => {
   // Vault mode: Classic by default; NSF when user opts in via checkbox.
   const [isNsfMode, setIsNsfMode] = useState(false);
 
+  // Rotation-on-expiration: visible when selected record is pamUser or folder is ROE-eligible.
+  const [rotateOnExpiration, setRotateOnExpiration] = useState(false);
+  const [isRotationEligible, setIsRotationEligible] = useState(false);
+  const [checkingRotationEligibility, setCheckingRotationEligibility] = useState(false);
+
   // Pagination settings
   const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
   const recordsPerPage = PAGINATION_SETTINGS.RECORDS_PER_PAGE;
@@ -165,9 +170,9 @@ const IssuePanel = () => {
   const isSharableFolder = (folder) =>
     folder.source === 'nsf' || folder.shared || (folder.flags && folder.flags.includes('S'));
 
-  // Render nested NSF folder path (hidden for Classic or when path equals folder name).
+  // Render nested folder path when it differs from the folder name (works for both Classic and NSF).
   const renderFolderPath = (folder) => {
-    if (!folder || folder.source !== 'nsf') return null;
+    if (!folder) return null;
     const path = folder.path || folder.folderPath || '';
     if (!path || path === folder.name || path === folder.title) return null;
     return <div className="nsf-folder-path">{path}</div>;
@@ -356,6 +361,9 @@ const IssuePanel = () => {
     setShowRecordDropdown(false);
     setShowFolderDropdown(false);
     setShowRecordForUpdateDropdown(false);
+    setRotateOnExpiration(false);
+    setIsRotationEligible(false);
+    lastCheckedRoeRef.current = { type: '', uid: '' };
     setFormData(prev => {
       const cleared = { ...prev };
       delete cleared.can_share;
@@ -385,6 +393,7 @@ const IssuePanel = () => {
   // Flag to track if we're preserving stored data
   const [isPreservingStoredData, setIsPreservingStoredData] = useState(false);
   const isPreservingStoredDataRef = useRef(false);
+  const lastCheckedRoeRef = useRef({ type: '', uid: '' });
 
   // Fetch Keeper record details when needed for record-update
   const fetchKeeperRecordDetails = async (recordUid, preserveStoredData = null) => {
@@ -987,6 +996,9 @@ const IssuePanel = () => {
     setHasStoredData(true);
     setSelectedAction(data.selectedAction);
     setFormData(data.formData || {});
+    setRotateOnExpiration(data.rotateOnExpiration === true);
+    setIsRotationEligible(data.isRotationEligible === true);
+    lastCheckedRoeRef.current = { type: '', uid: '' };
 
     const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : false;
     setIsNsfMode(nsfEnabled);
@@ -1076,6 +1088,8 @@ const IssuePanel = () => {
         selectedFolder,
         tempAddressData,
         isNsfMode,
+        rotateOnExpiration,
+        isRotationEligible,
         timestamp: now.toISOString()
       };
       
@@ -2519,6 +2533,67 @@ const IssuePanel = () => {
     refetchVaultData({ mode, action: selectedAction.value });
   }, [isNsfMode]);
 
+  // Check rotation eligibility only when expiration is selected (lazy — avoids
+  // API calls while the user is still browsing records/folders). Caches the
+  // last-checked UID so switching between expire-in and expire-at for the same
+  // record/folder skips the redundant call.
+  useEffect(() => {
+    const action = selectedAction?.value;
+    const hasExpiration = formData.expiration_type && formData.expiration_type !== 'none';
+
+    if (!isAdmin || !hasExpiration ||
+        (action !== 'share-record' && action !== 'share-folder')) {
+      setIsRotationEligible(false);
+      setRotateOnExpiration(false);
+      return;
+    }
+
+    let type, uid;
+    if (action === 'share-record' && selectedRecord) {
+      type = 'record';
+      uid = selectedRecord.record_uid;
+    } else if (action === 'share-folder' && selectedFolder) {
+      type = 'folder';
+      uid = selectedFolder.folder_uid || selectedFolder.uid;
+    } else if (action === 'share-record' && !selectedRecord && selectedFolder) {
+      // NSF folder-level share-record: entire folder shared via sharedFolder param
+      type = 'folder';
+      uid = selectedFolder.folder_uid || selectedFolder.uid;
+    }
+
+    if (!type || !uid) {
+      setIsRotationEligible(false);
+      setRotateOnExpiration(false);
+      return;
+    }
+
+    // Skip API call if we already checked this exact record/folder.
+    if (lastCheckedRoeRef.current.type === type &&
+        lastCheckedRoeRef.current.uid === uid) {
+      return;
+    }
+
+    let cancelled = false;
+    setCheckingRotationEligibility(true);
+    api.checkRotationEligibility(type, uid)
+      .then(res => {
+        if (cancelled) return;
+        lastCheckedRoeRef.current = { type, uid };
+        setIsRotationEligible(res?.eligible === true);
+        if (!res?.eligible) setRotateOnExpiration(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          lastCheckedRoeRef.current = { type, uid };
+          setIsRotationEligible(false);
+          setRotateOnExpiration(false);
+        }
+      })
+      .finally(() => { if (!cancelled) setCheckingRotationEligibility(false); });
+
+    return () => { cancelled = true; };
+  }, [selectedRecord, selectedFolder, selectedAction, isAdmin, formData.expiration_type]);
+
   // Auto-dismiss workflow info dialog after 5 seconds
   useEffect(() => {
     if (showWorkflowInfo && (issueContext?.hasConfig || !isAdmin) && !isLoading && !isLoadingStoredData) {
@@ -2578,6 +2653,11 @@ const IssuePanel = () => {
       }
     }
     
+    // Clear rotate-on-expiration when expiration is removed.
+    if (fieldName === 'expiration_type' && (!value || value === 'none')) {
+      setRotateOnExpiration(false);
+    }
+
     setFormData(prev => {
       const newData = {
         ...prev,
@@ -2689,6 +2769,13 @@ const IssuePanel = () => {
         return false;
       }
       
+      // Rotation requires a valid expiration window.
+      if (rotateOnExpiration) {
+        if (!formData.expiration_type || formData.expiration_type === 'none') return false;
+        if (formData.expiration_type === 'expire-at' && !formData.expire_at) return false;
+        if (formData.expiration_type === 'expire-in' && !formData.expire_in) return false;
+      }
+
       return true;
     }
     
@@ -2756,6 +2843,12 @@ const IssuePanel = () => {
         return false;
       }
       
+      if (rotateOnExpiration) {
+        if (!formData.expiration_type || formData.expiration_type === 'none') return false;
+        if (formData.expiration_type === 'expire-at' && !formData.expire_at) return false;
+        if (formData.expiration_type === 'expire-in' && !formData.expire_in) return false;
+      }
+
       return true;
     }
     
@@ -3164,8 +3257,7 @@ const IssuePanel = () => {
               
               // Special handling for share-record action field when "cancel" is selected
               if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'cancel') {
-                // Clear and disable all checkboxes when cancel is selected
-                // Keep both record and folder selections for admin users (they need to select one)
+                setRotateOnExpiration(false);
                 setFormData(prev => ({
                   ...prev,
                   action: newValue,
@@ -3176,13 +3268,11 @@ const IssuePanel = () => {
                   expire_at: '',
                   expire_in: ''
                 }));
-                // Don't clear record or folder - admin can select either one
               }
               
               // Special handling for share-record action field when "owner" is selected
               if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'owner') {
-                // Clear and disable all checkboxes and expiration when owner is selected
-                // Owner action doesn't support expiration or permission checkboxes
+                setRotateOnExpiration(false);
                 setFormData(prev => ({
                   ...prev,
                   action: newValue,
@@ -3196,10 +3286,8 @@ const IssuePanel = () => {
               }
               
               // Special handling for share-record action field when "revoke" is selected
-              // Per Keeper docs: revoke action NEEDS -s (share), -w (write), -R (recursive) flags
-              // to specify what permissions to revoke. Only expiration is not supported.
               if (selectedAction?.value === 'share-record' && field.name === 'action' && newValue === 'revoke') {
-                // Only clear expiration when revoke is selected (checkboxes are needed for revoke)
+                setRotateOnExpiration(false);
                 setFormData(prev => ({
                   ...prev,
                   action: newValue,
@@ -3211,8 +3299,7 @@ const IssuePanel = () => {
               
               // Special handling for share-folder action field when "remove" is selected
               if (selectedAction?.value === 'share-folder' && field.name === 'action' && newValue === 'remove') {
-                // Clear and disable all checkboxes and expiration when remove is selected
-                // Remove action doesn't support expiration or permission checkboxes
+                setRotateOnExpiration(false);
                 setFormData(prev => ({
                   ...prev,
                   action: newValue,
@@ -4201,12 +4288,14 @@ const IssuePanel = () => {
       }
       
       if (selectedAction.value === 'share-folder' && selectedFolder) {
-        // Ensure folder field is populated with selected folder UID
         finalParameters.folder = selectedFolder.uid || selectedFolder.path || selectedFolder.name;
-        // Include folder title for comment message (only use name, not UID/path)
         finalParameters.folderTitle = selectedFolder.name;
-        // User/email field is already in formData from manual input
-        
+      }
+
+      // Pass rotation flag when the checkbox is checked.
+      if (rotateOnExpiration &&
+          (selectedAction.value === 'share-record' || selectedAction.value === 'share-folder')) {
+        finalParameters.rotate_on_expiration = true;
       }
       
       if (selectedAction.value === 'record-permission' && selectedFolder) {
@@ -4585,6 +4674,9 @@ const IssuePanel = () => {
                 setStoredRequestData(null);
                 setHasStoredData(false);
                 setCustomFields([]);
+                setRotateOnExpiration(false);
+                setIsRotationEligible(false);
+                lastCheckedRoeRef.current = { type: '', uid: '' };
               }}
               disabled={isFormDisabled}
               searchTerm={searchTerm}
@@ -5656,6 +5748,26 @@ const IssuePanel = () => {
                       );
                     })}
 
+                  {/* Rotate password upon expiration — visible when expiration is active and record is pamUser or folder is ROE-eligible */}
+                  {(selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') &&
+                   isRotationEligible &&
+                   formData.expiration_type && formData.expiration_type !== 'none' && (
+                    <div className="mb-12">
+                      <label className="checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <input
+                          type="checkbox"
+                          checked={rotateOnExpiration}
+                          disabled={isFormDisabled || checkingRotationEligibility}
+                          onChange={(e) => setRotateOnExpiration(e.target.checked)}
+                        />
+                        <span>Rotate password upon expiration</span>
+                      </label>
+                      <div className="field-hint-text" style={{ marginTop: '4px', fontSize: '11px' }}>
+                        When enabled, the password will automatically rotate once access expires
+                      </div>
+                    </div>
+                  )}
+
                   {/* Checkbox fields for share-folder, share-record, and record-permission actions */}
                   {(selectedAction.value === 'share-folder' || selectedAction.value === 'share-record' || selectedAction.value === 'record-permission') && actionOptions.find(action => action.value === selectedAction.value)?.fields
                     .filter((field) => {
@@ -5788,6 +5900,7 @@ const IssuePanel = () => {
                         fontSize: "14px",
                         padding: "8px 16px",
                         borderRadius: "8px",
+                        marginTop: "8px",
                         border: "none",
                         cursor: isFormDisabled || loadingTemplate || loadingRecordTypes || (!selectedAction || !validateForm() || isExecuting) ? "not-allowed" : "pointer",
                         boxShadow: (selectedAction && validateForm() && !isExecuting) ? "0 2px 4px rgba(0,0,0,0.1)" : "none",
