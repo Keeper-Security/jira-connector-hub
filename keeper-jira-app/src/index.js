@@ -25,6 +25,7 @@ import {
   buildNsfRecordPermissionArgs,
   sanitizeNsfDuration
 } from './modules/utils/nsfShareCommands.js';
+import { isFolderRoeEligibleFromListSfRows } from './modules/utils/roeEligibility.js';
 import {
   escapeForSingleQuotes,
   escapeForDoubleQuotes,
@@ -943,7 +944,7 @@ function validateCommandParameters(action, parameters, options = {}) {
         }
       }
 
-      // rotate_on_expiration requires a valid expiration window.
+      // rotate_on_expiration requires a valid expiration window and target UID.
       if (parameters.rotate_on_expiration === true) {
         if (!parameters.expiration_type || parameters.expiration_type === 'none') {
           errors.push('Expiration is required when rotate-on-expiration is enabled');
@@ -951,6 +952,10 @@ function validateCommandParameters(action, parameters, options = {}) {
           errors.push('Expire-at value is required when rotate-on-expiration is enabled');
         } else if (parameters.expiration_type === 'expire-in' && !parameters.expire_in) {
           errors.push('Expire-in value is required when rotate-on-expiration is enabled');
+        }
+        const roeTargetUid = parameters.record || parameters.folder || parameters.sharedFolder;
+        if (!roeTargetUid) {
+          errors.push('rotate-on-expiration requires a record or folder UID');
         }
       }
       break;
@@ -1980,7 +1985,10 @@ async function checkRoeEligibility(userId, type, uid) {
   let rows = result.data?.data ?? [];
   if (typeof rows === 'string') rows = JSON.parse(rows);
   if (!Array.isArray(rows)) rows = [];
-  return { eligible: rows.some(r => r.shared_folder_uid === uid), roeResponse: rows };
+  return {
+    eligible: isFolderRoeEligibleFromListSfRows(rows, uid),
+    roeResponse: rows
+  };
 }
 
 // Check if a record is pamUser or a folder is rotation-on-expiration eligible.
@@ -2524,29 +2532,34 @@ resolver.define('executeKeeperAction', async (req) => {
       ? parameters.record
       : (parameters.folder || parameters.sharedFolder);
 
-    if (roeUid) {
-      try {
-        const { eligible } = await checkRoeEligibility(userId, roeType, roeUid);
-        if (!eligible) {
-          return errorResponse(
-            ERROR_CODES.VALIDATION_INVALID_FORMAT,
-            'rotate-on-expiration is not supported for this record or folder',
-            { uid: roeUid, type: roeType, reason: 'not_roe_eligible' }
-          );
-        }
-      } catch (roeCheckErr) {
-        if (roeCheckErr.rateLimited) {
-          return rateLimitError(roeCheckErr.limitType || 'minute', roeCheckErr.retryAfter || 60);
-        }
-        logger.warn('executeKeeperAction: ROE eligibility re-check failed, rejecting to be safe', {
-          roeType, roeUid, error: roeCheckErr.message
-        });
+    if (!roeUid) {
+      return errorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED_FIELD,
+        'rotate-on-expiration requires a record or folder UID'
+      );
+    }
+
+    try {
+      const { eligible } = await checkRoeEligibility(userId, roeType, roeUid);
+      if (!eligible) {
         return errorResponse(
           ERROR_CODES.VALIDATION_INVALID_FORMAT,
-          'Could not verify rotation eligibility. Please try again.',
-          { uid: roeUid, type: roeType, reason: 'eligibility_check_failed' }
+          'rotate-on-expiration is not supported for this record or folder',
+          { uid: roeUid, type: roeType, reason: 'not_roe_eligible' }
         );
       }
+    } catch (roeCheckErr) {
+      if (roeCheckErr.rateLimited) {
+        return rateLimitError(roeCheckErr.limitType || 'minute', roeCheckErr.retryAfter || 60);
+      }
+      logger.warn('executeKeeperAction: ROE eligibility re-check failed, rejecting to be safe', {
+        roeType, roeUid, error: roeCheckErr.message
+      });
+      return errorResponse(
+        ERROR_CODES.VALIDATION_INVALID_FORMAT,
+        'Could not verify rotation eligibility. Please try again.',
+        { uid: roeUid, type: roeType, reason: 'eligibility_check_failed' }
+      );
     }
   }
 

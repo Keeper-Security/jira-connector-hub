@@ -134,6 +134,7 @@ const IssuePanel = () => {
   const [rotateOnExpiration, setRotateOnExpiration] = useState(false);
   const [isRotationEligible, setIsRotationEligible] = useState(false);
   const [checkingRotationEligibility, setCheckingRotationEligibility] = useState(false);
+  const [eligibilityError, setEligibilityError] = useState(null);
 
   // Pagination settings
   const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
@@ -363,6 +364,7 @@ const IssuePanel = () => {
     setShowRecordForUpdateDropdown(false);
     setRotateOnExpiration(false);
     setIsRotationEligible(false);
+    setEligibilityError(null);
     lastCheckedRoeRef.current = { type: '', uid: '' };
     setFormData(prev => {
       const cleared = { ...prev };
@@ -2545,6 +2547,7 @@ const IssuePanel = () => {
         (action !== 'share-record' && action !== 'share-folder')) {
       setIsRotationEligible(false);
       setRotateOnExpiration(false);
+      setEligibilityError(null);
       return;
     }
 
@@ -2564,6 +2567,7 @@ const IssuePanel = () => {
     if (!type || !uid) {
       setIsRotationEligible(false);
       setRotateOnExpiration(false);
+      setEligibilityError(null);
       return;
     }
 
@@ -2579,14 +2583,20 @@ const IssuePanel = () => {
       .then(res => {
         if (cancelled) return;
         lastCheckedRoeRef.current = { type, uid };
+        if (res?.error) {
+          setIsRotationEligible(null);
+          setEligibilityError('Could not verify eligibility. Please try again before approving.');
+          return;
+        }
+        setEligibilityError(null);
         setIsRotationEligible(res?.eligible === true);
         if (!res?.eligible) setRotateOnExpiration(false);
       })
       .catch(() => {
         if (!cancelled) {
           lastCheckedRoeRef.current = { type, uid };
-          setIsRotationEligible(false);
-          setRotateOnExpiration(false);
+          setIsRotationEligible(null);
+          setEligibilityError('Could not verify eligibility. Please try again before approving.');
         }
       })
       .finally(() => { if (!cancelled) setCheckingRotationEligibility(false); });
@@ -2656,6 +2666,8 @@ const IssuePanel = () => {
     // Clear rotate-on-expiration when expiration is removed.
     if (fieldName === 'expiration_type' && (!value || value === 'none')) {
       setRotateOnExpiration(false);
+      setEligibilityError(null);
+      lastCheckedRoeRef.current = { type: '', uid: '' };
     }
 
     setFormData(prev => {
@@ -2769,11 +2781,12 @@ const IssuePanel = () => {
         return false;
       }
       
-      // Rotation requires a valid expiration window.
+      // Rotation requires a valid expiration window and confirmed eligibility.
       if (rotateOnExpiration) {
         if (!formData.expiration_type || formData.expiration_type === 'none') return false;
         if (formData.expiration_type === 'expire-at' && !formData.expire_at) return false;
         if (formData.expiration_type === 'expire-in' && !formData.expire_in) return false;
+        if (eligibilityError) return false;
       }
 
       return true;
@@ -2847,6 +2860,7 @@ const IssuePanel = () => {
         if (!formData.expiration_type || formData.expiration_type === 'none') return false;
         if (formData.expiration_type === 'expire-at' && !formData.expire_at) return false;
         if (formData.expiration_type === 'expire-in' && !formData.expire_in) return false;
+        if (eligibilityError) return false;
       }
 
       return true;
@@ -4676,6 +4690,7 @@ const IssuePanel = () => {
                 setCustomFields([]);
                 setRotateOnExpiration(false);
                 setIsRotationEligible(false);
+                setEligibilityError(null);
                 lastCheckedRoeRef.current = { type: '', uid: '' };
               }}
               disabled={isFormDisabled}
@@ -5750,9 +5765,15 @@ const IssuePanel = () => {
 
                   {/* Rotate password upon expiration — visible when expiration is active and record is pamUser or folder is ROE-eligible */}
                   {(selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') &&
-                   isRotationEligible &&
-                   formData.expiration_type && formData.expiration_type !== 'none' && (
+                   formData.expiration_type && formData.expiration_type !== 'none' &&
+                   (isRotationEligible === true ||
+                    (isRotationEligible === null && (rotateOnExpiration || eligibilityError))) && (
                     <div className="mb-12">
+                      {eligibilityError && (
+                        <SectionMessage appearance="warning" title="Eligibility check failed">
+                          <p>{eligibilityError}</p>
+                        </SectionMessage>
+                      )}
                       <label className="checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <input
                           type="checkbox"
