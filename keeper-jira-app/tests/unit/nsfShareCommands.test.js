@@ -306,6 +306,17 @@ describe('buildNsfShareRecordArgs', () => {
     );
   });
 
+  test('emits -R when record UID and recursive are both set', () => {
+    const args = buildNsfShareRecordArgs({
+      record: 'REC_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      recursive: true
+    });
+    expect(args).toBe(" 'REC_UID' -e 'alice@example.com' -a 'grant' -r 'viewer' -R");
+  });
+
   test('does NOT emit Classic -s / -w / -f flags', () => {
     const args = buildNsfShareRecordArgs({
       record: 'REC_UID',
