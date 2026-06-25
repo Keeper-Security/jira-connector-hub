@@ -1000,7 +1000,7 @@ const IssuePanel = () => {
     setIsRotationEligible(data.isRotationEligible === true);
     lastCheckedRoeRef.current = { type: '', uid: '' };
 
-    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : true;
+    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : false;
     setIsNsfMode(nsfEnabled);
 
     if (data.formData?.addressRef?.startsWith('temp_addr_')) {
