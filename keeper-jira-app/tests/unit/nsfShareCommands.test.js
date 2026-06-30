@@ -85,9 +85,9 @@ describe('appendEmails', () => {
 
 describe('appendAction', () => {
   test('appends -a <action> when set', () => {
-    expect(appendAction('', 'grant')).toBe(' -a grant');
-    expect(appendAction('', 'revoke')).toBe(' -a revoke');
-    expect(appendAction('', 'remove')).toBe(' -a remove');
+    expect(appendAction('', 'grant')).toBe(" -a 'grant'");
+    expect(appendAction('', 'revoke')).toBe(" -a 'revoke'");
+    expect(appendAction('', 'remove')).toBe(" -a 'remove'");
   });
 
   test('no-ops when action is missing', () => {
@@ -98,11 +98,11 @@ describe('appendAction', () => {
 
 describe('appendRole', () => {
   test('appends -r <role> on grant', () => {
-    expect(appendRole('', { role: 'viewer' }, 'grant')).toBe(' -r viewer');
+    expect(appendRole('', { role: 'viewer' }, 'grant')).toBe(" -r 'viewer'");
   });
 
   test('appends -r on revoke (filter usage)', () => {
-    expect(appendRole('', { role: 'viewer' }, 'revoke')).toBe(' -r viewer');
+    expect(appendRole('', { role: 'viewer' }, 'revoke')).toBe(" -r 'viewer'");
   });
 
   test('skips role for remove (nsf-share-folder)', () => {
@@ -205,7 +205,7 @@ describe('buildNsfShareFolderArgs', () => {
       role: 'content-share-manager'
     });
     expect(args).toBe(
-      " 'A9c07imejy27JD34Wl1bcQ' -e 'abdul.deshmukh@metronlabs.com' -a grant -r content-share-manager"
+      " 'A9c07imejy27JD34Wl1bcQ' -e 'abdul.deshmukh@metronlabs.com' -a 'grant' -r 'content-share-manager'"
     );
   });
 
@@ -219,7 +219,7 @@ describe('buildNsfShareFolderArgs', () => {
       expire_in: '30d'
     });
     expect(args).toBe(
-      " 'FOLDER_UID' -e 'alice@example.com' -e 'bob@example.com' -a grant -r viewer --expire-in 30d"
+      " 'FOLDER_UID' -e 'alice@example.com' -e 'bob@example.com' -a 'grant' -r 'viewer' --expire-in 30d"
     );
   });
 
@@ -230,7 +230,7 @@ describe('buildNsfShareFolderArgs', () => {
       action: 'remove',
       role: 'viewer'
     });
-    expect(args).toBe(" 'FOLDER_UID' -e 'alice@example.com' -a remove");
+    expect(args).toBe(" 'FOLDER_UID' -e 'alice@example.com' -a 'remove'");
   });
 
   test('does NOT emit Classic -p/-o/-s/-d/--force flags', () => {
@@ -260,7 +260,7 @@ describe('buildNsfShareRecordArgs', () => {
       action: 'grant',
       role: 'viewer'
     });
-    expect(args).toBe(" 'REC_UID' -e 'alice@example.com' -a grant -r viewer");
+    expect(args).toBe(" 'REC_UID' -e 'alice@example.com' -a 'grant' -r 'viewer'");
   });
 
   test('revoke does not require role; passes role through as filter when set', () => {
@@ -270,7 +270,7 @@ describe('buildNsfShareRecordArgs', () => {
         user: 'alice@example.com',
         action: 'revoke'
       })
-    ).toBe(" 'REC_UID' -e 'alice@example.com' -a revoke");
+    ).toBe(" 'REC_UID' -e 'alice@example.com' -a 'revoke'");
 
     expect(
       buildNsfShareRecordArgs({
@@ -279,7 +279,7 @@ describe('buildNsfShareRecordArgs', () => {
         action: 'revoke',
         role: 'viewer'
       })
-    ).toBe(" 'REC_UID' -e 'alice@example.com' -a revoke -r viewer");
+    ).toBe(" 'REC_UID' -e 'alice@example.com' -a 'revoke' -r 'viewer'");
   });
 
   test('owner action never emits -r', () => {
@@ -290,7 +290,7 @@ describe('buildNsfShareRecordArgs', () => {
         action: 'owner',
         role: 'viewer'
       })
-    ).toBe(" 'REC_UID' -e 'bob@example.com' -a owner");
+    ).toBe(" 'REC_UID' -e 'bob@example.com' -a 'owner'");
   });
 
   test('folder positional + recursive grant', () => {
@@ -302,8 +302,19 @@ describe('buildNsfShareRecordArgs', () => {
       recursive: true
     });
     expect(args).toBe(
-      " 'FOLDER_UID' -e 'alice@example.com' -a grant -r viewer -R"
+      " 'FOLDER_UID' -e 'alice@example.com' -a 'grant' -r 'viewer' -R"
     );
+  });
+
+  test('emits -R when record UID and recursive are both set', () => {
+    const args = buildNsfShareRecordArgs({
+      record: 'REC_UID',
+      user: 'alice@example.com',
+      action: 'grant',
+      role: 'viewer',
+      recursive: true
+    });
+    expect(args).toBe(" 'REC_UID' -e 'alice@example.com' -a 'grant' -r 'viewer' -R");
   });
 
   test('does NOT emit Classic -s / -w / -f flags', () => {
@@ -329,7 +340,7 @@ describe('buildNsfRecordPermissionArgs', () => {
         action: 'grant',
         role: 'viewer'
       })
-    ).toBe(" 'FOLDER_UID' -a grant -r viewer -f");
+    ).toBe(" 'FOLDER_UID' -a 'grant' -r 'viewer' -f");
   });
 
   test('revoke recursive with -f', () => {
@@ -339,7 +350,7 @@ describe('buildNsfRecordPermissionArgs', () => {
         action: 'revoke',
         recursive: true
       })
-    ).toBe(" 'FOLDER_UID' -a revoke -R -f");
+    ).toBe(" 'FOLDER_UID' -a 'revoke' -R -f");
   });
 
   test('falls back to sharedFolder when folder is absent', () => {
@@ -349,7 +360,7 @@ describe('buildNsfRecordPermissionArgs', () => {
         action: 'grant',
         role: 'content-manager'
       })
-    ).toBe(" 'FOLDER_UID' -a grant -r content-manager -f");
+    ).toBe(" 'FOLDER_UID' -a 'grant' -r 'content-manager' -f");
   });
 
   test('does NOT emit Classic -d / -s flags', () => {

@@ -14,7 +14,9 @@ const {
   connectionError,
   keeperError,
   epmError,
-  errorFromException
+  errorFromException,
+  isKeeperNsfUnavailableError,
+  nsfNotAvailableError
 } = require('../../src/modules/utils/errorResponse');
 
 // ============================================================================
@@ -262,5 +264,106 @@ describe('ERROR_CODES', () => {
     expect(ERROR_CODES.EPM_ALREADY_APPROVED).toBeDefined();
     expect(ERROR_CODES.EPM_ALREADY_DENIED).toBeDefined();
     expect(ERROR_CODES.EPM_EXPIRED).toBeDefined();
+  });
+});
+
+// ============================================================================
+// NSF Error Detection Tests
+// ============================================================================
+
+describe('isKeeperNsfUnavailableError', () => {
+  test('detects "unknown command" errors', () => {
+    expect(isKeeperNsfUnavailableError('unknown command nsf-list')).toBe(true);
+  });
+
+  test('detects "command not found" errors', () => {
+    expect(isKeeperNsfUnavailableError('command not found: nsf-list')).toBe(true);
+  });
+
+  test('detects "no such command" errors', () => {
+    expect(isKeeperNsfUnavailableError('no such command')).toBe(true);
+  });
+
+  test('detects "invalid command" errors', () => {
+    expect(isKeeperNsfUnavailableError('invalid command nsf-share-folder')).toBe(true);
+  });
+
+  test('detects "unrecognized command" errors', () => {
+    expect(isKeeperNsfUnavailableError('unrecognized command')).toBe(true);
+  });
+
+  test('detects "not permitted" errors', () => {
+    expect(isKeeperNsfUnavailableError('nsf-list is not permitted')).toBe(true);
+  });
+
+  test('detects "nested share" + "not enabled" combination', () => {
+    expect(isKeeperNsfUnavailableError('Nested Share subfolder feature not enabled')).toBe(true);
+  });
+
+  test('detects "keeper drive" + "disabled" combination', () => {
+    expect(isKeeperNsfUnavailableError('Keeper Drive is disabled on this vault')).toBe(true);
+  });
+
+  test('detects nsf-list + not pattern', () => {
+    expect(isKeeperNsfUnavailableError('nsf-list is not recognized')).toBe(true);
+  });
+
+  test('detects "feature flag" errors', () => {
+    expect(isKeeperNsfUnavailableError('feature flag not set for NSF')).toBe(true);
+  });
+
+  test('accepts Error object as input', () => {
+    expect(isKeeperNsfUnavailableError(new Error('unknown command nsf-list'))).toBe(true);
+  });
+
+  test('returns false for unrelated errors', () => {
+    expect(isKeeperNsfUnavailableError('Record does not exist')).toBe(false);
+    expect(isKeeperNsfUnavailableError('Rate limit exceeded')).toBe(false);
+    expect(isKeeperNsfUnavailableError('Connection timeout')).toBe(false);
+  });
+
+  test('returns false for empty/null input', () => {
+    expect(isKeeperNsfUnavailableError('')).toBe(false);
+    expect(isKeeperNsfUnavailableError(null)).toBe(false);
+    expect(isKeeperNsfUnavailableError(undefined)).toBe(false);
+  });
+
+  test('does NOT false-positive on "not allowed" (removed matcher)', () => {
+    expect(isKeeperNsfUnavailableError('Operation not allowed')).toBe(false);
+  });
+
+  test('does NOT false-positive on "not authorized" (removed matcher)', () => {
+    expect(isKeeperNsfUnavailableError('User not authorized for this action')).toBe(false);
+  });
+});
+
+describe('nsfNotAvailableError', () => {
+  test('returns a structured error with nsf_not_available errorCode', () => {
+    const result = nsfNotAvailableError();
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('nsf_not_available');
+    expect(result.error).toBe(ERROR_CODES.KEEPER_NSF_NOT_AVAILABLE);
+  });
+
+  test('includes helpful message about Commander requirements', () => {
+    const result = nsfNotAvailableError();
+    expect(result.message).toContain('Commander 18.0.0+');
+    expect(result.message).toContain('Nested Share Subfolders');
+  });
+
+  test('appends original message when provided', () => {
+    const result = nsfNotAvailableError('unknown command nsf-list');
+    expect(result.message).toContain('Commander reported: unknown command nsf-list');
+  });
+
+  test('includes originalMessage in details when provided', () => {
+    const result = nsfNotAvailableError('some error');
+    expect(result.details).toBeDefined();
+    expect(result.details.originalMessage).toBe('some error');
+  });
+
+  test('does not include details when no original message', () => {
+    const result = nsfNotAvailableError();
+    expect(result.details).toBeFalsy();
   });
 });

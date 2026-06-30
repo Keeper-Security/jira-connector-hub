@@ -537,9 +537,6 @@ function isKeeperNsfUnavailableError(errorOrMessage) {
     message.includes('invalid command') ||
     message.includes('unrecognized command') ||
     message.includes('not permitted') ||
-    message.includes('not allowed') ||
-    message.includes('disallowed') ||
-    message.includes('not authorized') ||
     ((message.includes('keeper drive') || message.includes('nested share')) && (
       message.includes('not enabled') ||
       message.includes('not available') ||

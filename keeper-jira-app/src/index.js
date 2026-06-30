@@ -25,6 +25,7 @@ import {
   buildNsfRecordPermissionArgs,
   sanitizeNsfDuration
 } from './modules/utils/nsfShareCommands.js';
+import { isFolderRoeEligibleFromListSfRows } from './modules/utils/roeEligibility.js';
 import {
   escapeForSingleQuotes,
   escapeForDoubleQuotes,
@@ -967,6 +968,18 @@ function validateCommandParameters(action, parameters, options = {}) {
       } else if (parameters.action !== 'cancel') {
         errors.push('User email is required for share operations');
       }
+
+      // Action allow-list check
+      if (parameters.action) {
+        const validShareActions = isNsfMode
+          ? ['grant', 'revoke', 'remove', 'owner']
+          : ['grant', 'revoke', 'cancel'];
+        if (!validShareActions.includes(parameters.action)) {
+          errors.push(
+            `Invalid action "${parameters.action}". Must be one of: ${validShareActions.join(', ')}`
+          );
+        }
+      }
       
       // Expiration validation
       if (parameters.expire_in) {
@@ -983,7 +996,7 @@ function validateCommandParameters(action, parameters, options = {}) {
         }
       }
 
-      // rotate_on_expiration requires a valid expiration window.
+      // rotate_on_expiration requires a valid expiration window and target UID.
       if (parameters.rotate_on_expiration === true) {
         if (!parameters.expiration_type || parameters.expiration_type === 'none') {
           errors.push('Expiration is required when rotate-on-expiration is enabled');
@@ -991,6 +1004,10 @@ function validateCommandParameters(action, parameters, options = {}) {
           errors.push('Expire-at value is required when rotate-on-expiration is enabled');
         } else if (parameters.expiration_type === 'expire-in' && !parameters.expire_in) {
           errors.push('Expire-in value is required when rotate-on-expiration is enabled');
+        }
+        const roeTargetUid = parameters.record || parameters.folder || parameters.sharedFolder;
+        if (!roeTargetUid) {
+          errors.push('rotate-on-expiration requires a record or folder UID');
         }
       }
       break;
@@ -2109,7 +2126,10 @@ async function checkRoeEligibility(userId, type, uid) {
   let rows = result.data?.data ?? [];
   if (typeof rows === 'string') rows = JSON.parse(rows);
   if (!Array.isArray(rows)) rows = [];
-  return { eligible: rows.some(r => r.shared_folder_uid === uid), roeResponse: rows };
+  return {
+    eligible: isFolderRoeEligibleFromListSfRows(rows, uid),
+    roeResponse: rows
+  };
 }
 
 // Check if a record is pamUser or a folder is rotation-on-expiration eligible.
@@ -2179,7 +2199,7 @@ resolver.define('executeKeeperCommand', async (req) => {
   }
 
   try {
-    const result = await executeKeeperApiCommand(sanitizedCommand, { userId });
+    const result = await executeKeeperApiCommand(sanitizedCommand, { userId, forgeSafe: true });
     return result;
   } catch (err) {
     // Check for rate limit error
@@ -2666,29 +2686,34 @@ resolver.define('executeKeeperAction', async (req) => {
       ? parameters.record
       : (parameters.folder || parameters.sharedFolder);
 
-    if (roeUid) {
-      try {
-        const { eligible } = await checkRoeEligibility(userId, roeType, roeUid);
-        if (!eligible) {
-          return errorResponse(
-            ERROR_CODES.VALIDATION_INVALID_FORMAT,
-            'rotate-on-expiration is not supported for this record or folder',
-            { uid: roeUid, type: roeType, reason: 'not_roe_eligible' }
-          );
-        }
-      } catch (roeCheckErr) {
-        if (roeCheckErr.rateLimited) {
-          return rateLimitError(roeCheckErr.limitType || 'minute', roeCheckErr.retryAfter || 60);
-        }
-        logger.warn('executeKeeperAction: ROE eligibility re-check failed, rejecting to be safe', {
-          roeType, roeUid, error: roeCheckErr.message
-        });
+    if (!roeUid) {
+      return errorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED_FIELD,
+        'rotate-on-expiration requires a record or folder UID'
+      );
+    }
+
+    try {
+      const { eligible } = await checkRoeEligibility(userId, roeType, roeUid);
+      if (!eligible) {
         return errorResponse(
           ERROR_CODES.VALIDATION_INVALID_FORMAT,
-          'Could not verify rotation eligibility. Please try again.',
-          { uid: roeUid, type: roeType, reason: 'eligibility_check_failed' }
+          'rotate-on-expiration is not supported for this record or folder',
+          { uid: roeUid, type: roeType, reason: 'not_roe_eligible' }
         );
       }
+    } catch (roeCheckErr) {
+      if (roeCheckErr.rateLimited) {
+        return rateLimitError(roeCheckErr.limitType || 'minute', roeCheckErr.retryAfter || 60);
+      }
+      logger.warn('executeKeeperAction: ROE eligibility re-check failed, rejecting to be safe', {
+        roeType, roeUid, error: roeCheckErr.message
+      });
+      return errorResponse(
+        ERROR_CODES.VALIDATION_INVALID_FORMAT,
+        'Could not verify rotation eligibility. Please try again.',
+        { uid: roeUid, type: roeType, reason: 'eligibility_check_failed' }
+      );
     }
   }
 
@@ -3184,19 +3209,13 @@ resolver.define('executeKeeperAction', async (req) => {
     // is not a pamUser with rotation fully configured. The CLI shows
     // "rotate-on-expiration requires a pamUser record..." but the HTTP API
     // returns a generic 500 with just the record UID. Catch both cases.
-    // Note: `command` here is the action name ('share-record'), not the full
-    // CLI string, so we check `parameters.rotate_on_expiration` instead.
     if (errorMessage && (
       errorMessage.includes('rotate-on-expiration requires a pamUser record with rotation configured') ||
-      (parameters?.rotate_on_expiration === true && errorMessage.includes('500'))
+      (command && command.includes('--rotate-on-expiration') && errorMessage.includes('500'))
     )) {
-      const ineligibleUid = errorMessage.match(/500\s*-\s*([A-Za-z0-9_-]{10,})/)?.[1];
-      const roeMsg = ineligibleUid
-        ? `Rotate-on-expiration failed — record "${ineligibleUid}" requires a fully configured PAM User with rotation enabled (linked PAM config/resource, enabled state, and an active Gateway).`
-        : 'Rotate-on-expiration failed — the target record requires a fully configured PAM User with rotation enabled (linked PAM config/resource, enabled state, and an active Gateway).';
       return errorResponse(
         ERROR_CODES.KEEPER_PERMISSION_DENIED,
-        roeMsg,
+        'Rotate-on-expiration failed — the target record requires a fully configured PAM User with rotation enabled (linked PAM config/resource, enabled state, and an active Gateway).',
         { troubleshooting: [
           'Verify the record is of type pamUser',
           'Ensure rotation is enabled for that record (pam rotation edit)',
