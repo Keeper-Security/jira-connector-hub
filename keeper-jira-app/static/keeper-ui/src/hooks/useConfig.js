@@ -1,23 +1,36 @@
 /**
- * Custom hook for managing configuration state and operations
+ * Custom hook for managing configuration state and operations.
+ *
+ * KJ-26-07: We track an `isApiKeyDirty` flag internally so we know whether
+ * the user actually typed a new value. When dirty=false on save / test, we
+ * pass through the masked value and the backend reuses the stored key.
  */
 import { useState, useEffect } from 'react';
 import * as api from '../services/api';
 import { handleApiError, getConnectionErrorContext, isStructuredError } from '../utils/errorHandler';
-import { MESSAGE_TYPES, COPY_MESSAGE_TIMEOUT } from '../constants';
+import { MESSAGE_TYPES } from '../constants';
 
 export const useConfig = () => {
   const [formValues, setFormValues] = useState({ apiUrl: "", apiKey: "" });
   const [originalFormValues, setOriginalFormValues] = useState({ apiUrl: "", apiKey: "" });
   const [hasExistingConfig, setHasExistingConfig] = useState(false);
+  const [isApiKeyDirty, setIsApiKeyDirty] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [formKey, setFormKey] = useState(0);
   const [isApiKeyMasked, setIsApiKeyMasked] = useState(true);
-  const [showCopiedMessage, setShowCopiedMessage] = useState(false);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [hasFormChanges, setHasFormChanges] = useState(false);
   const [connectionTested, setConnectionTested] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
+
+  // Wrapper for setFormValues that flips `isApiKeyDirty` when the apiKey
+  // field is changed by the user. Use this from inputs instead of setFormValues
+  // directly so we can distinguish "user typed a new key" from "we hydrated
+  // the masked placeholder from the backend".
+  const updateFormValue = (field, value) => {
+    if (field === 'apiKey') setIsApiKeyDirty(true);
+    setFormValues((prev) => ({ ...prev, [field]: value }));
+  };
 
   // Load configuration on mount
   useEffect(() => {
@@ -34,6 +47,7 @@ export const useConfig = () => {
             apiKey: config.apiKey || "",
           });
           setHasExistingConfig(true);
+          setIsApiKeyDirty(false);
           setConnectionTested(false); // Require connection test even for existing config
         }
       } catch (error) {
@@ -46,23 +60,30 @@ export const useConfig = () => {
     loadConfiguration();
   }, []);
 
-  // Track form changes
+  // Track form changes — apiKey diff is by `isApiKeyDirty`, not raw string
+  // comparison, so the masked placeholder doesn't register as a change.
   useEffect(() => {
-    const hasChanges = 
+    const hasChanges =
       formValues.apiUrl !== originalFormValues.apiUrl ||
-      formValues.apiKey !== originalFormValues.apiKey;
-    
+      isApiKeyDirty;
+
     setHasFormChanges(hasChanges);
-    
+
     if (hasChanges) {
       setConnectionTested(false);
     }
-  }, [formValues, originalFormValues]);
+  }, [formValues, originalFormValues, isApiKeyDirty]);
 
   // Handle form submission
   const handleSubmit = async (data) => {
     try {
-      const result = await api.saveConfig(data);
+      // KJ-26-07: When user didn't change the apiKey, send the masked
+      // placeholder; the backend recognises it and keeps the stored secret.
+      const payload = {
+        ...data,
+        apiKey: isApiKeyDirty ? data.apiKey : (formValues.apiKey || ''),
+      };
+      const result = await api.saveConfig(payload);
       
       // Check for structured error response (new pattern)
       if (isStructuredError(result)) {
@@ -76,14 +97,18 @@ export const useConfig = () => {
         return;
       }
       
+      // Re-load config so we display the masked apiKey returned by the backend
+      // instead of whatever the user typed (or the masked sentinel).
+      const refreshed = await api.loadConfig();
       setFormValues({
-        apiUrl: data.apiUrl || "",
-        apiKey: data.apiKey || "",
+        apiUrl: refreshed?.apiUrl || data.apiUrl || "",
+        apiKey: refreshed?.apiKey || "",
       });
       setOriginalFormValues({
-        apiUrl: data.apiUrl || "",
-        apiKey: data.apiKey || "",
+        apiUrl: refreshed?.apiUrl || data.apiUrl || "",
+        apiKey: refreshed?.apiKey || "",
       });
+      setIsApiKeyDirty(false);
       
       setFormKey(prev => prev + 1);
       setHasExistingConfig(true);
@@ -135,6 +160,8 @@ export const useConfig = () => {
       return;
     }
 
+    // KJ-26-07: Sending the masked placeholder is fine — the backend swaps in
+    // the stored apiKey. Block the test only when there's no key at all.
     setIsTestingConnection(true);
     setStatusMessage(null);
 
@@ -188,33 +215,22 @@ export const useConfig = () => {
     }
   };
 
-  // Copy API key
-  const copyApiKey = async () => {
-    try {
-      await navigator.clipboard.writeText(formValues.apiKey);
-      setShowCopiedMessage(true);
-      setTimeout(() => setShowCopiedMessage(false), COPY_MESSAGE_TIMEOUT);
-    } catch (err) {
-      // Silently fail
-    }
-  };
+  // The "Copy" button was removed because the apiKey we hold in state is the masked placeholder, not a usable secret. The Forge sandbox also blocks clipboard.writeText reliably across the issue panel iframe.
 
   // Clear form
   const handleClearForm = () => {
     setFormValues({ apiUrl: "", apiKey: "" });
+    setIsApiKeyDirty(true);
     setConnectionTested(false);
   };
 
   return {
     formValues,
-    setFormValues,
-    originalFormValues,
-    hasExistingConfig,
+    updateFormValue,
     isLoading,
     formKey,
     isApiKeyMasked,
     setIsApiKeyMasked,
-    showCopiedMessage,
     isTestingConnection,
     hasFormChanges,
     connectionTested,
@@ -222,8 +238,7 @@ export const useConfig = () => {
     setStatusMessage,
     handleSubmit,
     handleTestConnection,
-    copyApiKey,
-    handleClearForm
+    handleClearForm,
   };
 };
 

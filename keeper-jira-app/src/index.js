@@ -32,6 +32,15 @@ import {
   sanitizeJsonObject,
   capitalizeFieldName
 } from './modules/utils/commandBuilder.js';
+import { maskApiKey, isMaskedApiKey } from './modules/utils/auth.js';
+import {
+  requireProjectAdmin,
+  verifyProjectAdmin
+} from './modules/utils/adminGate.js';
+import {
+  validatePasswordComplexity,
+  formatPasswordPolicyError
+} from './modules/utils/passwordPolicy.js';
 
 const resolver = new Resolver();
 
@@ -282,7 +291,12 @@ async function getCurrentUser() {
 }
 
 /**
- * Get Keeper config (called from frontend)
+ * Get Keeper config (called from frontend).
+ *
+ * KJ-26-07: The full apiKey is never returned to the client. We return a
+ * masked form (`****<last 4 chars>`) so the UI can still indicate that a
+ * key is configured and surface its tail for visual verification, while the
+ * real secret remains server-side in Forge storage.
  */
 resolver.define('getConfig', async () => {
   // One-shot cleanup of webhook storage left by pre-ITSM versions.
@@ -297,7 +311,9 @@ resolver.define('getConfig', async () => {
   }
 
   const config = await storage.get('keeperConfig');
-  return config || {};
+  if (!config) return {};
+  const masked = maskApiKey(config.apiKey);
+  return { ...config, apiKey: masked };
 });
 
 /**
@@ -315,7 +331,7 @@ resolver.define('setConfig', async (req) => {
   }
   
   const apiUrl = payload.apiUrl;
-  const apiKey = payload.apiKey;
+  const submittedApiKey = payload.apiKey;
   const skipConnectionTest = payload.skipConnectionTest || false;
   
   // ========================================================================
@@ -339,8 +355,21 @@ resolver.define('setConfig', async (req) => {
   }
   
   // Validate API key is provided
-  if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
+  if (!submittedApiKey || typeof submittedApiKey !== 'string' || !submittedApiKey.trim()) {
     return validationError('apiKey', 'API Key is required');
+  }
+  
+  // KJ-26-07: If the UI round-tripped the masked placeholder (or the
+  // explicit keep-existing sentinel), reuse the stored API key instead of
+  // overwriting it. This lets users update the URL without re-typing the
+  // secret and ensures the masked form is never persisted as a real key.
+  let effectiveApiKey = submittedApiKey.trim();
+  if (isMaskedApiKey(effectiveApiKey)) {
+    const existing = await storage.get('keeperConfig');
+    if (!existing?.apiKey) {
+      return validationError('apiKey', 'API Key is required');
+    }
+    effectiveApiKey = existing.apiKey;
   }
   
   // Use the normalized URL (trailing slashes removed)
@@ -353,7 +382,7 @@ resolver.define('setConfig', async (req) => {
   let connectionWarning = null;
   
   if (!skipConnectionTest) {
-    const reachabilityTest = await testApiUrlReachability(normalizedApiUrl, apiKey);
+    const reachabilityTest = await testApiUrlReachability(normalizedApiUrl, effectiveApiKey);
     
     if (!reachabilityTest.reachable) {
       return connectionError(`Connection test failed: ${reachabilityTest.error}`);
@@ -367,7 +396,7 @@ resolver.define('setConfig', async (req) => {
   // Save the validated and normalized config
   const configToSave = { 
     apiUrl: normalizedApiUrl, 
-    apiKey: apiKey.trim() 
+    apiKey: effectiveApiKey 
   };
   
   await storage.set('keeperConfig', configToSave);
@@ -406,15 +435,27 @@ resolver.define('testConnection', async (req) => {
   }
   
   const apiUrl = payload.apiUrl;
-  const apiKey = payload.apiKey;
+  const submittedApiKey = payload.apiKey;
   
-  if (!apiUrl || !apiKey) {
+  if (!apiUrl || !submittedApiKey) {
     return validationError('apiUrl', 'API URL and API Key are required for testing connection');
+  }
+
+  // KJ-26-07: If the UI submitted the masked placeholder (user clicked
+  // "Test Connection" without retyping the key), fall back to the stored
+  // key so the test actually exercises real credentials.
+  let effectiveApiKey = submittedApiKey;
+  if (isMaskedApiKey(submittedApiKey)) {
+    const existing = await storage.get('keeperConfig');
+    if (!existing?.apiKey) {
+      return validationError('apiKey', 'API Key is required');
+    }
+    effectiveApiKey = existing.apiKey;
   }
 
   try {
     // Use the v2 API test connection function from keeperApi module
-    const result = await testKeeperConnection(apiUrl, apiKey);
+    const result = await testKeeperConnection(apiUrl, effectiveApiKey);
 
     // Extract service status information from the response
     const serviceMessage = result.data?.message || 'Service status unknown';
@@ -777,8 +818,11 @@ function validateCommandParameters(action, parameters, options = {}) {
         if (!recordValidation.valid) errors.push(recordValidation.error);
       }
       
-      // Record type validation
-      if (parameters.recordType) {
+      // KJ-26-06: Record type is immutable on record-update. The UI greys
+      // out the field, but a proxy can re-enable it; reject server-side too.
+      if (action === 'record-update' && parameters.recordType) {
+        errors.push('Record type cannot be changed after a record is created.');
+      } else if (parameters.recordType) {
         const typeValidation = validateField('recordType', parameters.recordType, { 
           limitKey: 'recordType',
           pattern: 'recordType'
@@ -801,10 +845,17 @@ function validateCommandParameters(action, parameters, options = {}) {
         if (!loginValidation.valid) errors.push(loginValidation.error);
       }
       
-      // Password validation (skip $GEN)
+      // Password validation: length limit + KJ-26-04 server-side complexity
+      // for any non-`$GEN` password on record-add / record-update. Client-
+      // side checks can be bypassed via proxy; this is the authoritative gate.
       if (parameters.password && parameters.password !== '$GEN' && parameters.password !== 'generate') {
         const passwordValidation = validateField('password', parameters.password, { limitKey: 'password' });
         if (!passwordValidation.valid) errors.push(passwordValidation.error);
+
+        const complexity = validatePasswordComplexity(parameters.password);
+        if (!complexity.valid) {
+          errors.push(formatPasswordPolicyError(complexity.errors));
+        }
       }
       
       // URL validation
@@ -882,15 +933,16 @@ function validateCommandParameters(action, parameters, options = {}) {
       for (const [key, value] of Object.entries(parameters)) {
         if (typeof value === 'string') {
           // Skip already validated fields
-          if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email'].includes(key)) {
+          if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email',
+               'keyPair_privateKey', 'keyPair_publicKey', 'passphrase'].includes(key)) {
             continue;
           }
           if (addressFields.includes(key) || nameFields.includes(key)) {
             continue;
           }
           
-          // Validate against default limit
-          const validation = validateField(key, value, { limitKey: 'default' });
+          // Use field-specific limit when available (e.g. privateKey: 16000), else default.
+          const validation = validateField(key, value, { limitKey: key });
           if (!validation.valid) errors.push(validation.error);
         }
       }
@@ -1046,9 +1098,8 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
         throw new Error(`Title is required for record-add command. Record type: ${recordType}`);
       }
       command += ` --title="${escapeForDoubleQuotes(parameters.title)}"`;
-      // Handle common fields for all record types
       if (parameters.notes) {
-        command += ` Notes="${escapeForDoubleQuotes(parameters.notes)}"`;
+        command += ` --notes='${escapeForSingleQuotes(parameters.notes)}'`;
       }
       
       // Skip metadata fields; folder is excluded (already emitted as --folder in NSF mode).
@@ -1222,10 +1273,9 @@ function buildKeeperCommand(action, parameters, issueKey, options = {}) {
         command += ` --title='${escapeForSingleQuotes(parameters.title)}'`;
       }
       
-      // Optional record type change
-      if (parameters.recordType) {
-        command += ` --record-type='${escapeForSingleQuotes(parameters.recordType)}'`;
-      }
+      // KJ-26-06: recordType is immutable on update — defence-in-depth.
+      // `validateCommandParameters` already rejects this branch; if anything
+      // ever bypasses validation we still must NOT emit `--record-type`.
       
       // Notes handling (with + prefix to append, without to replace)
       if (parameters.notes) {
@@ -1731,6 +1781,86 @@ function filterRecordsByVaultMode(records, mode) {
   });
 }
 
+/**
+ * Record types the app supports. Frontend peer: SUPPORTED_RECORD_TYPES in
+ * static/keeper-issue-ui/src/constants/index.js.
+ *
+ * Keyed by Commander's `content` value (the $id used in record-type-info).
+ * The Map gives O(1) lookup for both the intersection filter and the
+ * server-side validation gate in executeKeeperAction (KJ-26-02).
+ */
+const SUPPORTED_RECORD_TYPES = new Map([
+  ['contact',             'Contact'],
+  ['databaseCredentials', 'Database'],
+  ['encryptedNotes',      'Secure Note'],
+  ['login',               'Login'],
+  ['membership',          'Membership'],
+  ['serverCredentials',   'Server'],
+  ['softwareLicense',     'Software License'],
+  ['sshKeys',             'SSH Keys'],
+]);
+
+/**
+ * Convert the SUPPORTED_RECORD_TYPES map into the { label, value } shape
+ * the frontend expects. Used both as the resolver response and as the
+ * fallback when Commander's rti command is unavailable.
+ */
+function allSupportedRecordTypes() {
+  return Array.from(SUPPORTED_RECORD_TYPES, ([value, label]) => ({ label, value }));
+}
+
+/**
+ * Parse the JSON response from `rti -lr --effective --format=json` and
+ * return only the entries whose `content` is in SUPPORTED_RECORD_TYPES.
+ *
+ * Commander returns: [{ recordTypeId: number, content: string }, ...]
+ *
+ * @param {unknown} raw - Parsed JSON array from Commander.
+ * @returns {{ label: string, value: string }[]}
+ */
+function intersectEffectiveRecordTypes(raw) {
+  if (!Array.isArray(raw)) return allSupportedRecordTypes();
+  const effectiveIds = new Set(raw.map(r => r?.content).filter(Boolean));
+  return Array.from(SUPPORTED_RECORD_TYPES, ([value, label]) => ({ label, value }))
+    .filter(t => effectiveIds.has(t.value));
+}
+
+/**
+ * KJ-26-02: Return the record types the current user is permitted to create,
+ * intersected with the app's supported set.
+ *
+ * Runs `rti -lr --effective --format=json` to honour enterprise role policies
+ * (RESTRICT_RECORD_TYPES). On any failure (older Commander, network error,
+ * parse failure) falls back to the full supported list — no regression.
+ */
+resolver.define('getRecordTypes', async (req) => {
+  const userId = req?.context?.accountId;
+  try {
+    const result = await executeKeeperApiCommand(
+      'record-type-info -lr --effective --format=json',
+      { userId, forgeSafe: true },
+    );
+    const apiData = result?.data;
+
+    let parsed = [];
+    if (apiData?.data && Array.isArray(apiData.data)) {
+      parsed = apiData.data;
+    } else if (apiData?.message && typeof apiData.message === 'string') {
+      parsed = JSON.parse(apiData.message);
+    } else if (apiData?.data && typeof apiData.data === 'string') {
+      parsed = JSON.parse(apiData.data);
+    }
+
+    const types = intersectEffectiveRecordTypes(parsed);
+    return successResponse({ recordTypes: types });
+  } catch (err) {
+    logger.warn('getRecordTypes: rti --effective failed, falling back to full list', {
+      error: err.message,
+    });
+    return successResponse({ recordTypes: allSupportedRecordTypes() });
+  }
+});
+
 // Get records from Keeper API. NSF mode uses nsf-list; items are tagged with source.
 resolver.define('getKeeperRecords', async (req) => {
   const userId = req?.context?.accountId;
@@ -1794,6 +1924,17 @@ resolver.define('getKeeperFolders', async (req) => {
     : 'ls -f -R --format=json';
 
   try {
+    // Best-effort sync-down so newly created folders are visible without
+    // requiring a Commander restart. Mirrors the pattern used by runEpmSyncDown.
+    // Failures are logged and ignored — never block the user-facing fetch.
+    try {
+      await executeKeeperApiCommand('sync-down', { userId, skipRateLimit: true });
+    } catch (syncErr) {
+      logger.warn('sync-down before folder fetch failed; continuing with cached data', {
+        error: syncErr.message
+      });
+    }
+
     const result = await executeKeeperApiCommand(command, { userId, forgeSafe: true });
     const apiData = result.data;
 
@@ -2039,8 +2180,8 @@ resolver.define('executeKeeperCommand', async (req) => {
   const ALLOWED_COMMAND_PREFIXES = [
     'list', 'list-sf', 'ls', 'get', 'search',
     'record-add', 'record-update', 'record-permission',
+    'record-type-info', 'rti',
     'share-record', 'share-folder',
-    // NSF sharing/permission variants (see NSF_COMMAND_NAME_MAP).
     'nsf-list', 'nsf-get',
     'nsf-record-add', 'nsf-record-update', 'nsf-record-permission',
     'nsf-share-record', 'nsf-share-folder',
@@ -2301,48 +2442,61 @@ resolver.define('executeKeeperAction', async (req) => {
     return validationError('command', 'Command is required');
   }
 
-  // Enforce server-side admin check for privileged actions. The frontend hides
-  // admin controls for non-admins, but any user can bypass that restriction via
-  // direct invoke() calls. We re-verify the Jira project-admin permission here.
-  const requiresProjectAdmin =
-    command === 'record-add' ||
+  // KJ-26-03: Enforce server-side admin gate for privileged actions.
+  // The frontend hides admin controls for non-admins, but those restrictions
+  // are bypassable via direct invoke calls. `requireProjectAdmin` centralises
+  // the (group-membership OR ADMINISTER_PROJECTS) check and fails closed.
+  const ADMIN_GATED_COMMANDS = new Set(['record-add', 'record-update']);
+  const isAdminGated =
+    ADMIN_GATED_COMMANDS.has(command) ||
     command.startsWith('device-approve') ||
     command.startsWith('epm approval action');
 
-  if (requiresProjectAdmin) {
+  if (isAdminGated) {
+    const adminErr = await requireProjectAdmin(issueKey);
+    if (adminErr) return adminErr;
+  }
+
+  // KJ-26-02: Validate that the submitted recordType is both supported by
+  // the app AND permitted by the user's enterprise role policy.  The first
+  // check (SUPPORTED_RECORD_TYPES) is synchronous and always enforced.  The
+  // second check (rti --effective) is best-effort: on failure, we allow the
+  // request through so older Commander installs don't break.
+  if (command === 'record-add' && parameters?.recordType) {
+    if (!SUPPORTED_RECORD_TYPES.has(parameters.recordType)) {
+      return validationError(
+        'recordType',
+        `Record type "${parameters.recordType}" is not supported by this application.`,
+      );
+    }
     try {
-      const projectKey = issueKey.split('-')[0];
-      const permResponse = await requestJiraAsUserWithRetry(
-        route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=ADMINISTER_PROJECTS`,
-        { method: 'GET', headers: { Accept: 'application/json' } },
-        'Server-side admin check'
+      const rtiResult = await executeKeeperApiCommand(
+        'record-type-info -lr --effective --format=json',
+        { userId, skipRateLimit: true, forgeSafe: true },
       );
-      if (!permResponse.ok) {
-        return errorResponse(
-          ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
-          'Could not verify administrator permissions. Please try again.',
-          {}
-        );
+      const rtiData = rtiResult?.data;
+      let rtiParsed = [];
+      if (rtiData?.data && Array.isArray(rtiData.data)) {
+        rtiParsed = rtiData.data;
+      } else if (rtiData?.message && typeof rtiData.message === 'string') {
+        rtiParsed = JSON.parse(rtiData.message);
+      } else if (rtiData?.data && typeof rtiData.data === 'string') {
+        rtiParsed = JSON.parse(rtiData.data);
       }
-      const permData = await permResponse.json();
-      const isProjectAdmin = permData?.permissions?.ADMINISTER_PROJECTS?.havePermission === true;
-      if (!isProjectAdmin) {
-        return errorResponse(
-          ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
-          'Only Jira project administrators are allowed to perform this action.',
-          { requiredPermission: 'ADMINISTER_PROJECTS' }
-        );
+      if (Array.isArray(rtiParsed) && rtiParsed.length > 0) {
+        const effectiveIds = new Set(rtiParsed.map(r => r?.content).filter(Boolean));
+        if (!effectiveIds.has(parameters.recordType)) {
+          return errorResponse(
+            ERROR_CODES.VALIDATION_ERROR,
+            `Your enterprise role policy does not permit creating "${parameters.recordType}" records.`,
+            { recordType: parameters.recordType },
+          );
+        }
       }
-    } catch (adminCheckErr) {
-      logger.warn('executeKeeperAction: admin check failed', {
-        command: command.split(' ')[0],
-        error: adminCheckErr.message,
+    } catch (rtiErr) {
+      logger.warn('executeKeeperAction: rti --effective check failed, allowing request', {
+        error: rtiErr.message,
       });
-      return errorResponse(
-        ERROR_CODES.AUTH_NOT_PROJECT_ADMIN,
-        'Could not verify administrator permissions. Please try again.',
-        {}
-      );
     }
   }
   
@@ -3106,6 +3260,16 @@ resolver.define('executeKeeperAction', async (req) => {
       );
     }
 
+    // Strip CLI-internal hint that is meaningless to Jira users.
+    if (errorMessage && errorMessage.includes('Use --force to bypass password policy warnings')) {
+      const cleaned = errorMessage
+        .split('\n')
+        .filter(line => !line.includes('Use --force to bypass password policy warnings'))
+        .join('\n')
+        .trim();
+      return keeperError(cleaned || errorMessage, err);
+    }
+
     // Return Keeper error with automatic error type detection
     return keeperError(errorMessage, err);
   }
@@ -3292,92 +3456,41 @@ resolver.define('activateKeeperPanel', async (req) => {
 });
 
 /**
- * Get user role - check if current user is admin using Jira permissions API
+ * Get user role - check if current user is a Jira admin for the project.
+ *
+ * KJ-26-03: Delegates to `verifyProjectAdmin`, which prefers Jira group
+ * membership (reliable across all plan tiers) and falls back to
+ * `ADMINISTER_PROJECTS` when the user isn't in an admin group. Returns the
+ * same response shape callers already consume so the issue panel is
+ * unchanged.
  */
 resolver.define('getUserRole', async (req) => {
   const { issueKey } = req.payload;
-  
   if (!issueKey) {
     throw new Error('Issue key is required');
   }
-  
+
   try {
-    // Extract project key from issue key (e.g., "DM-5" -> "DM")
-    const projectKey = issueKey.split('-')[0];
-    
-    if (!projectKey) {
-      throw new Error('Unable to extract project key from issue key');
-    }
-    
-    let userApiResponse = null;
-    let permissionsApiResponse = null;
-    
-    // Get current user info
-    try {
-      const userData = await getCurrentUser();
-        
-      if (userData && Object.keys(userData).length > 0) {
-        userApiResponse = userData;
-      }
-    } catch (userErr) {
-    }
-    
-    // Get permissions data (with rate limit retry)
-    try {
-      const permResponse = await requestJiraAsUserWithRetry(
-        route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=ADMINISTER_PROJECTS`,
-        {},
-        'Check admin permissions'
-      );
-      
-      if (permResponse && permResponse.ok) {
-        const permissionsData = await permResponse.json();
-        
-        if (permissionsData && Object.keys(permissionsData).length > 0) {
-          permissionsApiResponse = permissionsData;
-        }
-      }
-    } catch (permErr) {
-    }
-    
-    // Process results if we have data
-    if ((userApiResponse && Object.keys(userApiResponse).length > 0) || 
-        (permissionsApiResponse && Object.keys(permissionsApiResponse).length > 0)) {
-      
-      const hasAdminPermission = permissionsApiResponse?.permissions?.ADMINISTER_PROJECTS?.havePermission === true;
-      
-      return {
-        success: true,
-        isAdmin: hasAdminPermission,
-        adminCheckMethod: 'project_permissions',
-        userKey: userApiResponse?.accountId || userApiResponse?.key || 'unknown',
-        displayName: userApiResponse?.displayName || userApiResponse?.name || userApiResponse?.emailAddress || 'User',
-        projectKey: projectKey
-      };
-    }
-    
-    // Fallback if no data available
-    throw new Error('Unable to retrieve user or permissions data');
-    
+    const verdict = await verifyProjectAdmin(issueKey);
+    return {
+      success: !verdict.error,
+      isAdmin: verdict.isAdmin,
+      adminCheckMethod: verdict.adminCheckMethod,
+      userKey: verdict.userKey || 'unknown',
+      displayName: verdict.displayName,
+      projectKey: verdict.projectKey,
+      ...(verdict.error ? { error: verdict.error } : {}),
+    };
   } catch (err) {
-    
-    // Try to get project key even on error
-    let projectKey = null;
-    try {
-      projectKey = issueKey.split('-')[0];
-    } catch (projectKeyError) {
-      // Ignore extraction error
-    }
-    
-    // Default to non-admin on error
+    logger.error('getUserRole: unexpected failure', { error: err.message, issueKey });
     return {
       success: false,
       isAdmin: false,
       adminCheckMethod: 'error_fallback',
       userKey: null,
       displayName: 'User',
-      projectKey: projectKey,
-      error: err.message
+      projectKey: issueKey ? issueKey.split('-')[0] : null,
+      error: err.message,
     };
   }
 });

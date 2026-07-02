@@ -62,18 +62,16 @@ const App = () => {
               statusMessage={configHook.statusMessage}
               setStatusMessage={configHook.setStatusMessage}
               formValues={configHook.formValues}
-              setFormValues={configHook.setFormValues}
+              updateFormValue={configHook.updateFormValue}
               formKey={configHook.formKey}
               isApiKeyMasked={configHook.isApiKeyMasked}
               setIsApiKeyMasked={configHook.setIsApiKeyMasked}
-              showCopiedMessage={configHook.showCopiedMessage}
               isTestingConnection={configHook.isTestingConnection}
               hasFormChanges={configHook.hasFormChanges}
               connectionTested={configHook.connectionTested}
               handleSubmit={configHook.handleSubmit}
               handleTestConnection={configHook.handleTestConnection}
               handleClearForm={configHook.handleClearForm}
-              copyApiKey={configHook.copyApiKey}
             />
           )}
 
@@ -222,21 +220,21 @@ const App = () => {
                     Basic Deployment:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status' -f json -rm foreground -q y --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down' -f json -rm foreground -q y --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-subtitle-spacing">
                     With Ngrok Tunneling:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status' -f json -rm foreground -q y -ng &lt;ngrok-auth-token&gt; -cd &lt;custom-domain&gt; --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down' -f json -rm foreground -q y -ng &lt;ngrok-auth-token&gt; -cd &lt;custom-domain&gt; --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-subtitle-spacing">
                     With Cloudflare Tunneling:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status' -f json -rm foreground -q y -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down' -f json -rm foreground -q y -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
                   </code>
                   
                   <p className="setup-docker-note">
@@ -268,21 +266,21 @@ this-device timeout 30d`}
                     Basic Service Creation:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status" -rm="foreground" -q=y -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -f=json
                   </code>
                   
                   <p className="setup-cli-subtitle-bold">
                     With Ngrok Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" -rm="foreground" -q=y -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-subtitle-bold">
                     With Cloudflare Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status" -rm="foreground" -q=y -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-note">

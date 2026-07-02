@@ -10,7 +10,7 @@ import ErrorIcon from "@atlaskit/icon/glyph/error";
 import LockIcon from "@atlaskit/icon/glyph/lock";
 import CrossIcon from "@atlaskit/icon/glyph/cross";
 
-import { KEEPER_ACTION_OPTIONS, KEEPER_ACTION_OPTIONS_NSF, PAGINATION_SETTINGS } from "./constants";
+import { KEEPER_ACTION_OPTIONS, KEEPER_ACTION_OPTIONS_NSF, SUPPORTED_RECORD_TYPES, PAGINATION_SETTINGS } from "./constants";
 import * as api from "./services/api";
 import { handleApiError as handleApiErrorUtil, isStructuredError, getErrorCode } from "./utils/errorHandler";
 import { formatWithUid, filterByTitleOrUid } from "./utils/formatters";
@@ -677,24 +677,23 @@ const IssuePanel = () => {
     }
   };
 
-  // Fetch Keeper record types - using static list
-  const fetchRecordTypes = () => {
+  // KJ-26-02: Fetch record types from the backend, which intersects
+  // Commander's `rti --effective` output with the app's supported set.
+  // Falls back to the frontend constant on any failure (no regression).
+  const fetchRecordTypes = async () => {
     setLoadingRecordTypes(true);
-    
-    // Static list of record types
-    const staticRecordTypes = [
-      { label: 'Contact', value: 'contact' },
-      { label: 'Database', value: 'databaseCredentials' },
-      { label: 'Secure Note', value: 'encryptedNotes' },
-      { label: 'Login', value: 'login' },
-      { label: 'Membership', value: 'membership' },
-      { label: 'Server', value: 'serverCredentials' },
-      { label: 'Software License', value: 'softwareLicense' },
-      { label: 'SSH Keys', value: 'sshKeys' }
-    ];
-    
-    setRecordTypes(staticRecordTypes);
+    try {
+      const result = await api.getRecordTypes();
+      if (result?.recordTypes && Array.isArray(result.recordTypes) && result.recordTypes.length > 0) {
+        setRecordTypes(result.recordTypes);
+      } else {
+        setRecordTypes(SUPPORTED_RECORD_TYPES);
+      }
+    } catch {
+      setRecordTypes(SUPPORTED_RECORD_TYPES);
+    } finally {
       setLoadingRecordTypes(false);
+    }
   };
 
   // Static field templates for each record type
@@ -1089,6 +1088,8 @@ const IssuePanel = () => {
         selectedRecordForUpdate,
         selectedFolder,
         tempAddressData,
+        rotateOnExpiration,
+        isRotationEligible,
         isNsfMode,
         rotateOnExpiration,
         isRotationEligible,
@@ -4192,6 +4193,11 @@ const IssuePanel = () => {
         if (finalParameters.password === '••••••••') {
           delete finalParameters.password; // Don't send masked password back
         }
+
+        // KJ-26-06: Record type is immutable on update. The form still shows
+        // the record type for context, but we never submit it — the backend
+        // will reject the request if recordType is present.
+        delete finalParameters.recordType;
         
         // IMPORTANT: Merge existing values for complex JSON fields to prevent data loss
         // When sending partial updates for fields like name, address, host, etc.,
@@ -4523,7 +4529,7 @@ const IssuePanel = () => {
       });
       
       // Update the JIRA ticket with rejection comment
-      const result = await api.rejectKeeperRequest(issueContext.issueKey, rejectionReason.trim());
+      const result = await api.rejectKeeperRequest(issueContext.issueKey, rejectionReason.trim(), formattedTimestamp);
 
       // Check for structured error response (new pattern)
       if (checkResultError(result)) {
@@ -5198,9 +5204,9 @@ const IssuePanel = () => {
                       {!(isAdmin && formData.action === 'cancel') && (
                         <RequirementsBlock
                           showInfoMessage={formData.action !== 'cancel'}
-                          infoMessage={isAdmin
-                            ? 'Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.'
-                            : 'Provide your requirement and justification for this request. An admin will review and process it.'}
+                          infoMessage={!isAdmin
+                            ? 'Provide your requirement and justification for this request. An admin will review and process it.'
+                            : undefined}
                           requirementsRequired={!isAdmin}
                           requirementsValue={formData.requirements}
                           onRequirementsChange={(e) => handleInputChange('requirements', e.target.value)}
@@ -5363,11 +5369,11 @@ const IssuePanel = () => {
 
                       {/* Info message and requirement text area for share-folder and record-permission actions */}
                       <RequirementsBlock
-                        infoMessage={isAdmin
-                          ? 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'
-                          : (selectedAction.value === 'record-permission'
+                        infoMessage={!isAdmin
+                          ? (selectedAction.value === 'record-permission'
                             ? 'Provide your requirement and justification for changing folder permissions. An admin will review and process it.'
-                            : 'Provide your requirement and justification for accessing a folder. An admin will review and process it.')}
+                            : 'Provide your requirement and justification for accessing a folder. An admin will review and process it.')
+                          : undefined}
                         requirementsRequired={!isAdmin}
                         requirementsValue={formData.requirements}
                         onRequirementsChange={(e) => handleInputChange('requirements', e.target.value)}

@@ -42,6 +42,9 @@ const VALIDATION_LIMITS = {
   lastName: 64,
   hostname: 256,
   port: 10,
+  privateKey: 16000,
+  publicKey: 8000,
+  passphrase: 1024,
   default: 1024
 };
 
@@ -248,8 +251,9 @@ function validateCommandParameters(action, parameters) {
         if (!recordValidation.valid) errors.push(recordValidation.error);
       }
       
-      // Record type validation
-      if (parameters.recordType) {
+      if (action === 'record-update' && parameters.recordType) {
+        errors.push('Record type cannot be changed after a record is created.');
+      } else if (parameters.recordType) {
         const typeValidation = validateField('recordType', parameters.recordType, { 
           limitKey: 'recordType',
           pattern: 'recordType'
@@ -447,10 +451,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
         throw new Error(`Title is required for record-add command. Record type: ${recordType}`);
       }
       command += ` --title="${escapeForDoubleQuotes(parameters.title)}"`;
-      
-      // Handle common fields
       if (parameters.notes) {
-        command += ` Notes="${escapeForDoubleQuotes(parameters.notes)}"`;
+        command += ` --notes='${escapeForSingleQuotes(parameters.notes)}'`;
       }
       
       // Password generation for login records
@@ -489,8 +491,9 @@ function buildKeeperCommand(action, parameters, issueKey) {
       }
       command += ` "${escapeForDoubleQuotes(parameters.record)}"`;
       
-      // Handle fields to update
-      const skipFields = ['record', 'skipComment'];
+      
+// Record type validation must be skipped for record-update
+      const skipFields = ['record', 'skipComment', 'recordType'];
       for (const [key, value] of Object.entries(parameters)) {
         if (skipFields.includes(key) || !value) continue;
         const fieldName = capitalizeFieldName(key);
