@@ -127,10 +127,10 @@ describe('isMaskedApiKey', () => {
     expect(isMaskedApiKey('__KEEP_EXISTING__')).toBe(true);
   });
 
-  test('recognises round-tripped masked values', () => {
-    expect(isMaskedApiKey('****abcd')).toBe(true);
-    expect(isMaskedApiKey('*'.repeat(36) + '1234')).toBe(true);
-    expect(isMaskedApiKey(maskApiKey('really-long-secret-here'))).toBe(true);
+  test('does NOT match masked placeholder values (regex removed)', () => {
+    expect(isMaskedApiKey('****abcd')).toBe(false);
+    expect(isMaskedApiKey('*'.repeat(36) + '1234')).toBe(false);
+    expect(isMaskedApiKey(maskApiKey('really-long-secret-here'))).toBe(false);
   });
 
   test('rejects values that look like real keys', () => {
@@ -148,6 +148,11 @@ describe('isMaskedApiKey', () => {
 
   test('rejects asterisks with no trailing tail', () => {
     expect(isMaskedApiKey('****')).toBe(false);
+  });
+
+  test('does not false-positive on keys starting with *', () => {
+    expect(isMaskedApiKey('*realApiKeyValue')).toBe(false);
+    expect(isMaskedApiKey('**key1234')).toBe(false);
   });
 });
 
