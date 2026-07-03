@@ -217,28 +217,10 @@ async function fetchWithRetry(url, options = {}, operationName = 'Keeper API') {
 // Rate Limiting Functions
 // ============================================================================
 
-// Verbs considered read-only / idempotent. Anything else is treated as a
-// write. Match is case-insensitive on the first whitespace-delimited token.
-// Keep in sync with ALLOWED_COMMAND_PREFIXES in src/index.js.
-const READ_ONLY_COMMAND_VERBS = new Set([
-  'list', 'ls', 'get', 'search', 'tree', 'cd',
-  'nsf-list', 'nsf-get',
-  'record-type-info', 'rti',
-  'service-status',
-  'enterprise-info', 'ei', 'enterprise-role', 'enterprise-user',
-]);
-
-/**
- * Classify a Keeper Commander command string into a rate-limit bucket.
- * Used by executeKeeperCommand so resolvers don't need to know about buckets.
- * @param {string} command - Full command, e.g. "nsf-list --records --format=json"
- * @returns {'read'|'write'}
- */
-function getRateLimitBucketForCommand(command) {
-  if (typeof command !== 'string' || !command.trim()) return 'write';
-  const verb = command.trim().split(/\s+/)[0].toLowerCase();
-  return READ_ONLY_COMMAND_VERBS.has(verb) ? 'read' : 'write';
-}
+// Rate-limit bucket classification is extracted into a standalone CJS module
+// (utils/rateLimitBucket.js) so it can be unit-tested without Forge ESM.
+import { getRateLimitBucketForCommand, READ_ONLY_COMMAND_VERBS } from './utils/rateLimitBucket.js';
+export { getRateLimitBucketForCommand, READ_ONLY_COMMAND_VERBS };
 
 // ---------------------------------------------------------------------------
 // Rate-limit storage (KJ-26-09)
@@ -487,27 +469,23 @@ function parseKeeperErrorMessage(errorMessage) {
   // Skip system messages like "Bypassing master password enforcement..."
   const meaningfulLines = lines.filter(line => 
     !line.startsWith('Bypassing master password') &&
-    !line.includes('running in service mode')
+    !line.includes('running in service mode') &&
+    !line.includes('Use --force to bypass password policy warnings')
   );
   
   let result;
   
-  // If we have meaningful lines, process them
-  if (meaningfulLines.length > 0) {
-    const lastLine = meaningfulLines[meaningfulLines.length - 1];
-    
-    // Look for pattern: "Failed to ... : <actual error message>"
-    // Extract the part after the last colon if it contains a meaningful message
+  if (meaningfulLines.length > 1) {
+    result = meaningfulLines.join('\n');
+  } else if (meaningfulLines.length === 1) {
+    const lastLine = meaningfulLines[0];
     const colonIndex = lastLine.lastIndexOf(': ');
     if (colonIndex !== -1) {
       const afterColon = lastLine.substring(colonIndex + 2).trim();
-      // Check if the part after colon is a meaningful message (not just a short token)
       if (afterColon.length > 20 && !afterColon.includes('Failed to')) {
         result = afterColon;
       }
     }
-    
-    // If no colon pattern found, return the last meaningful line
     if (!result) {
       result = lastLine;
     }

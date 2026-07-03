@@ -111,8 +111,13 @@ const IssuePanel = () => {
   const [storedRequestData, setStoredRequestData] = useState(null); // Store user's saved request
   const [hasStoredData, setHasStoredData] = useState(false); // Track if data has been stored
   const [isUpdating, setIsUpdating] = useState(false); // Track update operation
-  const [isItsmApprovalTicket, setIsItsmApprovalTicket] = useState(false); // Ticket created by JIRA ITSM Forge app for an EPM approval request (label: ITSM_approval_request_created)
-  const [isItsmDeviceApprovalTicket, setIsItsmDeviceApprovalTicket] = useState(false); // Ticket for a device admin approval request (label: ITSM_device_admin_approval_requested)
+  // ITSM-driven approval ticket type: 'epm' | 'device' | null.
+  // Adding a new ITSM workflow requires only a new entry in this map.
+  const ITSM_LABEL_HANDLERS = {
+    'ITSM_approval_request_created': 'epm',
+    'ITSM_device_admin_approval_requested': 'device',
+  };
+  const [itsmKind, setItsmKind] = useState(null);
 
 
   // Expiration warning modal for share-record action
@@ -122,13 +127,14 @@ const IssuePanel = () => {
   // Email validation state
   const [emailValidationError, setEmailValidationError] = useState(null);
 
-  // Vault mode: NSF by default; Classic when user opts in via checkbox.
-  const [isNsfMode, setIsNsfMode] = useState(true);
+  // Vault mode: Classic by default; NSF when user opts in via checkbox.
+  const [isNsfMode, setIsNsfMode] = useState(false);
 
   // Rotation-on-expiration: visible when selected record is pamUser or folder is ROE-eligible.
   const [rotateOnExpiration, setRotateOnExpiration] = useState(false);
   const [isRotationEligible, setIsRotationEligible] = useState(false);
   const [checkingRotationEligibility, setCheckingRotationEligibility] = useState(false);
+  const [eligibilityError, setEligibilityError] = useState(null);
 
   // Pagination settings
   const itemsPerPage = PAGINATION_SETTINGS.ITEMS_PER_PAGE;
@@ -165,7 +171,7 @@ const IssuePanel = () => {
   const isSharableFolder = (folder) =>
     folder.source === 'nsf' || folder.shared || (folder.flags && folder.flags.includes('S'));
 
-  // Render nested NSF folder path (hidden for Classic or when path equals folder name).
+  // Render nested folder path when it differs from the folder name (works for both Classic and NSF).
   const renderFolderPath = (folder) => {
     if (!folder) return null;
     const path = folder.path || folder.folderPath || '';
@@ -358,6 +364,7 @@ const IssuePanel = () => {
     setShowRecordForUpdateDropdown(false);
     setRotateOnExpiration(false);
     setIsRotationEligible(false);
+    setEligibilityError(null);
     lastCheckedRoeRef.current = { type: '', uid: '' };
     setFormData(prev => {
       const cleared = { ...prev };
@@ -992,8 +999,9 @@ const IssuePanel = () => {
     setFormData(data.formData || {});
     setRotateOnExpiration(data.rotateOnExpiration === true);
     setIsRotationEligible(data.isRotationEligible === true);
+    lastCheckedRoeRef.current = { type: '', uid: '' };
 
-    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : true;
+    const nsfEnabled = data.isNsfMode !== undefined ? data.isNsfMode !== false : false;
     setIsNsfMode(nsfEnabled);
 
     if (data.formData?.addressRef?.startsWith('temp_addr_')) {
@@ -1083,6 +1091,8 @@ const IssuePanel = () => {
         rotateOnExpiration,
         isRotationEligible,
         isNsfMode,
+        rotateOnExpiration,
+        isRotationEligible,
         timestamp: now.toISOString()
       };
       
@@ -2538,6 +2548,7 @@ const IssuePanel = () => {
         (action !== 'share-record' && action !== 'share-folder')) {
       setIsRotationEligible(false);
       setRotateOnExpiration(false);
+      setEligibilityError(null);
       return;
     }
 
@@ -2548,11 +2559,16 @@ const IssuePanel = () => {
     } else if (action === 'share-folder' && selectedFolder) {
       type = 'folder';
       uid = selectedFolder.folder_uid || selectedFolder.uid;
+    } else if (action === 'share-record' && !selectedRecord && selectedFolder) {
+      // NSF folder-level share-record: entire folder shared via sharedFolder param
+      type = 'folder';
+      uid = selectedFolder.folder_uid || selectedFolder.uid;
     }
 
     if (!type || !uid) {
       setIsRotationEligible(false);
       setRotateOnExpiration(false);
+      setEligibilityError(null);
       return;
     }
 
@@ -2568,14 +2584,20 @@ const IssuePanel = () => {
       .then(res => {
         if (cancelled) return;
         lastCheckedRoeRef.current = { type, uid };
+        if (res?.error) {
+          setIsRotationEligible(null);
+          setEligibilityError('Could not verify eligibility. Please try again before approving.');
+          return;
+        }
+        setEligibilityError(null);
         setIsRotationEligible(res?.eligible === true);
         if (!res?.eligible) setRotateOnExpiration(false);
       })
       .catch(() => {
         if (!cancelled) {
           lastCheckedRoeRef.current = { type, uid };
-          setIsRotationEligible(false);
-          setRotateOnExpiration(false);
+          setIsRotationEligible(null);
+          setEligibilityError('Could not verify eligibility. Please try again before approving.');
         }
       })
       .finally(() => { if (!cancelled) setCheckingRotationEligibility(false); });
@@ -2645,6 +2667,8 @@ const IssuePanel = () => {
     // Clear rotate-on-expiration when expiration is removed.
     if (fieldName === 'expiration_type' && (!value || value === 'none')) {
       setRotateOnExpiration(false);
+      setEligibilityError(null);
+      lastCheckedRoeRef.current = { type: '', uid: '' };
     }
 
     setFormData(prev => {
@@ -2758,11 +2782,12 @@ const IssuePanel = () => {
         return false;
       }
       
-      // Rotation requires a valid expiration window.
+      // Rotation requires a valid expiration window and confirmed eligibility.
       if (rotateOnExpiration) {
         if (!formData.expiration_type || formData.expiration_type === 'none') return false;
         if (formData.expiration_type === 'expire-at' && !formData.expire_at) return false;
         if (formData.expiration_type === 'expire-in' && !formData.expire_in) return false;
+        if (eligibilityError) return false;
       }
 
       return true;
@@ -2836,6 +2861,7 @@ const IssuePanel = () => {
         if (!formData.expiration_type || formData.expiration_type === 'none') return false;
         if (formData.expiration_type === 'expire-at' && !formData.expire_at) return false;
         if (formData.expiration_type === 'expire-in' && !formData.expire_in) return false;
+        if (eligibilityError) return false;
       }
 
       return true;
@@ -4025,10 +4051,8 @@ const IssuePanel = () => {
         // when adding it as a Jira label. Detect each ITSM-driven workflow we
         // know how to render so we can route to the right admin panel below.
         const labels = context.labels || [];
-        const isItsmApproval = labels.includes('ITSM_approval_request_created');
-        const isItsmDeviceApproval = labels.includes('ITSM_device_admin_approval_requested');
-        setIsItsmApprovalTicket(isItsmApproval);
-        setIsItsmDeviceApprovalTicket(isItsmDeviceApproval);
+        const matchedLabel = labels.find(l => ITSM_LABEL_HANDLERS[l]);
+        setItsmKind(matchedLabel ? ITSM_LABEL_HANDLERS[matchedLabel] : null);
         
         // Clear any previous stored data to ensure fresh start for new ticket
         setStoredRequestData(null);
@@ -4301,13 +4325,19 @@ const IssuePanel = () => {
           selectedFolder.path ||
           selectedFolder.name;
 
-        // KJ-26-03: Both NSF and Classic now pass structured params; the
-        // backend builder assembles the (nsf-)record-permission command with
-        // the -a/-d/-s/-R/--force flags. No client-built command strings.
-        finalParameters = {
-          ...finalParameters,
-          folder: folderUid
-        };
+        if (isNsfMode) {
+          // NSF: pass structured params; backend builds nsf-record-permission.
+          finalParameters = {
+            ...finalParameters,
+            folder: folderUid
+          };
+        } else {
+          // Classic: pass structured params; server builds the CLI command with validation.
+          finalParameters = {
+            ...finalParameters,
+            folder: folderUid
+          };
+        }
       }
       
       // Handle address creation before executing the main action
@@ -4570,9 +4600,8 @@ const IssuePanel = () => {
  // Restrict access for ITSM-driven approval tickets (EPM + device admin).
   // Only admins can act on these; everyone else gets the same locked-out
   // message regardless of which specific ITSM workflow created the ticket.
-  const isItsmRestrictedTicket = isItsmApprovalTicket || isItsmDeviceApprovalTicket;
-  if (isItsmRestrictedTicket && !isAdmin) {
-    const restrictedSubject = isItsmDeviceApprovalTicket
+  if (itsmKind && !isAdmin) {
+    const restrictedSubject = itsmKind === 'device'
       ? 'a device admin approval request'
       : 'an Endpoint Privilege Manager approval request';
     return (
@@ -4604,10 +4633,10 @@ const IssuePanel = () => {
 
   // Admin-facing routing: dispatch to the dedicated panel for each ITSM
   // workflow we recognise via labels.
-  if (isItsmApprovalTicket && isAdmin) {
+  if (itsmKind === 'epm' && isAdmin) {
     return <EpmApprovalPanel issueContext={issueContext} />;
   }
-  if (isItsmDeviceApprovalTicket && isAdmin) {
+  if (itsmKind === 'device' && isAdmin) {
     return <DeviceApprovalPanel issueContext={issueContext} />;
   }
 
@@ -4667,6 +4696,7 @@ const IssuePanel = () => {
                 setCustomFields([]);
                 setRotateOnExpiration(false);
                 setIsRotationEligible(false);
+                setEligibilityError(null);
                 lastCheckedRoeRef.current = { type: '', uid: '' };
               }}
               disabled={isFormDisabled}
@@ -4691,8 +4721,7 @@ const IssuePanel = () => {
                     Required Information:
                   </div>
 
-                  {(['record-update', 'share-record', 'share-folder', 'record-permission'].includes(selectedAction.value)) &&
-                    renderClassicModeCheckbox()}
+                  {['record-update', 'share-record', 'share-folder', 'record-permission'].includes(selectedAction.value) && renderClassicModeCheckbox()}
 
                   {/* Records Selector for record-update action only */}
                   {selectedAction.value === 'record-update' && (
@@ -5742,9 +5771,15 @@ const IssuePanel = () => {
 
                   {/* Rotate password upon expiration — visible when expiration is active and record is pamUser or folder is ROE-eligible */}
                   {(selectedAction.value === 'share-record' || selectedAction.value === 'share-folder') &&
-                   isRotationEligible &&
-                   formData.expiration_type && formData.expiration_type !== 'none' && (
+                   formData.expiration_type && formData.expiration_type !== 'none' &&
+                   (isRotationEligible === true ||
+                    (isRotationEligible === null && (rotateOnExpiration || eligibilityError))) && (
                     <div className="mb-12">
+                      {eligibilityError && (
+                        <SectionMessage appearance="warning" title="Eligibility check failed">
+                          <p>{eligibilityError}</p>
+                        </SectionMessage>
+                      )}
                       <label className="checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <input
                           type="checkbox"

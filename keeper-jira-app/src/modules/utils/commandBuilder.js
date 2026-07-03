@@ -1,10 +1,13 @@
 /**
  * Command Builder Utility
- * 
+ *
  * Builds Keeper Commander CLI commands from structured parameters.
  * Includes input validation and shell escaping to prevent command injection.
- * 
- * Extracted for testability - these functions are used by the main index.js resolvers.
+ *
+ * Extracted for testability. This module is the testable reference implementation
+ * for Classic command building. The production Forge resolver (src/index.js) extends
+ * this with NSF routing via { mode: 'nsf' } — keep the two in sync when adding new
+ * actions or changing command shapes.
  */
 
 // ============================================================================
@@ -39,6 +42,9 @@ const VALIDATION_LIMITS = {
   lastName: 64,
   hostname: 256,
   port: 10,
+  privateKey: 16000,
+  publicKey: 8000,
+  passphrase: 1024,
   default: 1024
 };
 
@@ -64,6 +70,27 @@ const VALIDATION_PATTERNS = {
   // Port: Digits only, 1-65535
   port: /^[0-9]{1,5}$/
 };
+
+// ============================================================================
+// Keeper Command Constants
+// ============================================================================
+
+const KEEPER_ACTIONS = Object.freeze({
+  APPROVE: 'approve',
+  DENY:    'deny',
+});
+
+const KEEPER_FLAGS = Object.freeze({
+  APPROVE: '--approve',
+  DENY:    '--deny',
+});
+
+// Allowed characters for a device-approve target (email or device ID) when
+// passed unquoted to the shell.
+const SAFE_DEVICE_TARGET_PATTERN = /^[a-zA-Z0-9._+\-@]+$/;
+
+// EPM approval UIDs must be strictly alphanumeric + hyphens/underscores.
+const SAFE_EPM_UID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 // ============================================================================
 // Validation Functions
@@ -199,11 +226,7 @@ function validatePhoneEntry(entry) {
  */
 function validateCommandParameters(action, parameters) {
   const errors = [];
-
-  // KJ-26-03: The `parameters.cliCommand` passthrough has been removed. Every
-  // command is now built from structured params; approval verbs are validated
-  // in `buildKeeperCommand` before this runs.
-
+  
   // Common validations based on action type
   switch (action) {
     case 'record-add':
@@ -299,24 +322,23 @@ function validateCommandParameters(action, parameters) {
     }
     
     case 'epm approval action': {
-      // Approval UID required (handled by cliCommand path)
+      if (!parameters.epmDecision || !Object.values(KEEPER_ACTIONS).includes(parameters.epmDecision)) {
+        errors.push('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!parameters.approvalUid || !String(parameters.approvalUid).trim()) {
+        errors.push('EPM approval UID is required');
+      }
       break;
     }
 
     case 'device-approve': {
-      if (!parameters.action || (parameters.action !== 'approve' && parameters.action !== 'deny')) {
+      if (!parameters.action || !Object.values(KEEPER_ACTIONS).includes(parameters.action)) {
         errors.push('Action must be "approve" or "deny" for device-approve');
       }
-      const emailTrim = parameters.email ? String(parameters.email).trim() : '';
-      if (!emailTrim) {
-        errors.push('Email is required for device-approve');
-      } else {
-        const emailValidation = validateField('email', emailTrim, {
-          limitKey: 'email',
-          pattern: 'email',
-          required: true
-        });
-        if (!emailValidation.valid) errors.push(emailValidation.error);
+      // Target may be a user email or a Keeper device ID (matches index.js behaviour).
+      const targetTrim = parameters.email ? String(parameters.email).trim() : '';
+      if (!targetTrim) {
+        errors.push('Email or device ID is required for device-approve');
       }
       break;
     }
@@ -496,17 +518,6 @@ function buildDeviceApproveCommand(action, parameters) {
  * @throws {Error} - If validation fails
  */
 function buildKeeperCommand(action, parameters, issueKey) {
-  // KJ-26-03: Approval verbs are rebuilt from validated structured params; the
-  // `parameters.cliCommand` passthrough (an arbitrary-command vector) is gone.
-  if (typeof action === 'string') {
-    if (action.startsWith('epm approval action')) {
-      return buildEpmApprovalCommand(action, parameters);
-    }
-    if (action.startsWith('device-approve')) {
-      return buildDeviceApproveCommand(action, parameters);
-    }
-  }
-
   // Input Validation
   const validation = validateCommandParameters(action, parameters);
   if (!validation.valid) {
@@ -525,10 +536,8 @@ function buildKeeperCommand(action, parameters, issueKey) {
         throw new Error(`Title is required for record-add command. Record type: ${recordType}`);
       }
       command += ` --title="${escapeForDoubleQuotes(parameters.title)}"`;
-      
-      // Handle common fields
       if (parameters.notes) {
-        command += ` Notes="${escapeForDoubleQuotes(parameters.notes)}"`;
+        command += ` --notes='${escapeForSingleQuotes(parameters.notes)}'`;
       }
       
       // Password generation for login records
@@ -620,9 +629,40 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
     }
 
-    // Note: `device-approve` and `epm approval action` are handled by the
-    // dedicated early-return builders above (buildDeviceApproveCommand /
-    // buildEpmApprovalCommand) and never reach this switch.
+    case 'epm approval action': {
+      const decision = parameters.epmDecision;
+      const uid = String(parameters.approvalUid || '').trim();
+      if (!decision || !Object.values(KEEPER_ACTIONS).includes(decision)) {
+        throw new Error('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!uid) {
+        throw new Error('EPM approval UID is required');
+      }
+      // Strict charset — prevent shell injection via the UID.
+      if (!SAFE_EPM_UID_PATTERN.test(uid)) {
+        throw new Error('EPM approval UID contains invalid characters');
+      }
+      command += ` --${decision} ${uid}`;
+      break;
+    }
+
+    case 'device-approve': {
+      // Target may be a user email or a Keeper device ID.
+      const rawTarget = parameters.email ? String(parameters.email).trim() : '';
+      if (!rawTarget) {
+        throw new Error('Email or device ID is required for device-approve command');
+      }
+      if (!parameters.action || !Object.values(KEEPER_ACTIONS).includes(parameters.action)) {
+        throw new Error('Action must be "approve" or "deny" for device-approve command');
+      }
+      const flag = parameters.action === KEEPER_ACTIONS.APPROVE ? KEEPER_FLAGS.APPROVE : KEEPER_FLAGS.DENY;
+      if (SAFE_DEVICE_TARGET_PATTERN.test(rawTarget)) {
+        command += ` ${rawTarget} ${flag}`;
+      } else {
+        command += ` "${escapeForDoubleQuotes(rawTarget)}" ${flag}`;
+      }
+      break;
+    }
 
     default:
       // For other actions, return as-is or with basic parameter handling
@@ -640,6 +680,10 @@ module.exports = {
   // Configuration
   VALIDATION_LIMITS,
   VALIDATION_PATTERNS,
+  KEEPER_ACTIONS,
+  KEEPER_FLAGS,
+  SAFE_DEVICE_TARGET_PATTERN,
+  SAFE_EPM_UID_PATTERN,
   
   // Validation functions
   validateField,

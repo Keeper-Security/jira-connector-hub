@@ -269,12 +269,10 @@ const EpmApprovalPanel = ({ issueContext }) => {
     setActionResult(null);
 
     try {
-      const command = `epm approval action --approve ${requestUid}`;
       const result = await api.executeKeeperAction(
         issueContext.issueKey,
-        command,
+        'epm approval action',
         `EPM Approval: Approved request ${requestUid}`,
-        // KJ-26-03: send structured params; the backend rebuilds the command.
         { epmDecision: 'approve', approvalUid: requestUid },
         new Date().toLocaleString('en-US', {
           month: '2-digit',
@@ -334,12 +332,10 @@ const EpmApprovalPanel = ({ issueContext }) => {
     setActionResult(null);
 
     try {
-      const command = `epm approval action --deny ${requestUid}`;
       const result = await api.executeKeeperAction(
         issueContext.issueKey,
-        command,
+        'epm approval action',
         `EPM Approval: Denied request ${requestUid}`,
-        // KJ-26-03: send structured params; the backend rebuilds the command.
         { epmDecision: 'deny', approvalUid: requestUid },
         new Date().toLocaleString('en-US', {
           month: '2-digit',
