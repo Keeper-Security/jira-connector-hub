@@ -77,11 +77,11 @@ export const useConfig = () => {
   // Handle form submission
   const handleSubmit = async (data) => {
     try {
-      // KJ-26-07: When user didn't change the apiKey, send the masked
-      // placeholder; the backend recognises it and keeps the stored secret.
+      // KJ-26-07: When user didn't change the apiKey, send the keep-existing
+      // sentinel; the backend recognises it and keeps the stored secret.
       const payload = {
         ...data,
-        apiKey: isApiKeyDirty ? data.apiKey : (formValues.apiKey || ''),
+        apiKey: isApiKeyDirty ? data.apiKey : '__KEEP_EXISTING__',
       };
       const result = await api.saveConfig(payload);
       

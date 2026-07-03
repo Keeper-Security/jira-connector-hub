@@ -127,10 +127,10 @@ describe('isMaskedApiKey', () => {
     expect(isMaskedApiKey('__KEEP_EXISTING__')).toBe(true);
   });
 
-  test('recognises round-tripped masked values', () => {
-    expect(isMaskedApiKey('****abcd')).toBe(true);
-    expect(isMaskedApiKey('*'.repeat(36) + '1234')).toBe(true);
-    expect(isMaskedApiKey(maskApiKey('really-long-secret-here'))).toBe(true);
+  test('rejects round-tripped masked values (sentinel-only mode)', () => {
+    expect(isMaskedApiKey('****abcd')).toBe(false);
+    expect(isMaskedApiKey('*'.repeat(36) + '1234')).toBe(false);
+    expect(isMaskedApiKey(maskApiKey('really-long-secret-here'))).toBe(false);
   });
 
   test('rejects values that look like real keys', () => {
@@ -146,8 +146,10 @@ describe('isMaskedApiKey', () => {
     expect(isMaskedApiKey(123)).toBe(false);
   });
 
-  test('rejects asterisks with no trailing tail', () => {
+  test('rejects values starting with asterisks (no regex false-positive)', () => {
     expect(isMaskedApiKey('****')).toBe(false);
+    expect(isMaskedApiKey('*real-api-key')).toBe(false);
+    expect(isMaskedApiKey('***secret')).toBe(false);
   });
 });
 

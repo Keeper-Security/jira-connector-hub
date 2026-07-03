@@ -68,7 +68,7 @@ describe('KJ-26-03: EPM approval command is rebuilt from a strict charset', () =
   test.each(injectionUids)('rejects malicious approval UID: %s', (uid) => {
     expect(() => {
       buildKeeperCommand('epm approval action', { epmDecision: 'approve', approvalUid: uid }, 'T-1');
-    }).toThrow('invalid EPM approval request UID');
+    }).toThrow('EPM approval UID contains invalid characters');
   });
 
   test('rejects a missing/unknown decision', () => {

@@ -2211,17 +2211,11 @@ resolver.define('executeKeeperCommand', async (req) => {
   // to prevent log injection via crafted "command" values.
   const ALLOWED_COMMAND_PREFIXES = [
     'list', 'list-sf', 'ls', 'get', 'search',
-    'record-add', 'record-update', 'record-permission',
     'record-type-info', 'rti',
-    'share-record', 'share-folder',
     'nsf-list', 'nsf-get',
-    'nsf-record-add', 'nsf-record-update', 'nsf-record-permission',
-    'nsf-share-record', 'nsf-share-folder',
     'epm',
-    'device-approve',
     'service-status',
     'enterprise-info', 'enterprise-role', 'enterprise-user',
-    'getConfig',
   ];
   // Strip newlines and control characters that could forge log entries
   const sanitizedCommand = command.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();

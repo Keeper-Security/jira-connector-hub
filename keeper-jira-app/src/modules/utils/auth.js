@@ -35,9 +35,6 @@ const JIRA_ADMIN_GROUPS = Object.freeze(new Set([
 /** Sentinel sent by the UI when saving config without re-typing the API key. */
 const API_KEY_KEEP_EXISTING_SENTINEL = '__KEEP_EXISTING__';
 
-/** Regex matching the masked form returned by `getConfig` (`****abcd`). */
-const MASKED_API_KEY_PATTERN = /^\*+[A-Za-z0-9\-_]{1,8}$/;
-
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
@@ -77,15 +74,14 @@ function maskApiKey(secret) {
 }
 
 /**
- * True if `value` is the keep-existing sentinel or a masked form, i.e. the
- * frontend round-tripped the placeholder without actually changing the secret.
+ * True when `value` is the keep-existing sentinel, meaning the frontend
+ * submitted config without re-typing the API key.
  * @param {string} value
  * @returns {boolean}
  */
 function isMaskedApiKey(value) {
   if (!value || typeof value !== 'string') return false;
-  if (value === API_KEY_KEEP_EXISTING_SENTINEL) return true;
-  return MASKED_API_KEY_PATTERN.test(value);
+  return value === API_KEY_KEEP_EXISTING_SENTINEL;
 }
 
 /**
