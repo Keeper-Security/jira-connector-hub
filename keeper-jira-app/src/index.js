@@ -2207,8 +2207,6 @@ resolver.define('executeKeeperCommand', async (req) => {
     return validationError('command', 'Command is required');
   }
 
-  // KJ-26-05: Validate command against an allowlist and strip control characters
-  // to prevent log injection via crafted "command" values.
   const ALLOWED_COMMAND_PREFIXES = [
     'list', 'list-sf', 'ls', 'get', 'search',
     'record-type-info', 'rti',

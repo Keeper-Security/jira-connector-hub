@@ -74,8 +74,8 @@ function maskApiKey(secret) {
 }
 
 /**
- * True when `value` is the keep-existing sentinel, meaning the frontend
- * submitted config without re-typing the API key.
+ * True if `value` is the keep-existing sentinel, i.e. the frontend sent the
+ * explicit marker indicating the user did not change the API key.
  * @param {string} value
  * @returns {boolean}
  */

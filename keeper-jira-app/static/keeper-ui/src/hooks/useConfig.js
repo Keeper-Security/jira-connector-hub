@@ -77,8 +77,8 @@ export const useConfig = () => {
   // Handle form submission
   const handleSubmit = async (data) => {
     try {
-      // KJ-26-07: When user didn't change the apiKey, send the keep-existing
-      // sentinel; the backend recognises it and keeps the stored secret.
+      // KJ-26-07: When user didn't change the apiKey, send the sentinel so the
+      // backend keeps the stored secret. No regex pattern-matching needed.
       const payload = {
         ...data,
         apiKey: isApiKeyDirty ? data.apiKey : '__KEEP_EXISTING__',

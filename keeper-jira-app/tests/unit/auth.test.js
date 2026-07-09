@@ -151,6 +151,16 @@ describe('isMaskedApiKey', () => {
     expect(isMaskedApiKey('*real-api-key')).toBe(false);
     expect(isMaskedApiKey('***secret')).toBe(false);
   });
+
+  test('does not false-positive on keys starting with *', () => {
+    expect(isMaskedApiKey('*realApiKeyValue')).toBe(false);
+    expect(isMaskedApiKey('**key1234')).toBe(false);
+  });
+
+  test('does not false-positive on keys starting with *', () => {
+    expect(isMaskedApiKey('*realApiKeyValue')).toBe(false);
+    expect(isMaskedApiKey('**key1234')).toBe(false);
+  });
 });
 
 describe('buildAdminVerdict', () => {
