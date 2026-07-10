@@ -23,6 +23,7 @@
 
 const {
   buildKeeperCommand,
+  buildDeviceApproveCommand,
   validateCommandParameters,
 } = require('../../src/modules/utils/commandBuilder');
 
@@ -75,5 +76,21 @@ describe('KJ-26-03: EPM approval command is rebuilt from a strict charset', () =
     expect(() => {
       buildKeeperCommand('epm approval action', { approvalUid: 'abc123' }, 'T-1');
     }).toThrow('EPM approval decision');
+  });
+});
+
+describe('device-approve command is rebuilt from a strict charset', () => {
+  const injectionTargets = [
+    'user@example.com; enterprise-info',
+    'user@example.com && get xyz',
+    'user@example.com | cat',
+    'user@example.com`whoami`',
+    'user@example.com$(whoami)',
+    'user@example.com\nrm -rf /',
+  ];
+  test.each(injectionTargets)('rejects malicious device target: %s', (target) => {
+    expect(() => {
+      buildDeviceApproveCommand('device-approve', { deviceDecision: 'approve', deviceTarget: target });
+    }).toThrow('invalid device approval target');
   });
 });

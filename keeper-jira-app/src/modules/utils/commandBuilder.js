@@ -431,7 +431,7 @@ function capitalizeFieldName(fieldName) {
 // and the resolver in `src/index.js`.
 
 const EPM_APPROVAL_UID_PATTERN = /^[A-Za-z0-9_-]+$/;
-const DEVICE_APPROVAL_TARGET_PATTERN = /^[A-Za-z0-9@._-]+$/;
+const DEVICE_APPROVAL_TARGET_PATTERN = /^[A-Za-z0-9@._+\-]+$/;
 
 /**
  * Resolve an approve/deny decision from structured params, falling back to the
