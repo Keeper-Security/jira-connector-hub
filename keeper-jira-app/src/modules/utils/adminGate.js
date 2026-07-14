@@ -137,24 +137,23 @@ export async function requireProjectAdmin(issueKey) {
 }
 
 /**
- * Check site/global admin permission via `ADMINISTER` (or `ADMINISTER_PROJECTS`
- * as a Jira-plan fallback) without a project context. Returns `false` on any
- * failure so callers can layer it on top of group checks without throwing.
+ * Check site/global admin permission via the `ADMINISTER` permission without a
+ * project context. `ADMINISTER_PROJECTS` is intentionally excluded here because
+ * it returns `true` for every authenticated user on Jira Free, which would let
+ * any user bypass the global admin gate. Returns `false` on any failure so
+ * callers can layer it on top of group checks without throwing.
  * @returns {Promise<boolean>}
  */
 async function hasGlobalAdminPermission() {
   try {
     const resp = await requestJiraAsUserWithRetry(
-      route`/rest/api/3/mypermissions?permissions=ADMINISTER,ADMINISTER_PROJECTS`,
+      route`/rest/api/3/mypermissions?permissions=ADMINISTER`,
       { method: 'GET', headers: { Accept: 'application/json' } },
-      'Check ADMINISTER/ADMINISTER_PROJECTS (global)',
+      'Check ADMINISTER (global)',
     );
     if (!resp || !resp.ok) return false;
     const data = await resp.json();
-    return (
-      data?.permissions?.ADMINISTER?.havePermission === true ||
-      data?.permissions?.ADMINISTER_PROJECTS?.havePermission === true
-    );
+    return data?.permissions?.ADMINISTER?.havePermission === true;
   } catch (err) {
     logger.warn('hasGlobalAdminPermission failed', { error: err.message });
     return false;
