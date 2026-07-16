@@ -2213,7 +2213,7 @@ resolver.define('executeKeeperCommand', async (req) => {
     'nsf-list', 'nsf-get',
     'epm',
     'service-status',
-    'enterprise-info', 'enterprise-role', 'enterprise-user',
+    'enterprise-info',
   ];
   // Strip newlines and control characters that could forge log entries
   const sanitizedCommand = command.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();
@@ -2457,7 +2457,7 @@ resolver.define('executeKeeperAction', async (req) => {
   // The frontend hides admin controls for non-admins, but those restrictions
   // are bypassable via direct invoke calls. `requireProjectAdmin` centralises
   // the (group-membership OR ADMINISTER_PROJECTS) check and fails closed.
-  const ADMIN_GATED_COMMANDS = new Set(['record-add', 'record-update']);
+  const ADMIN_GATED_COMMANDS = new Set(['record-add', 'record-update', 'share-record', 'share-folder', 'record-permission']);
   const isAdminGated =
     ADMIN_GATED_COMMANDS.has(command) ||
     command.startsWith('device-approve') ||
