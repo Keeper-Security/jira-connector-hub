@@ -431,7 +431,6 @@ function capitalizeFieldName(fieldName) {
 // and the resolver in `src/index.js`.
 
 const EPM_APPROVAL_UID_PATTERN = /^[A-Za-z0-9_-]+$/;
-const DEVICE_APPROVAL_TARGET_PATTERN = /^[A-Za-z0-9@._+\-]+$/;
 
 /**
  * Resolve an approve/deny decision from structured params, falling back to the
@@ -498,7 +497,7 @@ function buildDeviceApproveCommand(action, parameters) {
   if (!decision) {
     throw new Error('Input validation failed: device approval decision (approve or deny) is required');
   }
-  if (!DEVICE_APPROVAL_TARGET_PATTERN.test(target)) {
+  if (!SAFE_DEVICE_TARGET_PATTERN.test(target)) {
     throw new Error('Input validation failed: invalid device approval target');
   }
   return `device-approve ${target} --${decision}`;
