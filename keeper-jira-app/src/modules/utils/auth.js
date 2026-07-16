@@ -80,6 +80,7 @@ function maskApiKey(secret) {
  * @returns {boolean}
  */
 function isMaskedApiKey(value) {
+  if (!value || typeof value !== 'string') return false;
   return value === API_KEY_KEEP_EXISTING_SENTINEL;
 }
 

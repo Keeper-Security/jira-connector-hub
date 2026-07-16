@@ -160,13 +160,14 @@ export const useConfig = () => {
       return;
     }
 
-    // KJ-26-07: Sending the masked placeholder is fine — the backend swaps in
-    // the stored apiKey. Block the test only when there's no key at all.
+    // KJ-26-07: Send the keep-existing sentinel when the user hasn't re-typed
+    // the key, matching handleSubmit. The backend swaps in the stored secret.
     setIsTestingConnection(true);
     setStatusMessage(null);
 
     try {
-      const result = await api.testConnection(currentApiUrl, currentApiKey);
+      const keyToTest = isApiKeyDirty ? currentApiKey : '__KEEP_EXISTING__';
+      const result = await api.testConnection(currentApiUrl, keyToTest);
       
       // Check for structured error response (new pattern)
       if (isStructuredError(result)) {

@@ -420,6 +420,90 @@ function capitalizeFieldName(fieldName) {
 }
 
 // ============================================================================
+// Approval-command builders (KJ-26-03 — single source of truth)
+// ============================================================================
+//
+// The two "approval" verbs (EPM + device admin) used to ride in on the now-
+// removed `parameters.cliCommand` passthrough. They are rebuilt server-side
+// from structured params and rejected outside a strict charset, so a crafted
+// invoke can never smuggle an arbitrary Commander command. These helpers are
+// the ONE implementation, consumed by both this module's `buildKeeperCommand`
+// and the resolver in `src/index.js`.
+
+const EPM_APPROVAL_UID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Resolve an approve/deny decision from structured params, falling back to the
+ * descriptive command string (`--approve` / `--deny`) for resilience if an
+ * older UI bundle is briefly live after deploy. Returns null when unknown.
+ * @param {string|undefined} decision
+ * @param {string|undefined} action
+ * @returns {'approve'|'deny'|null}
+ */
+function normalizeApprovalDecision(decision, action) {
+  if (decision === 'approve' || decision === 'deny') return decision;
+  if (typeof action === 'string') {
+    if (action.includes('--deny')) return 'deny';
+    if (action.includes('--approve')) return 'approve';
+  }
+  return null;
+}
+
+/**
+ * Pull the device target (user email or device ID) out of a `device-approve`
+ * CLI invocation. Order-agnostic: accepts either
+ *   `device-approve <target> --approve`  (canonical)
+ * or `device-approve --approve <target>` (legacy). Returns null if absent.
+ * @param {string} cliCommand
+ * @returns {string|null}
+ */
+function extractDeviceTarget(cliCommand) {
+  if (!cliCommand) return null;
+  const tokens = String(cliCommand).split(/\s+/);
+  return tokens.find((t, i) => i > 0 && t && !t.startsWith('-')) || null;
+}
+
+/**
+ * Build a validated `epm approval action --approve|--deny <uid>` command.
+ * @throws {Error} when the decision is missing or the UID is not allowlisted.
+ */
+function buildEpmApprovalCommand(action, parameters) {
+  const decision = normalizeApprovalDecision(parameters && parameters.epmDecision, action);
+  const uid = String(
+    (parameters && parameters.approvalUid) ||
+    (typeof action === 'string' ? action.split(/\s+/).pop() : '') ||
+    ''
+  ).trim();
+  if (!decision) {
+    throw new Error('Input validation failed: EPM approval decision (approve or deny) is required');
+  }
+  if (!EPM_APPROVAL_UID_PATTERN.test(uid)) {
+    throw new Error('Input validation failed: invalid EPM approval request UID');
+  }
+  return `epm approval action --${decision} ${uid}`;
+}
+
+/**
+ * Build a validated `device-approve <target> --approve|--deny` command.
+ * @throws {Error} when the decision is missing or the target is not allowlisted.
+ */
+function buildDeviceApproveCommand(action, parameters) {
+  const decision = normalizeApprovalDecision(parameters && parameters.deviceDecision, action);
+  const target = String(
+    (parameters && parameters.deviceTarget) ||
+    extractDeviceTarget(action) ||
+    ''
+  ).trim();
+  if (!decision) {
+    throw new Error('Input validation failed: device approval decision (approve or deny) is required');
+  }
+  if (!SAFE_DEVICE_TARGET_PATTERN.test(target)) {
+    throw new Error('Input validation failed: invalid device approval target');
+  }
+  return `device-approve ${target} --${decision}`;
+}
+
+// ============================================================================
 // Command Builder
 // ============================================================================
 
@@ -611,6 +695,12 @@ module.exports = {
   escapeForDoubleQuotes,
   sanitizeJsonObject,
   capitalizeFieldName,
+  
+  // Approval-command builders (KJ-26-03 — single source of truth)
+  normalizeApprovalDecision,
+  extractDeviceTarget,
+  buildEpmApprovalCommand,
+  buildDeviceApproveCommand,
   
   // Main command builder
   buildKeeperCommand

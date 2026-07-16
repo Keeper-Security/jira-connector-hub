@@ -30,11 +30,16 @@ import {
   escapeForSingleQuotes,
   escapeForDoubleQuotes,
   sanitizeJsonObject,
-  capitalizeFieldName
+  capitalizeFieldName,
+  normalizeApprovalDecision,
+  extractDeviceTarget,
+  buildEpmApprovalCommand,
+  buildDeviceApproveCommand
 } from './modules/utils/commandBuilder.js';
 import { maskApiKey, isMaskedApiKey } from './modules/utils/auth.js';
 import {
   requireProjectAdmin,
+  requireGlobalAdmin,
   verifyProjectAdmin
 } from './modules/utils/adminGate.js';
 import {
@@ -321,6 +326,10 @@ resolver.define('getConfig', async () => {
  * Includes URL validation to prevent saving malicious tunnel URLs (Issue #8)
  */
 resolver.define('setConfig', async (req) => {
+  // KJ-26-03: Only Jira admins may change the integration configuration.
+  const adminErr = await requireGlobalAdmin();
+  if (adminErr) return adminErr;
+
   // Handle double nesting: req.payload.payload
   let payload = req?.payload?.payload || req?.payload || req;
   
@@ -427,6 +436,11 @@ resolver.define('setConfig', async (req) => {
  * Uses API v2 async queue mode
  */
 resolver.define('testConnection', async (req) => {
+  // KJ-26-03: Connection testing exercises the configured Keeper endpoint and
+  // is admin-only, like the rest of the global config page.
+  const adminErr = await requireGlobalAdmin();
+  if (adminErr) return adminErr;
+
   // Handle double nesting: req.payload.payload
   let payload = req?.payload?.payload || req?.payload || req;
   
@@ -767,10 +781,10 @@ function validateCommandParameters(action, parameters, options = {}) {
   const errors = [];
   const isNsfMode = !!(options && options.mode === 'nsf');
 
-  // Skip validation for pre-formatted Classic CLI commands; NSF always rebuilds server-side.
-  if (parameters.cliCommand && !isNsfMode) {
-    return { valid: true };
-  }
+  // KJ-26-03: The `parameters.cliCommand` passthrough has been removed. EPM /
+  // device approval verbs are validated + rebuilt in their dedicated builders
+  // (buildEpmApprovalCommand / buildDeviceApproveCommand) before this runs, and
+  // every other action is validated structurally below.
 
   // NSF share/permission commands require -r <role> on grant per Commander docs.
   // Classic uses permission flags instead and is unaffected.
@@ -1056,13 +1070,25 @@ function validateCommandParameters(action, parameters, options = {}) {
  * Build Keeper CLI command from action and parameters
  */
 
+// KJ-26-03: The approval-command builders (EPM + device admin) and
+// `extractDeviceTarget` live in `modules/utils/commandBuilder.js` as the single
+// source of truth and are imported at the top of this file.
+
 function buildKeeperCommand(action, parameters, issueKey, options = {}) {
   // NSF mode reroutes actions via NSF_COMMAND_NAME_MAP; Classic mode is unaffected.
   const isNsf = options?.mode === 'nsf';
 
-  // Honor pre-formatted CLI commands only in Classic mode.
-  if (parameters.cliCommand && !isNsf) {
-    return parameters.cliCommand;
+  // KJ-26-03: Approval verbs (EPM + device admin) are rebuilt server-side from
+  // validated structured params. We never execute a client-supplied command
+  // string verbatim — the former `parameters.cliCommand` passthrough was an
+  // arbitrary-command-execution vector.
+  if (typeof action === 'string') {
+    if (action.startsWith('epm approval action')) {
+      return buildEpmApprovalCommand(action, parameters);
+    }
+    if (action.startsWith('device-approve')) {
+      return buildDeviceApproveCommand(action, parameters);
+    }
   }
   
   // ========================================================================
@@ -2160,6 +2186,12 @@ resolver.define('checkRotationEligibility', async (req) => {
  * Execute a simple Keeper command (called from config page for EPM, etc.)
  */
 resolver.define('executeKeeperCommand', async (req) => {
+  // KJ-26-03: This resolver forwards a caller-supplied command verb to
+  // Keeper Commander. Even with the KJ-26-05 allowlist it must be admin-only;
+  // it is invoked exclusively from the global (admin) config page.
+  const adminErr = await requireGlobalAdmin();
+  if (adminErr) return adminErr;
+
   const userId = req?.context?.accountId;
   
   // Handle double nesting: req.payload.payload
@@ -2245,19 +2277,6 @@ async function runEpmSyncDown(userId) {
       error: syncErr.message
     });
   }
-}
-
-/**
- * Pull the device target (user email or device ID) out of a `device-approve`
- * CLI invocation. Order-agnostic: we accept either
- *   `device-approve <target> --approve`  (canonical)
- * or
- *   `device-approve --approve <target>`  (legacy)
- */
-function extractDeviceTarget(cliCommand) {
-  if (!cliCommand) return null;
-  const tokens = cliCommand.split(/\s+/);
-  return tokens.find((t, i) => i > 0 && t && !t.startsWith('-')) || null;
 }
 
 /**
@@ -2493,8 +2512,24 @@ resolver.define('executeKeeperAction', async (req) => {
   }
   
 
-  // Check if this is an EPM command and if the request is already expired or action was already taken
+  // KJ-26-03: Derive the approval context ONCE and reuse it across the
+  // pre-checks, audit comments, panel rendering, and label updates below.
+  // `command` is the descriptive string sent by the panel; decision/target/uid
+  // come from the structured params with a fallback to parsing `command`.
   const isEpmCommand = command.startsWith('epm approval action');
+  const isDeviceCommand = command.startsWith('device-approve');
+  const approvalDecision = normalizeApprovalDecision(
+    parameters?.epmDecision || parameters?.deviceDecision,
+    command
+  );
+  const isApprove = approvalDecision === 'approve';
+  const isDeny = approvalDecision === 'deny';
+  const epmApprovalUid =
+    parameters?.approvalUid || (isEpmCommand ? command.split(/\s+/).pop() : '') || '';
+  const deviceTarget =
+    parameters?.deviceTarget || extractDeviceTarget(command) || '';
+
+  // Check if this is an EPM command and if the request is already expired or action was already taken
   if (isEpmCommand) {
     // Check if any action label already exists (with rate limit retry)
     try {
@@ -2548,7 +2583,6 @@ resolver.define('executeKeeperAction', async (req) => {
   // --approve|--deny` command (see
   // https://docs.keeper.io/en/keeperpam/commander-cli/command-reference/enterprise-management-commands#device-approve-command).
   // Block re-execution once one of those commands has already succeeded.
-  const isDeviceCommand = command.startsWith('device-approve');
   if (isDeviceCommand) {
     try {
       const issueResponse = await requestJiraAsAppWithRetry(
@@ -2796,7 +2830,7 @@ resolver.define('executeKeeperAction', async (req) => {
           actionDescription = `Device Admin Approval: Approved ${target}`;
         } else if (deviceDecision === 'deny') {
           actionMessage = 'Device admin approval request has been denied';
-          actionDescription = `Device Admin Approval: Denied ${target}`;
+          actionDescription = `Device Admin Approval: Denied ${deviceTarget}`;
         }
       } else {
         switch (command) {
@@ -3223,10 +3257,7 @@ resolver.define('executeKeeperAction', async (req) => {
     // shared label, post an audit comment, and return a structured error so
     // the panel can render a friendly resolved-state message instead of the
     // raw Keeper error.
-    if (
-      command.startsWith('epm approval action') &&
-      isEpmRequestNotFoundError(errorMessage)
-    ) {
+    if (isEpmCommand && isEpmRequestNotFoundError(errorMessage)) {
       const requestUid =
         parameters?.approvalUid ||
         parameters?.request_uid ||
@@ -3318,6 +3349,11 @@ resolver.define('rejectKeeperRequest', async (req) => {
   if (!issueKey) {
     return validationError('issueKey', 'Issue key is required');
   }
+
+  // KJ-26-03: Rejecting a request is a state-changing approver action; gate it
+  // server-side like executeKeeperAction.
+  const adminErr = await requireProjectAdmin(issueKey);
+  if (adminErr) return adminErr;
   
   if (!rejectionReason || !rejectionReason.trim()) {
     return validationError('rejectionReason', 'Rejection reason is required');
@@ -4699,7 +4735,79 @@ resolver.define('clearStoredRequestData', async (req) => {
   }
 });
 
-export const handler = resolver.getDefinitions();
+// ============================================================================
+// KJ-26-03: Per-surface resolver isolation
+// ============================================================================
+//
+// Both the global admin page (`keeperResolver` -> handler) and the issue panel
+// (`keeperIssueResolver` -> issuePanelHandler) are backed by the SAME resolver
+// registry, so historically either surface could invoke ANY resolver by name.
+// Server-side admin guards already block the sensitive actions, but we add a
+// second layer here: each exported handler only dispatches the resolver names
+// that its surface legitimately calls. A forged invoke for an out-of-surface
+// resolver (e.g. `getConfig` from the issue panel) is rejected before the
+// resolver body runs. Allowlists are derived from the two frontends'
+// `invoke(...)` call sites and must be kept in sync when adding resolvers.
 
-// Export same resolver for issue panel - they can share the same functions
-export const issuePanelHandler = resolver.getDefinitions();
+// Global admin configuration page (static/keeper-ui).
+const GLOBAL_PAGE_RESOLVERS = new Set([
+  'getConfig',
+  'setConfig',
+  'testConnection',
+  'getGlobalUserRole',
+  'executeKeeperCommand',
+]);
+
+// Jira issue panel (static/keeper-issue-ui). `getRateLimitStatus` is read-only
+// diagnostics and lives here (not currently invoked by either UI bundle).
+const ISSUE_PANEL_RESOLVERS = new Set([
+  'getIssueContext',
+  'activateKeeperPanel',
+  'getKeeperRecords',
+  'getKeeperFolders',
+  'getRecordTypes',
+  'getKeeperRecordDetails',
+  'getUserRole',
+  'getStoredRequestData',
+  'storeRequestData',
+  'clearStoredRequestData',
+  'getProjectAdmins',
+  'executeKeeperAction',
+  'checkRotationEligibility',
+  'rejectKeeperRequest',
+  'getItsmTicketData',
+  'getEpmApprovalDetails',
+  'addEpmExpiredComment',
+  'checkEpmExpired',
+  'checkEpmActionTaken',
+  'checkDeviceActionTaken',
+  'checkDevicePendingStatus',
+  'getRateLimitStatus',
+]);
+
+/**
+ * Wrap the shared resolver dispatch so a given Forge function only services the
+ * resolver names allowlisted for its surface. The dispatch arg shape matches
+ * `@forge/resolver`'s `getDefinitions()` (`{ call: { functionKey }, ... }`).
+ * @param {string} surface - label for diagnostics
+ * @param {Set<string>} allowed - resolver names permitted on this surface
+ */
+function restrictResolverSurface(surface, allowed) {
+  const dispatch = resolver.getDefinitions();
+  return async (event, backendRuntimePayload) => {
+    const functionKey = event?.call?.functionKey;
+    if (!allowed.has(functionKey)) {
+      logger.warn('Blocked cross-surface resolver invocation', { surface, functionKey });
+      return errorResponse(
+        ERROR_CODES.AUTH_PERMISSION_DENIED,
+        'This action is not available from this context.',
+        { resolver: functionKey, surface }
+      );
+    }
+    return dispatch(event, backendRuntimePayload);
+  };
+}
+
+export const handler = restrictResolverSurface('global-page', GLOBAL_PAGE_RESOLVERS);
+
+export const issuePanelHandler = restrictResolverSurface('issue-panel', ISSUE_PANEL_RESOLVERS);

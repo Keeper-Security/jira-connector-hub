@@ -135,3 +135,88 @@ export async function requireProjectAdmin(issueKey) {
     },
   );
 }
+
+/**
+ * Check site/global admin permission via the `ADMINISTER` permission without a
+ * project context. `ADMINISTER_PROJECTS` is intentionally excluded here because
+ * it returns `true` for every authenticated user on Jira Free, which would let
+ * any user bypass the global admin gate. Returns `false` on any failure so
+ * callers can layer it on top of group checks without throwing.
+ * @returns {Promise<boolean>}
+ */
+async function hasGlobalAdminPermission() {
+  try {
+    const resp = await requestJiraAsUserWithRetry(
+      route`/rest/api/3/mypermissions?permissions=ADMINISTER`,
+      { method: 'GET', headers: { Accept: 'application/json' } },
+      'Check ADMINISTER (global)',
+    );
+    if (!resp || !resp.ok) return false;
+    const data = await resp.json();
+    return data?.permissions?.ADMINISTER?.havePermission === true;
+  } catch (err) {
+    logger.warn('hasGlobalAdminPermission failed', { error: err.message });
+    return false;
+  }
+}
+
+/**
+ * Determine whether the current user is a global/site administrator. Mirrors
+ * `verifyProjectAdmin` but without a project context: group membership first
+ * (reliable across Jira plans), then `ADMINISTER`/`ADMINISTER_PROJECTS`.
+ *
+ * @returns {Promise<{ isAdmin: boolean, adminCheckMethod: string, userKey: string|null, displayName: string }>}
+ */
+export async function verifyGlobalAdmin() {
+  let userData = null;
+  let userGroups = [];
+  try {
+    const result = await getCurrentUserWithGroups();
+    userData = result.userData;
+    userGroups = result.userGroups;
+  } catch (err) {
+    logger.warn('verifyGlobalAdmin: group lookup failed', { error: err.message });
+  }
+
+  const isGroupAdmin = userGroups.some((g) => isAdminGroup(g));
+  const hasPermAdmin = isGroupAdmin ? false : await hasGlobalAdminPermission();
+  const isAdmin = isGroupAdmin || hasPermAdmin;
+
+  let adminCheckMethod = 'none';
+  if (isGroupAdmin) adminCheckMethod = 'group_membership';
+  else if (hasPermAdmin) adminCheckMethod = 'global_permissions';
+
+  return {
+    isAdmin,
+    adminCheckMethod,
+    userKey: userData?.accountId || userData?.key || null,
+    displayName:
+      userData?.displayName || userData?.name || userData?.emailAddress || 'User',
+  };
+}
+
+/**
+ * Resolver gate for global/admin-only resolvers (config + raw command exec).
+ * Returns `null` when the caller is a global admin and a ready-to-return
+ * `errorResponse` otherwise. Fails closed.
+ *
+ *   const adminErr = await requireGlobalAdmin();
+ *   if (adminErr) return adminErr;
+ *
+ * @returns {Promise<object|null>}
+ */
+export async function requireGlobalAdmin() {
+  const verdict = await verifyGlobalAdmin();
+  if (verdict.isAdmin) return null;
+  logger.warn('requireGlobalAdmin: denied', {
+    adminCheckMethod: verdict.adminCheckMethod,
+  });
+  return errorResponse(
+    ERROR_CODES.AUTH_NOT_ADMIN,
+    'Only Jira administrators are allowed to perform this action.',
+    {
+      requiredPermission: 'ADMINISTER',
+      adminCheckMethod: verdict.adminCheckMethod,
+    },
+  );
+}

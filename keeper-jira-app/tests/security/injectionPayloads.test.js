@@ -267,8 +267,8 @@ describe('Path Traversal in Inputs', () => {
       notes: payload
     }, 'TEST-1');
     
-    // Notes can contain path references - they're just text
-    expect(command).toContain('--notes=');
+    // Notes are single-quoted; path references are just literal text.
+    expect(command).toContain("--notes='");
   });
 });
 

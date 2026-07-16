@@ -456,11 +456,13 @@ describe('buildKeeperCommand', () => {
     });
   });
 
-  describe('device-approve', () => {
-    test('builds unquoted email then flag (matches interactive shell)', () => {
+  // KJ-26-03: device-approve is validated via structured params and
+  // rejects anything outside the allowlisted target charset.
+  describe('device-approve (structured, KJ-26-03)', () => {
+    test('builds approve from structured params', () => {
       const command = buildKeeperCommand(
         'device-approve',
-        { email: 'mnaqvi@keepersecurity.com', action: 'approve' },
+        { action: 'approve', email: 'mnaqvi@keepersecurity.com' },
         'TEST-1'
       );
       expect(command).toBe('device-approve mnaqvi@keepersecurity.com --approve');
@@ -469,28 +471,48 @@ describe('buildKeeperCommand', () => {
     test('builds deny variant', () => {
       const command = buildKeeperCommand(
         'device-approve',
-        { email: 'user@example.com', action: 'deny' },
+        { action: 'deny', email: 'user@example.com' },
         'TEST-1'
       );
       expect(command).toBe('device-approve user@example.com --deny');
     });
 
-    test('trims email whitespace', () => {
+    test('trims target whitespace', () => {
       const command = buildKeeperCommand(
         'device-approve',
-        { email: '  user@example.com  ', action: 'approve' },
+        { action: 'approve', email: '  user@example.com  ' },
         'TEST-1'
       );
       expect(command).toBe('device-approve user@example.com --approve');
     });
 
-    test('double-quotes email when token needs it', () => {
+    test('accepts a bare device ID target', () => {
       const command = buildKeeperCommand(
         'device-approve',
-        { email: 'user!name@example.com', action: 'approve' },
+        { action: 'deny', email: '1234hgghjjhg234gh123' },
         'TEST-1'
       );
-      expect(command).toBe('device-approve "user\\!name@example.com" --approve');
+      expect(command).toBe('device-approve 1234hgghjjhg234gh123 --deny');
+    });
+
+    test('escapes a target with shell metacharacters in double quotes', () => {
+      const command = buildKeeperCommand(
+        'device-approve',
+        { action: 'approve', email: 'user@example.com; enterprise-info' },
+        'TEST-1'
+      );
+      expect(command).toContain('"user@example.com; enterprise-info"');
+      expect(command).toContain('--approve');
+    });
+
+    test('rejects a missing/unknown decision', () => {
+      expect(() => {
+        buildKeeperCommand(
+          'device-approve',
+          { email: 'user@example.com' },
+          'TEST-1'
+        );
+      }).toThrow('Action must be');
     });
 
     test('accepts a device ID (non-email token) as target', () => {
