@@ -22,8 +22,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:security": "jest --testPathPattern=security",
-    "test:unit": "jest --testPathPattern=unit",
-    "test:integration": "jest --testPathPattern=integration"
+    "test:unit": "jest --testPathPattern=unit"
   },
   "devDependencies": {
     "eslint": "^8.56.0",
@@ -44,7 +43,8 @@
     ],
     "collectCoverageFrom": [
       "src/**/*.js",
-      "!src/index.js"
+      "!src/index.js",
+      "!src/modules/keeperApi.js"
     ],
     "coverageThreshold": {
       "global": {

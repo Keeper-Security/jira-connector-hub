@@ -51,12 +51,20 @@ const ERROR_CODES = {
   KEEPER_PERMISSION_DENIED: 'KEEPER_PERMISSION_DENIED',
   KEEPER_QUEUE_FULL: 'KEEPER_QUEUE_FULL',
   KEEPER_TIMEOUT: 'KEEPER_TIMEOUT',
+  KEEPER_NSF_NOT_AVAILABLE: 'KEEPER_NSF_NOT_AVAILABLE',
   
   // EPM-specific Errors (Endpoint Privilege Manager)
   EPM_ALREADY_APPROVED: 'EPM_ALREADY_APPROVED',
   EPM_ALREADY_DENIED: 'EPM_ALREADY_DENIED',
+  EPM_ALREADY_PROCESSED_OUTSIDE_JIRA: 'EPM_ALREADY_PROCESSED_OUTSIDE_JIRA',
   EPM_EXPIRED: 'EPM_EXPIRED',
   EPM_INVALID_UID: 'EPM_INVALID_UID',
+
+  // Device admin approval errors (label: ITSM_device_admin_approval_requested)
+  DEVICE_ALREADY_APPROVED: 'DEVICE_ALREADY_APPROVED',
+  DEVICE_ALREADY_DENIED: 'DEVICE_ALREADY_DENIED',
+  DEVICE_ALREADY_PROCESSED_OUTSIDE_JIRA: 'DEVICE_ALREADY_PROCESSED_OUTSIDE_JIRA',
+  DEVICE_INVALID_UID: 'DEVICE_INVALID_UID',
   
   // Jira API Errors
   JIRA_API_ERROR: 'JIRA_API_ERROR',
@@ -67,16 +75,15 @@ const ERROR_CODES = {
   // Storage Errors
   STORAGE_ERROR: 'STORAGE_ERROR',
   STORAGE_NOT_FOUND: 'STORAGE_NOT_FOUND',
-  
-  // Webhook Errors
-  WEBHOOK_NOT_CONFIGURED: 'WEBHOOK_NOT_CONFIGURED',
-  WEBHOOK_INVALID_TOKEN: 'WEBHOOK_INVALID_TOKEN',
-  WEBHOOK_RATE_LIMITED: 'WEBHOOK_RATE_LIMITED',
-  
+
   // Generic Errors
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   UNKNOWN_ERROR: 'UNKNOWN_ERROR'
 };
+
+/** Commander verbs required on the Keeper Service allowlist when NSF mode is used. */
+const KEEPER_NSF_SERVICE_ALLOWLIST =
+  'nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission';
 
 // ========================================================================
 // Troubleshooting Steps by Error Code
@@ -174,6 +181,13 @@ const TROUBLESHOOTING = {
     'Wait for pending requests to complete',
     'Try again in a few moments'
   ],
+  [ERROR_CODES.KEEPER_NSF_NOT_AVAILABLE]: [
+    'On the Keeper Service host (not only your laptop), run `keeper version` — need 18.0.0+.',
+    'On that same host run `keeper nsf-list --folders` and confirm it succeeds.',
+    `Restart the service with -c allowlist including: ${KEEPER_NSF_SERVICE_ALLOWLIST}`,
+    'Confirm Nested Share Subfolders is enabled for the vault the service logs into.',
+    'Until fixed, leave "Use Nested Share Subfolders" off — Classic mode still works.'
+  ],
   
   // EPM (Endpoint Privilege Manager)
   [ERROR_CODES.EPM_ALREADY_APPROVED]: [
@@ -199,14 +213,7 @@ const TROUBLESHOOTING = {
     'You may not have permission to access this resource',
     'Check your Jira project permissions'
   ],
-  
-  // Webhook
-  [ERROR_CODES.WEBHOOK_NOT_CONFIGURED]: [
-    'Configure the webhook in Global Settings > Webhook Configuration',
-    'Set the target project and issue type',
-    'Generate an authentication token'
-  ],
-  
+
   // Generic
   [ERROR_CODES.INTERNAL_ERROR]: [
     'An unexpected error occurred',
@@ -388,18 +395,48 @@ function epmError(type, message = null) {
   const codeMap = {
     approved: ERROR_CODES.EPM_ALREADY_APPROVED,
     denied: ERROR_CODES.EPM_ALREADY_DENIED,
-    expired: ERROR_CODES.EPM_EXPIRED
+    expired: ERROR_CODES.EPM_EXPIRED,
+    processed_outside: ERROR_CODES.EPM_ALREADY_PROCESSED_OUTSIDE_JIRA
   };
   
   const messageMap = {
     approved: 'This approval request has already been approved',
     denied: 'This approval request has already been denied',
-    expired: 'This approval request has expired and can no longer be processed'
+    expired: 'This approval request has expired and can no longer be processed',
+    processed_outside:
+      'This EPM approval request was already processed outside Jira ' +
+      '(no longer pending in Keeper).'
   };
   
   const code = codeMap[type] || ERROR_CODES.INTERNAL_ERROR;
   const defaultMessage = messageMap[type] || 'Unknown EPM error';
   
+  return errorResponse(code, message || defaultMessage);
+}
+
+/**
+ * Create a device-admin-approval-specific error response.
+ * @param {string} type - 'approved' or 'denied'
+ * @param {string} message - Optional custom message
+ */
+function deviceError(type, message = null) {
+  const codeMap = {
+    approved: ERROR_CODES.DEVICE_ALREADY_APPROVED,
+    denied: ERROR_CODES.DEVICE_ALREADY_DENIED,
+    processed_outside: ERROR_CODES.DEVICE_ALREADY_PROCESSED_OUTSIDE_JIRA
+  };
+
+  const messageMap = {
+    approved: 'This device approval request has already been approved',
+    denied: 'This device approval request has already been denied',
+    processed_outside:
+      'This device approval request was already processed outside Jira ' +
+      '(no longer in Keeper\'s pending list).'
+  };
+
+  const code = codeMap[type] || ERROR_CODES.INTERNAL_ERROR;
+  const defaultMessage = messageMap[type] || 'Unknown device approval error';
+
   return errorResponse(code, message || defaultMessage);
 }
 
@@ -476,6 +513,69 @@ function errorFromException(error) {
   return errorResponse(ERROR_CODES.INTERNAL_ERROR, message);
 }
 
+/**
+ * Detect whether a Keeper Commander error indicates that Nested Share Subfolders (NSF) is not
+ * enabled on the customer's vault. Nested Share Subfolders (NSF) is
+ * invitation-only / feature-flagged on the vault. When the flag is off,
+ * Commander rejects `nsf-*` commands with messages like "unknown command",
+ * "command not found", or "not enabled". This helper centralizes that
+ * heuristic so the resolvers can return a structured nsf_not_available error
+ * for the UI to surface a friendly inline message and revert the toggle.
+ *
+ * @param {Error|string} errorOrMessage - Error object or raw message string.
+ * @returns {boolean}
+ */
+function isKeeperNsfUnavailableError(errorOrMessage) {
+  const raw = (errorOrMessage && (errorOrMessage.message || errorOrMessage)) || '';
+  const message = String(raw).toLowerCase();
+  if (!message) return false;
+  // Match common Commander unknown-command / feature-disabled / allowlist phrasings.
+  return (
+    message.includes('unknown command') ||
+    message.includes('command not found') ||
+    message.includes('no such command') ||
+    message.includes('invalid command') ||
+    message.includes('unrecognized command') ||
+    message.includes('not permitted') ||
+    ((message.includes('keeper drive') || message.includes('nested share')) && (
+      message.includes('not enabled') ||
+      message.includes('not available') ||
+      message.includes('disabled') ||
+      message.includes('not supported')
+    )) ||
+    (message.includes('nsf-list') && message.includes('not')) ||
+    message.includes('feature flag')
+  );
+}
+
+/**
+ * Create a structured "Nested Share Subfolders not enabled" error response. Used by the
+ * `getKeeperRecords`, `getKeeperFolders`, and create/update resolvers when NSF
+ * mode was requested but the customer's Commander does not have the feature
+ * flag enabled. The frontend reads `errorCode === 'nsf_not_available'` and
+ * reverts the panel toggle to Classic with an inline message.
+ */
+function nsfNotAvailableError(originalMessage = null) {
+  let message =
+    'Nested Share Subfolders is not available on the Keeper Service that Jira connects to (not your local CLI). ' +
+    'The service host needs Commander 18.0.0+, Nested Share Subfolders (NSF) enabled on that vault, and these commands on the service allowlist: ' +
+    KEEPER_NSF_SERVICE_ALLOWLIST + '.';
+  if (originalMessage) {
+    const trimmed = String(originalMessage).trim();
+    if (trimmed && !message.includes(trimmed)) {
+      message += ` Commander reported: ${trimmed}`;
+    }
+  }
+  const response = errorResponse(ERROR_CODES.KEEPER_NSF_NOT_AVAILABLE, message, {
+    troubleshooting: TROUBLESHOOTING[ERROR_CODES.KEEPER_NSF_NOT_AVAILABLE],
+    details: originalMessage ? { originalMessage: String(originalMessage).trim() } : null
+  });
+  // Duplicate the code on a top-level `errorCode` field for easy detection
+  // by frontend code that does not unpack the structured `error` field.
+  response.errorCode = 'nsf_not_available';
+  return response;
+}
+
 // ========================================================================
 // Module Exports
 // ========================================================================
@@ -490,6 +590,10 @@ module.exports = {
   connectionError,
   keeperError,
   epmError,
+  deviceError,
   withErrorHandling,
-  errorFromException
+  errorFromException,
+  isKeeperNsfUnavailableError,
+  nsfNotAvailableError,
+  KEEPER_NSF_SERVICE_ALLOWLIST
 };

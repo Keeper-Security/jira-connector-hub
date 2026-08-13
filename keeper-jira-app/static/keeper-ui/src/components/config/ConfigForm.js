@@ -1,5 +1,5 @@
 /**
- * Configuration form component
+ * Configuration form component.
  */
 import React from 'react';
 import { router } from "@forge/bridge";
@@ -10,17 +10,15 @@ import '../../styles/ConfigForm.css';
 
 const ConfigForm = ({
   formValues,
-  setFormValues,
+  updateFormValue,
   formKey,
   isApiKeyMasked,
   setIsApiKeyMasked,
-  showCopiedMessage,
   isTestingConnection,
   hasFormChanges,
   connectionTested,
   handleSubmit,
   handleTestConnection,
-  copyApiKey
 }) => {
   const renderLabel = (text) => (
     <span className="config-form-label">{text}</span>
@@ -53,7 +51,7 @@ const ConfigForm = ({
                 <TextField
                   {...fieldProps}
                   value={formValues.apiUrl}
-                  onChange={(e) => setFormValues(prev => ({ ...prev, apiUrl: e.target.value }))}
+                  onChange={(e) => updateFormValue('apiUrl', e.target.value)}
                   placeholder="https://your-domain.com/api/v2"
                 />
                 <div className="config-form-helper-text">
@@ -93,7 +91,7 @@ const ConfigForm = ({
                   <TextField
                     {...fieldProps}
                     value={formValues.apiKey}
-                    onChange={(e) => setFormValues(prev => ({ ...prev, apiKey: e.target.value }))}
+                    onChange={(e) => updateFormValue('apiKey', e.target.value)}
                     type={isApiKeyMasked ? "password" : "text"}
                     placeholder="Enter your Keeper API key"
                     className="api-key-field-input"
@@ -106,15 +104,6 @@ const ConfigForm = ({
                       title={isApiKeyMasked ? "Show API Key" : "Hide API Key"}
                     >
                       {isApiKeyMasked ? "Show" : "Hide"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={copyApiKey}
-                      className={`api-key-action-button ${showCopiedMessage ? 'copied' : ''}`}
-                      title={showCopiedMessage ? "Copied!" : "Copy API Key"}
-                      disabled={!formValues.apiKey}
-                    >
-                      {showCopiedMessage ? "Copied!" : "Copy"}
                     </button>
                   </div>
                 </div>

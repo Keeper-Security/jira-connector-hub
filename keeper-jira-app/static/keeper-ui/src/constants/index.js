@@ -13,7 +13,6 @@ export const MESSAGE_TYPES = {
 // Tab names
 export const TABS = {
   CONFIG: 'config',
-  EPM: 'epm',
   PREREQ: 'prereq',
   ABOUT: 'about'
 };
@@ -45,7 +44,4 @@ export const MESSAGE_STYLES = {
     title: "Info Message"
   }
 };
-
-// Copy message timeout
-export const COPY_MESSAGE_TIMEOUT = 2000;
 

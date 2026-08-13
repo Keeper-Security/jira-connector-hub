@@ -780,6 +780,23 @@
   cursor: pointer;
 }
 
+/* Normalize native selects across browsers/iframes */
+select.input-field {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236B778C' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+select.input-field:disabled {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23A5ADBA' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+}
+
 /* Textarea specific styles */
 textarea.input-field {
   resize: vertical;
@@ -1396,7 +1413,8 @@ textarea.input-field {
   font-size: 16px;
   font-weight: 600;
   color: #1A1A1A;
-  margin-bottom: 12px;
+  margin-top: 4px;
+  margin-bottom: 14px;
   padding-bottom: 8px;
   border-bottom: 2px solid #0066CC;
 }
@@ -1687,7 +1705,7 @@ textarea.input-field {
 
 /* Form section heading */
 .form-section-heading {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   font-weight: 600;
   font-size: 14px;
   color: #1A1A1A;
@@ -2462,46 +2480,6 @@ textarea.input-field {
   border-radius: 8px;
   border: 2px dashed #DFE1E6;
   margin-bottom: 16px;
-}
-
-/* Select with value state */
-.select-with-value {
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 14px;
-  outline: none;
-  box-sizing: border-box;
-  border: 1px solid #006644;
-  background-color: #F8FFF8;
-  color: #000;
-  cursor: pointer;
-}
-
-.select-no-value {
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 14px;
-  outline: none;
-  box-sizing: border-box;
-  border: 1px solid #DFE1E6;
-  background-color: white;
-  color: #000;
-  cursor: pointer;
-}
-
-.select-disabled-state {
-  width: 100%;
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 14px;
-  outline: none;
-  box-sizing: border-box;
-  border: 1px solid #E0E0E0;
-  background-color: #F5F5F5;
-  color: #999;
-  cursor: not-allowed;
 }
 
 /* Section header with border */
@@ -3857,4 +3835,89 @@ textarea.input-field {
   .phone-ext-field {
     max-width: none;
   }
+}
+
+/* Classic mode opt-in checkbox */
+.classic-mode-toggle {
+  margin-top: 4px;
+  margin-bottom: 20px;
+  padding: 10px 12px;
+  background-color: #F4F5F7;
+  border: 1px solid #DFE1E6;
+  border-radius: 4px;
+}
+
+.classic-mode-toggle:has(.classic-mode-input:disabled) {
+  opacity: 0.85;
+  background-color: #F0F1F4;
+}
+
+.classic-mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #172B4D;
+}
+
+.classic-mode-label-disabled {
+  cursor: not-allowed;
+  color: #6B778C;
+}
+
+.classic-mode-input {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #0066CC;
+}
+
+.classic-mode-input:disabled {
+  cursor: not-allowed;
+}
+
+.classic-mode-text {
+  user-select: none;
+}
+
+.classic-mode-description {
+  margin: 4px 0 0 23px;
+  font-size: 12px;
+  color: #6B778C;
+  line-height: 1.4;
+}
+
+/* Source badge in record/folder pickers (Classic vs NSF) */
+.source-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+
+.source-badge-nsf {
+  background-color: #DEEBFF;
+  color: #0747A6;
+  border: 1px solid #B3D4FF;
+}
+
+.source-badge-classic {
+  background-color: #EBECF0;
+  color: #42526E;
+  border: 1px solid #DFE1E6;
+}
+
+.nsf-folder-path {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #6B778C;
+  font-style: italic;
 }

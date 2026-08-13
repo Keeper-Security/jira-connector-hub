@@ -1,7 +1,6 @@
 import Resolver from '@forge/resolver';
-import { storage, webTrigger } from '@forge/api';
-import { webTriggerHandler, generateWebhookToken } from './modules/webhookHandler.js';
-import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus } from './modules/keeperApi.js';
+import { storage } from '@forge/api';
+import { testKeeperConnection, executeKeeperCommand as executeKeeperApiCommand, getRateLimitStatus, fetchEpmApprovalDetails } from './modules/keeperApi.js';
 import { requestJiraAsAppWithRetry, requestJiraAsUserWithRetry, route } from './modules/utils/jiraApiRetry.js';
 import { logger } from './modules/utils/logger.js';
 import { 
@@ -12,8 +11,41 @@ import {
   rateLimitError, 
   connectionError, 
   keeperError, 
-  epmError 
+  epmError,
+  deviceError,
+  isKeeperNsfUnavailableError,
+  nsfNotAvailableError
 } from './modules/utils/errorResponse.js';
+import { parseNsfFoldersFromRaw, parseNsfRecordsFromRaw } from './modules/utils/nsfParser.js';
+import {
+  NSF_COMMAND_NAME_MAP,
+  NSF_ROLES,
+  buildNsfShareFolderArgs,
+  buildNsfShareRecordArgs,
+  buildNsfRecordPermissionArgs,
+  sanitizeNsfDuration
+} from './modules/utils/nsfShareCommands.js';
+import { isFolderRoeEligibleFromListSfRows } from './modules/utils/roeEligibility.js';
+import {
+  escapeForSingleQuotes,
+  escapeForDoubleQuotes,
+  sanitizeJsonObject,
+  capitalizeFieldName,
+  normalizeApprovalDecision,
+  extractDeviceTarget,
+  buildEpmApprovalCommand,
+  buildDeviceApproveCommand
+} from './modules/utils/commandBuilder.js';
+import { maskApiKey, isMaskedApiKey } from './modules/utils/auth.js';
+import {
+  requireProjectAdmin,
+  requireGlobalAdmin,
+  verifyProjectAdmin
+} from './modules/utils/adminGate.js';
+import {
+  validatePasswordComplexity,
+  formatPasswordPolicyError
+} from './modules/utils/passwordPolicy.js';
 
 const resolver = new Resolver();
 
@@ -264,11 +296,29 @@ async function getCurrentUser() {
 }
 
 /**
- * Get Keeper config (called from frontend)
+ * Get Keeper config (called from frontend).
+ *
+ * KJ-26-07: The full apiKey is never returned to the client. We return a
+ * masked form (`****<last 4 chars>`) so the UI can still indicate that a
+ * key is configured and surface its tail for visual verification, while the
+ * real secret remains server-side in Forge storage.
  */
 resolver.define('getConfig', async () => {
+  // One-shot cleanup of webhook storage left by pre-ITSM versions.
+  const migrated = await storage.get('postWebhookMigrationDone');
+  if (!migrated) {
+    await Promise.all([
+      storage.delete('webhookConfig'),
+      storage.delete('webhookToken'),
+      storage.delete('webhookAuditLog'),
+    ]);
+    await storage.set('postWebhookMigrationDone', true);
+  }
+
   const config = await storage.get('keeperConfig');
-  return config || {};
+  if (!config) return {};
+  const masked = maskApiKey(config.apiKey);
+  return { ...config, apiKey: masked };
 });
 
 /**
@@ -276,6 +326,10 @@ resolver.define('getConfig', async () => {
  * Includes URL validation to prevent saving malicious tunnel URLs (Issue #8)
  */
 resolver.define('setConfig', async (req) => {
+  // KJ-26-03: Only Jira admins may change the integration configuration.
+  const adminErr = await requireGlobalAdmin();
+  if (adminErr) return adminErr;
+
   // Handle double nesting: req.payload.payload
   let payload = req?.payload?.payload || req?.payload || req;
   
@@ -286,7 +340,7 @@ resolver.define('setConfig', async (req) => {
   }
   
   const apiUrl = payload.apiUrl;
-  const apiKey = payload.apiKey;
+  const submittedApiKey = payload.apiKey;
   const skipConnectionTest = payload.skipConnectionTest || false;
   
   // ========================================================================
@@ -310,8 +364,21 @@ resolver.define('setConfig', async (req) => {
   }
   
   // Validate API key is provided
-  if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
+  if (!submittedApiKey || typeof submittedApiKey !== 'string' || !submittedApiKey.trim()) {
     return validationError('apiKey', 'API Key is required');
+  }
+  
+  // KJ-26-07: If the UI round-tripped the masked placeholder (or the
+  // explicit keep-existing sentinel), reuse the stored API key instead of
+  // overwriting it. This lets users update the URL without re-typing the
+  // secret and ensures the masked form is never persisted as a real key.
+  let effectiveApiKey = submittedApiKey.trim();
+  if (isMaskedApiKey(effectiveApiKey)) {
+    const existing = await storage.get('keeperConfig');
+    if (!existing?.apiKey) {
+      return validationError('apiKey', 'API Key is required');
+    }
+    effectiveApiKey = existing.apiKey;
   }
   
   // Use the normalized URL (trailing slashes removed)
@@ -324,7 +391,7 @@ resolver.define('setConfig', async (req) => {
   let connectionWarning = null;
   
   if (!skipConnectionTest) {
-    const reachabilityTest = await testApiUrlReachability(normalizedApiUrl, apiKey);
+    const reachabilityTest = await testApiUrlReachability(normalizedApiUrl, effectiveApiKey);
     
     if (!reachabilityTest.reachable) {
       return connectionError(`Connection test failed: ${reachabilityTest.error}`);
@@ -338,7 +405,7 @@ resolver.define('setConfig', async (req) => {
   // Save the validated and normalized config
   const configToSave = { 
     apiUrl: normalizedApiUrl, 
-    apiKey: apiKey.trim() 
+    apiKey: effectiveApiKey 
   };
   
   await storage.set('keeperConfig', configToSave);
@@ -369,6 +436,11 @@ resolver.define('setConfig', async (req) => {
  * Uses API v2 async queue mode
  */
 resolver.define('testConnection', async (req) => {
+  // KJ-26-03: Connection testing exercises the configured Keeper endpoint and
+  // is admin-only, like the rest of the global config page.
+  const adminErr = await requireGlobalAdmin();
+  if (adminErr) return adminErr;
+
   // Handle double nesting: req.payload.payload
   let payload = req?.payload?.payload || req?.payload || req;
   
@@ -377,15 +449,27 @@ resolver.define('testConnection', async (req) => {
   }
   
   const apiUrl = payload.apiUrl;
-  const apiKey = payload.apiKey;
+  const submittedApiKey = payload.apiKey;
   
-  if (!apiUrl || !apiKey) {
+  if (!apiUrl || !submittedApiKey) {
     return validationError('apiUrl', 'API URL and API Key are required for testing connection');
+  }
+
+  // KJ-26-07: If the UI submitted the masked placeholder (user clicked
+  // "Test Connection" without retyping the key), fall back to the stored
+  // key so the test actually exercises real credentials.
+  let effectiveApiKey = submittedApiKey;
+  if (isMaskedApiKey(submittedApiKey)) {
+    const existing = await storage.get('keeperConfig');
+    if (!existing?.apiKey) {
+      return validationError('apiKey', 'API Key is required');
+    }
+    effectiveApiKey = existing.apiKey;
   }
 
   try {
     // Use the v2 API test connection function from keeperApi module
-    const result = await testKeeperConnection(apiUrl, apiKey);
+    const result = await testKeeperConnection(apiUrl, effectiveApiKey);
 
     // Extract service status information from the response
     const serviceMessage = result.data?.message || 'Service status unknown';
@@ -539,8 +623,8 @@ const VALIDATION_PATTERNS = {
   // Date: ISO format YYYY-MM-DD or Unix timestamp
   date: /^(\d{4}-\d{2}-\d{2}|\d{10,13})$/,
   
-  // Expiration duration: Number with time unit (e.g., 30d, 24h, 60m)
-  duration: /^\d+[dhms]?$/i,
+  // Expiration duration: Number with time unit (e.g., 30d, 24h, 60mi, 6mo, 1y)
+  duration: /^\d+(mi|mo|d|h|m|s|y)$/i,
 };
 
 /**
@@ -693,21 +777,44 @@ function validatePhoneEntry(phoneEntry) {
  * @param {Object} parameters - The parameters object
  * @returns {Object} - { valid: boolean, errors?: string[] }
  */
-function validateCommandParameters(action, parameters) {
+function validateCommandParameters(action, parameters, options = {}) {
   const errors = [];
-  
-  // Skip validation for pre-formatted CLI commands
-  if (parameters.cliCommand) {
-    return { valid: true };
+  const isNsfMode = !!(options && options.mode === 'nsf');
+
+  // KJ-26-03: The `parameters.cliCommand` passthrough has been removed. EPM /
+  // device approval verbs are validated + rebuilt in their dedicated builders
+  // (buildEpmApprovalCommand / buildDeviceApproveCommand) before this runs, and
+  // every other action is validated structurally below.
+
+  // NSF share/permission commands require -r <role> on grant per Commander docs.
+  // Classic uses permission flags instead and is unaffected.
+  if (
+    isNsfMode &&
+    parameters &&
+    parameters.action === 'grant' &&
+    ['share-folder', 'share-record', 'record-permission'].includes(action)
+  ) {
+    const role = parameters.role ? String(parameters.role).trim() : '';
+    if (!role) {
+      errors.push('Role is required for Nested Share Subfolders (NSF) grant operations');
+    } else if (!NSF_ROLES.includes(role)) {
+      errors.push(
+        `Invalid Nested Share Subfolders (NSF) role "${role}". Allowed: ${NSF_ROLES.join(', ')}`
+      );
+    }
   }
-  
+
   // Common validations based on action type
   switch (action) {
     case 'record-add':
     case 'record-update': {
       // Title validation
       if (action === 'record-add' && !parameters.title) {
-        errors.push('Title is required for record-add');
+        errors.push(
+          isNsfMode
+            ? 'Title is required for Nested Share Subfolders (NSF) record-add'
+            : 'Title is required for record-add'
+        );
       } else if (parameters.title) {
         const titleValidation = validateField('title', parameters.title, { 
           limitKey: 'title',
@@ -725,8 +832,11 @@ function validateCommandParameters(action, parameters) {
         if (!recordValidation.valid) errors.push(recordValidation.error);
       }
       
-      // Record type validation
-      if (parameters.recordType) {
+      // KJ-26-06: Record type is immutable on record-update. The UI greys
+      // out the field, but a proxy can re-enable it; reject server-side too.
+      if (action === 'record-update' && parameters.recordType) {
+        errors.push('Record type cannot be changed after a record is created.');
+      } else if (parameters.recordType) {
         const typeValidation = validateField('recordType', parameters.recordType, { 
           limitKey: 'recordType',
           pattern: 'recordType'
@@ -749,10 +859,17 @@ function validateCommandParameters(action, parameters) {
         if (!loginValidation.valid) errors.push(loginValidation.error);
       }
       
-      // Password validation (skip $GEN)
+      // Password validation: length limit + KJ-26-04 server-side complexity
+      // for any non-`$GEN` password on record-add / record-update. Client-
+      // side checks can be bypassed via proxy; this is the authoritative gate.
       if (parameters.password && parameters.password !== '$GEN' && parameters.password !== 'generate') {
         const passwordValidation = validateField('password', parameters.password, { limitKey: 'password' });
         if (!passwordValidation.valid) errors.push(passwordValidation.error);
+
+        const complexity = validatePasswordComplexity(parameters.password);
+        if (!complexity.valid) {
+          errors.push(formatPasswordPolicyError(complexity.errors));
+        }
       }
       
       // URL validation
@@ -828,17 +945,18 @@ function validateCommandParameters(action, parameters) {
       
       // Validate all remaining string parameters against default limits
       for (const [key, value] of Object.entries(parameters)) {
-        if (typeof value === 'string' && !['cliCommand'].includes(key)) {
+        if (typeof value === 'string') {
           // Skip already validated fields
-          if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email'].includes(key)) {
+          if (['title', 'notes', 'record', 'recordType', 'login', 'password', 'url', 'email',
+               'keyPair_privateKey', 'keyPair_publicKey', 'passphrase'].includes(key)) {
             continue;
           }
           if (addressFields.includes(key) || nameFields.includes(key)) {
             continue;
           }
           
-          // Validate against default limit
-          const validation = validateField(key, value, { limitKey: 'default' });
+          // Use field-specific limit when available (e.g. privateKey: 16000), else default.
+          const validation = validateField(key, value, { limitKey: key });
           if (!validation.valid) errors.push(validation.error);
         }
       }
@@ -864,6 +982,18 @@ function validateCommandParameters(action, parameters) {
       } else if (parameters.action !== 'cancel') {
         errors.push('User email is required for share operations');
       }
+
+      // Action allow-list check
+      if (parameters.action) {
+        const validShareActions = isNsfMode
+          ? ['grant', 'revoke', 'remove', 'owner']
+          : ['grant', 'revoke', 'cancel'];
+        if (!validShareActions.includes(parameters.action)) {
+          errors.push(
+            `Invalid action "${parameters.action}". Must be one of: ${validShareActions.join(', ')}`
+          );
+        }
+      }
       
       // Expiration validation
       if (parameters.expire_in) {
@@ -874,10 +1004,24 @@ function validateCommandParameters(action, parameters) {
       }
       
       if (parameters.expire_at) {
-        // Basic datetime validation
         const expireAt = parameters.expire_at;
         if (typeof expireAt === 'string' && expireAt.length > 30) {
           errors.push('Expiration date exceeds maximum length');
+        }
+      }
+
+      // rotate_on_expiration requires a valid expiration window and target UID.
+      if (parameters.rotate_on_expiration === true) {
+        if (!parameters.expiration_type || parameters.expiration_type === 'none') {
+          errors.push('Expiration is required when rotate-on-expiration is enabled');
+        } else if (parameters.expiration_type === 'expire-at' && !parameters.expire_at) {
+          errors.push('Expire-at value is required when rotate-on-expiration is enabled');
+        } else if (parameters.expiration_type === 'expire-in' && !parameters.expire_in) {
+          errors.push('Expire-in value is required when rotate-on-expiration is enabled');
+        }
+        const roeTargetUid = parameters.record || parameters.folder || parameters.sharedFolder;
+        if (!roeTargetUid) {
+          errors.push('rotate-on-expiration requires a record or folder UID');
         }
       }
       break;
@@ -900,7 +1044,7 @@ function validateCommandParameters(action, parameters) {
       }
       break;
     }
-    
+
     default: {
       // For unknown actions, validate all string parameters against default limits
       for (const [key, value] of Object.entries(parameters)) {
@@ -925,86 +1069,42 @@ function validateCommandParameters(action, parameters) {
 /**
  * Build Keeper CLI command from action and parameters
  */
-// Helper function to capitalize first letter of a field name
-function capitalizeFieldName(fieldName) {
-  if (!fieldName || typeof fieldName !== 'string') return fieldName;
-  return fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
-}
 
-/**
- * Escape a value for use inside single-quoted shell arguments.
- * Single quotes in shell cannot contain escaped single quotes, so we use
- * the technique: replace ' with '\'' (end quote, escaped quote, start quote)
- * 
- * Example: "Test's Record" becomes "Test'\''s Record"
- * Which in shell becomes: 'Test'\''s Record' = Test's Record
- * 
- * @param {string} value - The user input value to escape
- * @returns {string} - The escaped value safe for single-quoted context
- */
-function escapeForSingleQuotes(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value !== 'string') value = String(value);
-  // Replace single quotes with the escape sequence '\''
-  return value.replace(/'/g, "'\\''");
-}
+// KJ-26-03: The approval-command builders (EPM + device admin) and
+// `extractDeviceTarget` live in `modules/utils/commandBuilder.js` as the single
+// source of truth and are imported at the top of this file.
 
-/**
- * Escape a value for use inside double-quoted shell arguments.
- * Characters that need escaping in double quotes: " $ ` \ !
- * 
- * @param {string} value - The user input value to escape
- * @returns {string} - The escaped value safe for double-quoted context
- */
-function escapeForDoubleQuotes(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value !== 'string') value = String(value);
-  // Escape backslashes first, then other special characters
-  return value
-    .replace(/\\/g, '\\\\')   // Escape backslashes
-    .replace(/"/g, '\\"')     // Escape double quotes
-    .replace(/\$/g, '\\$')    // Escape dollar signs (variable expansion)
-    .replace(/`/g, '\\`')     // Escape backticks (command substitution)
-    .replace(/!/g, '\\!');    // Escape exclamation marks (history expansion)
-}
+function buildKeeperCommand(action, parameters, issueKey, options = {}) {
+  // NSF mode reroutes actions via NSF_COMMAND_NAME_MAP; Classic mode is unaffected.
+  const isNsf = options?.mode === 'nsf';
 
-/**
- * Sanitize JSON field values before JSON.stringify to prevent injection
- * through JSON string escaping edge cases.
- * 
- * @param {Object} obj - Object with string values to sanitize
- * @returns {Object} - Object with sanitized values
- */
-function sanitizeJsonObject(obj) {
-  const sanitized = {};
-  for (const key of Object.keys(obj)) {
-    const value = obj[key];
-    if (typeof value === 'string') {
-      // JSON.stringify handles most escaping, but we ensure no null bytes
-      // or other control characters that could cause parsing issues
-      sanitized[key] = value.replace(/[\x00-\x1f]/g, '');
-    } else {
-      sanitized[key] = value;
+  // KJ-26-03: Approval verbs (EPM + device admin) are rebuilt server-side from
+  // validated structured params. We never execute a client-supplied command
+  // string verbatim — the former `parameters.cliCommand` passthrough was an
+  // arbitrary-command-execution vector.
+  if (typeof action === 'string') {
+    if (action.startsWith('epm approval action')) {
+      return buildEpmApprovalCommand(action, parameters);
     }
-  }
-  return sanitized;
-}
-
-function buildKeeperCommand(action, parameters, issueKey) {
-  // Check if we have a pre-formatted CLI command (used for record-permission)
-  if (parameters.cliCommand) {
-    return parameters.cliCommand;
+    if (action.startsWith('device-approve')) {
+      return buildDeviceApproveCommand(action, parameters);
+    }
   }
   
   // ========================================================================
   // Input Validation - validate all parameters before building command
   // ========================================================================
-  const validation = validateCommandParameters(action, parameters);
+  const validation = validateCommandParameters(action, parameters, { mode: isNsf ? 'nsf' : 'classic' });
   if (!validation.valid) {
     throw new Error(`Input validation failed: ${validation.errors.join('; ')}`);
   }
-  
-  let command = action;
+
+  let command;
+  if (isNsf && NSF_COMMAND_NAME_MAP[action]) {
+    command = NSF_COMMAND_NAME_MAP[action];
+  } else {
+    command = action;
+  }
   
   // Build command based on action type
   switch (action) {
@@ -1012,20 +1112,24 @@ function buildKeeperCommand(action, parameters, issueKey) {
       // Use the recordType parameter if provided, otherwise default to login
       const recordType = parameters.recordType || 'login';
       command += ` --record-type='${escapeForSingleQuotes(recordType)}'`;
-      
+
+      // Folder is optional for both Classic and NSF record-add; if provided, emit --folder,
+      // otherwise Commander creates the record at vault root.
+      if (parameters.folder && String(parameters.folder).trim()) {
+        command += ` --folder='${escapeForSingleQuotes(String(parameters.folder).trim())}'`;
+      }
+
       // Title is required for all record types
       if (!parameters.title) {
         throw new Error(`Title is required for record-add command. Record type: ${recordType}`);
       }
       command += ` --title="${escapeForDoubleQuotes(parameters.title)}"`;
-      // Handle common fields for all record types
       if (parameters.notes) {
-        command += ` Notes="${escapeForDoubleQuotes(parameters.notes)}"`;
+        command += ` --notes='${escapeForSingleQuotes(parameters.notes)}'`;
       }
       
-      // Dynamic field processing for any record type
-      // Process all parameters except metadata fields
-      const metadataFields = ['recordType', 'title', 'notes', 'skipComment', 'phoneEntries'];
+      // Skip metadata fields; folder is excluded (already emitted as --folder in NSF mode).
+      const metadataFields = ['recordType', 'title', 'notes', 'skipComment', 'phoneEntries', 'folder'];
       
       // Special handling for login record type (password generation)
       if (recordType === 'login' && !parameters.password) {
@@ -1181,9 +1285,13 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'record-update':
-      // Required record parameter
+      // NSF uses short -r <UID>; Classic uses --record=<UID>.
       if (parameters.record) {
-        command += ` --record='${escapeForSingleQuotes(parameters.record)}'`;
+        if (isNsf) {
+          command += ` -r '${escapeForSingleQuotes(parameters.record)}'`;
+        } else {
+          command += ` --record='${escapeForSingleQuotes(parameters.record)}'`;
+        }
       }
       
       // Optional title update
@@ -1191,10 +1299,9 @@ function buildKeeperCommand(action, parameters, issueKey) {
         command += ` --title='${escapeForSingleQuotes(parameters.title)}'`;
       }
       
-      // Optional record type change
-      if (parameters.recordType) {
-        command += ` --record-type='${escapeForSingleQuotes(parameters.recordType)}'`;
-      }
+      // KJ-26-06: recordType is immutable on update — defence-in-depth.
+      // `validateCommandParameters` already rejects this branch; if anything
+      // ever bypasses validation we still must NOT emit `--record-type`.
       
       // Notes handling (with + prefix to append, without to replace)
       if (parameters.notes) {
@@ -1360,8 +1467,6 @@ function buildKeeperCommand(action, parameters, issueKey) {
               break;
               
             case 'passphrase':
-              // Passphrase is a password-type field with label "passphrase"
-              // Keeper CLI format: password.label='value'
               if (value === '$GEN' || value === 'generate') {
                 command += ` password.passphrase=$GEN`;
               } else {
@@ -1466,6 +1571,10 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'record-permission':
+      if (isNsf) {
+        command += buildNsfRecordPermissionArgs(parameters);
+        break;
+      }
       // Format: record-permission FOLDER_UID -a ACTION [-d] [-s] [-R] [--force]
       // Example: record-permission jdrkYEaf03bG0ShCGlnKww -a revoke -d -R --force
       // -a = action (grant/revoke)
@@ -1509,6 +1618,10 @@ function buildKeeperCommand(action, parameters, issueKey) {
       break;
       
     case 'share-record':
+      if (isNsf) {
+        command += buildNsfShareRecordArgs(parameters);
+        break;
+      }
       // Format: share-record "RECORD_UID" -e "EMAIL" -a "ACTION" [-s] [-w] [-R] [--expire-at|--expire-in] --force
       // For cancel action with record: share-record "RECORD_UID" -a cancel -e "EMAIL" [-e "EMAIL2" ...] -f
       // For cancel action with folder: share-record "FOLDER_UID" -a cancel -e "EMAIL" [-e "EMAIL2" ...] -f
@@ -1556,21 +1669,25 @@ function buildKeeperCommand(action, parameters, issueKey) {
         }
         // Add expiration options
         if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
-          // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
           const expireAtFormatted = parameters.expire_at.replace('T', ' ');
           command += ` --expire-at "${escapeForDoubleQuotes(expireAtFormatted)}"`;
         } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-          // expire_in is expected to be a numeric duration, validate it's safe
-          const expireInValue = String(parameters.expire_in).replace(/[^0-9dhms]/gi, '');
-          command += ` --expire-in ${expireInValue}`;
+          const expireInValue = sanitizeNsfDuration(parameters.expire_in);
+          if (expireInValue) command += ` --expire-in ${expireInValue}`;
+        }
+        if (parameters.rotate_on_expiration === true) {
+          command += ' --rotate-on-expiration';
         }
       }
       
-      // Add force flag at the end
       command += ` -f`;
       break;
       
     case 'share-folder':
+      if (isNsf) {
+        command += buildNsfShareFolderArgs(parameters);
+        break;
+      }
       // Format: share-folder "FOLDER_UID" -e "EMAIL" -a "ACTION" [options] [--expire-at|--expire-in] --force
       if (parameters.folder) {
         command += ` '${escapeForSingleQuotes(parameters.folder)}'`;
@@ -1596,40 +1713,190 @@ function buildKeeperCommand(action, parameters, issueKey) {
       command += ` -o ${parameters.manage_users === true ? 'on' : 'off'}`;    // User permission: Can manage users
       command += ` -s ${parameters.can_share === true ? 'on' : 'off'}`;       // Record permission: Can be shared
       command += ` -d ${parameters.can_edit === true ? 'on' : 'off'}`;        // Record permission: Can be modified
-      // Add expiration options
       if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
-        // Convert datetime-local format to ISO format (yyyy-MM-dd hh:mm:ss)
         const expireAtFormatted = parameters.expire_at.replace('T', ' ');
         command += ` --expire-at "${escapeForDoubleQuotes(expireAtFormatted)}"`;
       } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
-        // expire_in is expected to be a numeric duration, validate it's safe
-        const expireInValue = String(parameters.expire_in).replace(/[^0-9dhms]/gi, '');
-        command += ` --expire-in ${expireInValue}`;
+        const expireInValue = sanitizeNsfDuration(parameters.expire_in);
+        if (expireInValue) command += ` --expire-in ${expireInValue}`;
       }
-      // Add force flag at the end
+      if (parameters.rotate_on_expiration === true) {
+        command += ' --rotate-on-expiration';
+      }
       command += ` --force`;
       break;
-      
+
+    case 'epm approval action': {
+      const decision = parameters.epmDecision;
+      const uid = String(parameters.approvalUid || '').trim();
+      if (!decision || !['approve', 'deny'].includes(decision)) {
+        throw new Error('EPM approval decision must be "approve" or "deny"');
+      }
+      if (!uid) {
+        throw new Error('EPM approval UID is required');
+      }
+      if (!/^[A-Za-z0-9_-]+$/.test(uid)) {
+        throw new Error('EPM approval UID contains invalid characters');
+      }
+      command += ` --${decision} ${uid}`;
+      break;
+    }
+
+    case 'device-approve': {
+      const rawTarget = (parameters.email || '').trim();
+      if (!rawTarget) {
+        throw new Error('Email or device ID is required for device-approve command');
+      }
+      if (!parameters.action || !['approve', 'deny'].includes(parameters.action)) {
+        throw new Error('Action must be "approve" or "deny" for device-approve command');
+      }
+      const flag = parameters.action === 'approve' ? '--approve' : '--deny';
+      const safeToken = /^[a-zA-Z0-9._+\-@]+$/;
+      if (safeToken.test(rawTarget)) {
+        command += ` ${rawTarget} ${flag}`;
+      } else {
+        command += ` "${escapeForDoubleQuotes(rawTarget)}" ${flag}`;
+      }
+      break;
+    }
+
     default:
-      // For any other commands, add parameters as key=value pairs with proper escaping
-      Object.keys(parameters).forEach(key => {
-        if (parameters[key]) {
-            command += ` ${key}='${escapeForSingleQuotes(String(parameters[key]))}'`;
-        }
-      });
+      break;
   }
   
   return command;
 }
 
 /**
- * Get records list from Keeper API (called from issue panel)
+ * Normalize the `mode` payload field to one of 'classic' | 'nsf'. Defaults to
+ * 'classic' so callers that haven't been updated keep their pre-toggle
+ * behavior.
  */
+function resolveVaultMode(payload) {
+  const raw = (payload && payload.mode ? String(payload.mode).toLowerCase() : '').trim();
+  return raw === 'nsf' ? 'nsf' : 'classic';
+}
+
+/**
+ * Map vault mode → expected Commander `record_category` value (lowercased).
+ * Commander tags Classic records as "Classic" and NSF records as "Nested".
+ * Keeping the mapping in one place avoids scattered magic strings.
+ */
+const VAULT_MODE_CATEGORY = Object.freeze({ classic: 'classic', nsf: 'nested' });
+
+/**
+ * Filter a list of records so only those belonging to the requested vault mode
+ * are returned.  Comparison is case-insensitive against Commander's
+ * `record_category` field.  Records without a `record_category` are assumed
+ * Classic (backward-compat with older Commander versions).
+ *
+ * Only meaningful for `classic` mode — Commander's `list` returns the entire
+ * vault (both Classic and Nested).  The `nsf-list --records` command already
+ * scopes to NSF records, so NSF mode passes through unfiltered.
+ *
+ * @param {object[]} records
+ * @param {'classic'|'nsf'} mode
+ * @returns {object[]}
+ */
+function filterRecordsByVaultMode(records, mode) {
+  if (mode !== 'classic') return records;
+  const expected = VAULT_MODE_CATEGORY[mode];
+  return records.filter(r => {
+    const cat = (r.record_category || 'classic').toLowerCase();
+    return cat === expected;
+  });
+}
+
+/**
+ * Record types the app supports. Frontend peer: SUPPORTED_RECORD_TYPES in
+ * static/keeper-issue-ui/src/constants/index.js.
+ *
+ * Keyed by Commander's `content` value (the $id used in record-type-info).
+ * The Map gives O(1) lookup for both the intersection filter and the
+ * server-side validation gate in executeKeeperAction (KJ-26-02).
+ */
+const SUPPORTED_RECORD_TYPES = new Map([
+  ['contact',             'Contact'],
+  ['databaseCredentials', 'Database'],
+  ['encryptedNotes',      'Secure Note'],
+  ['login',               'Login'],
+  ['membership',          'Membership'],
+  ['serverCredentials',   'Server'],
+  ['softwareLicense',     'Software License'],
+  ['sshKeys',             'SSH Keys'],
+]);
+
+/**
+ * Convert the SUPPORTED_RECORD_TYPES map into the { label, value } shape
+ * the frontend expects. Used both as the resolver response and as the
+ * fallback when Commander's rti command is unavailable.
+ */
+function allSupportedRecordTypes() {
+  return Array.from(SUPPORTED_RECORD_TYPES, ([value, label]) => ({ label, value }));
+}
+
+/**
+ * Parse the JSON response from `rti -lr --effective --format=json` and
+ * return only the entries whose `content` is in SUPPORTED_RECORD_TYPES.
+ *
+ * Commander returns: [{ recordTypeId: number, content: string }, ...]
+ *
+ * @param {unknown} raw - Parsed JSON array from Commander.
+ * @returns {{ label: string, value: string }[]}
+ */
+function intersectEffectiveRecordTypes(raw) {
+  if (!Array.isArray(raw)) return allSupportedRecordTypes();
+  const effectiveIds = new Set(raw.map(r => r?.content).filter(Boolean));
+  return Array.from(SUPPORTED_RECORD_TYPES, ([value, label]) => ({ label, value }))
+    .filter(t => effectiveIds.has(t.value));
+}
+
+/**
+ * KJ-26-02: Return the record types the current user is permitted to create,
+ * intersected with the app's supported set.
+ *
+ * Runs `rti -lr --effective --format=json` to honour enterprise role policies
+ * (RESTRICT_RECORD_TYPES). On any failure (older Commander, network error,
+ * parse failure) falls back to the full supported list — no regression.
+ */
+resolver.define('getRecordTypes', async (req) => {
+  const userId = req?.context?.accountId;
+  try {
+    const result = await executeKeeperApiCommand(
+      'record-type-info -lr --effective --format=json',
+      { userId, forgeSafe: true },
+    );
+    const apiData = result?.data;
+
+    let parsed = [];
+    if (apiData?.data && Array.isArray(apiData.data)) {
+      parsed = apiData.data;
+    } else if (apiData?.message && typeof apiData.message === 'string') {
+      parsed = JSON.parse(apiData.message);
+    } else if (apiData?.data && typeof apiData.data === 'string') {
+      parsed = JSON.parse(apiData.data);
+    }
+
+    const types = intersectEffectiveRecordTypes(parsed);
+    return successResponse({ recordTypes: types });
+  } catch (err) {
+    logger.warn('getRecordTypes: rti --effective failed, falling back to full list', {
+      error: err.message,
+    });
+    return successResponse({ recordTypes: allSupportedRecordTypes() });
+  }
+});
+
+// Get records from Keeper API. NSF mode uses nsf-list; items are tagged with source.
 resolver.define('getKeeperRecords', async (req) => {
   const userId = req?.context?.accountId;
-  
+  const mode = resolveVaultMode(req?.payload);
+  const command = mode === 'nsf'
+    ? 'nsf-list --records --format=json'
+    : 'list --format=json';
+
   try {
-    const result = await executeKeeperApiCommand('list --format=json', { userId });
+    const result = await executeKeeperApiCommand(command, { userId, forgeSafe: true });
     const apiData = result.data;
 
     // Parse the JSON data from the response
@@ -1650,8 +1917,22 @@ resolver.define('getKeeperRecords', async (req) => {
       }
     }
 
-    return successResponse({ records: records || [] });
+    const parsedRecords = mode === 'nsf' ? parseNsfRecordsFromRaw(records) : (records || []);
+    const scoped = filterRecordsByVaultMode(parsedRecords, mode);
+    const tagged = scoped.map(record => ({
+      ...record,
+      source: mode
+    }));
+
+    return successResponse({ records: tagged, mode });
   } catch (err) {
+      // NSF unavailable: return structured error so the UI can revert the toggle.
+    if (mode === 'nsf' && isKeeperNsfUnavailableError(err)) {
+      logger.error('Nested Share Subfolders (NSF) not available on this vault for getKeeperRecords', {
+        message: err.message
+      });
+      return nsfNotAvailableError(err.message);
+    }
     // Check for rate limit error
     if (err.rateLimited) {
       return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
@@ -1660,27 +1941,66 @@ resolver.define('getKeeperRecords', async (req) => {
   }
 });
 
-/**
- * Get folders list from Keeper API (called from issue panel)
- */
+// Get folders from Keeper API. NSF mode uses nsf-list; folders are tagged with source and nested path.
 resolver.define('getKeeperFolders', async (req) => {
   const userId = req?.context?.accountId;
-  
+  const mode = resolveVaultMode(req?.payload);
+  const command = mode === 'nsf'
+    ? 'nsf-list --folders --format=json'
+    : 'ls -f -R --format=json';
+
   try {
-    const result = await executeKeeperApiCommand('ls -f --format=json', { userId });
+    // Best-effort sync-down so newly created folders are visible without
+    // requiring a Commander restart. Mirrors the pattern used by runEpmSyncDown.
+    // Failures are logged and ignored — never block the user-facing fetch.
+    try {
+      await executeKeeperApiCommand('sync-down', { userId, skipRateLimit: true });
+    } catch (syncErr) {
+      logger.warn('sync-down before folder fetch failed; continuing with cached data', {
+        error: syncErr.message
+      });
+    }
+
+    const result = await executeKeeperApiCommand(command, { userId, forgeSafe: true });
     const apiData = result.data;
 
     // Parse the JSON data from the response
-    let folders = [];
+    let rawFolders = [];
     if (apiData.data && Array.isArray(apiData.data)) {
+      rawFolders = apiData.data;
+    } else if (apiData.message && typeof apiData.message === 'string') {
       try {
-        // data.data is directly an array of folders for ls -f command
-        folders = apiData.data.map((folder, index) => {
-          // Clean ANSI color codes from folder name
+        rawFolders = JSON.parse(apiData.message);
+      } catch (parseError) {
+        return keeperError('Failed to parse folders data from Keeper API');
+      }
+    } else if (apiData.data && typeof apiData.data === 'string') {
+      try {
+        rawFolders = JSON.parse(apiData.data);
+      } catch (parseError) {
+        return keeperError('Failed to parse folders data from Keeper API');
+      }
+    }
+
+    let folders = [];
+    try {
+      if (mode === 'nsf') {
+        // Commander 18.x returns display keys: UID, Title, Parent/Folder.
+        folders = parseNsfFoldersFromRaw(rawFolders);
+      } else {
+        // Classic: exclude NSF rows (they're surfaced via nsf-list --folders).
+        // Rows without a source field are kept for backward compat.
+        const classicRawFolders = (rawFolders || []).filter((folder) => {
+          const rawSource = folder && folder.source != null ? String(folder.source).trim().toLowerCase() : '';
+          if (!rawSource) return true;
+          return rawSource === 'legacy';
+        });
+
+        // First pass: normalize each folder row.
+        const normalized = classicRawFolders.map((folder, index) => {
           let cleanName = folder.name || '';
-          cleanName = cleanName.replace(/\[?\d+m/g, ''); // Remove [31m, [39m etc.
-          
-          // Extract flags from details string (format: "Flags: S, Parent: /")
+          cleanName = cleanName.replace(/\[?\d+m/g, '');
+
           let flags = '';
           let parentUid = '';
           if (folder.details) {
@@ -1693,27 +2013,66 @@ resolver.define('getKeeperFolders', async (req) => {
               parentUid = parentMatch[1].trim();
             }
           }
-          
+          // "/" means root level — treat as no parent.
+          if (parentUid === '/') parentUid = '';
+
           return {
             number: index + 1,
             folder_uid: folder.uid,
             uid: folder.uid,
             name: cleanName,
             title: cleanName,
-            path: cleanName,
             flags: flags,
             parent_uid: parentUid,
-            shared: flags && flags.includes('S'),
+            shared: !!(flags && flags.includes('S')),
+            source: 'classic',
             raw_data: folder
           };
         });
-      } catch (parseError) {
-        return keeperError('Failed to parse folders data from Keeper API');
+
+        // Second pass: build nested paths from parent_uid chains (same algorithm as buildNsfFolderPaths).
+        const byUid = new Map();
+        for (const f of normalized) {
+          if (f && f.uid) byUid.set(f.uid, f);
+        }
+        const pathCache = new Map();
+        const resolvePath = (uid, visiting = new Set()) => {
+          if (!uid) return '';
+          if (pathCache.has(uid)) return pathCache.get(uid);
+          if (visiting.has(uid)) return byUid.get(uid)?.name || '';
+          const f = byUid.get(uid);
+          if (!f) return '';
+          visiting.add(uid);
+          const name = f.name || '';
+          const pUid = f.parent_uid || '';
+          let path = name;
+          if (pUid && byUid.has(pUid)) {
+            const parentPath = resolvePath(pUid, visiting);
+            path = parentPath ? `${parentPath} / ${name}` : name;
+          }
+          visiting.delete(uid);
+          pathCache.set(uid, path);
+          return path;
+        };
+
+        folders = normalized.map((f) => ({
+          ...f,
+          path: resolvePath(f.uid) || f.name || '',
+          folderPath: resolvePath(f.uid) || f.name || ''
+        }));
       }
+    } catch (parseError) {
+      return keeperError('Failed to parse folders data from Keeper API');
     }
 
-    return successResponse({ folders: folders || [] });
+    return successResponse({ folders: folders || [], mode });
   } catch (err) {
+    if (mode === 'nsf' && isKeeperNsfUnavailableError(err)) {
+      logger.error('Nested Share Subfolders (NSF) not available on this vault for getKeeperFolders', {
+        message: err.message
+      });
+      return nsfNotAvailableError(err.message);
+    }
     // Check for rate limit error
     if (err.rateLimited) {
       return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
@@ -1734,7 +2093,7 @@ resolver.define('getKeeperRecordDetails', async (req) => {
   }
 
   try {
-    const result = await executeKeeperApiCommand(`get "${recordUid}" --format=json`, { userId });
+    const result = await executeKeeperApiCommand(`get "${recordUid}" --format=json`, { userId, forgeSafe: true });
     const apiData = result.data;
 
     // Parse the JSON data from the response
@@ -1763,9 +2122,76 @@ resolver.define('getKeeperRecordDetails', async (req) => {
 });
 
 /**
+ * Core ROE eligibility check shared by the checkRotationEligibility resolver
+ * and the server-side guard inside executeKeeperAction.
+ *
+ * Returns { eligible: boolean, recordType?: string, roeResponse?: array }.
+ * Propagates rate-limit errors as-thrown so callers can handle them.
+ */
+async function checkRoeEligibility(userId, type, uid) {
+  if (type === 'record') {
+    const result = await executeKeeperApiCommand(
+      `get "${uid}" --format=json`,
+      { userId, skipRateLimit: true, forgeSafe: true }
+    );
+    let details = {};
+    if (result.data?.data) {
+      details = typeof result.data.data === 'string'
+        ? JSON.parse(result.data.data)
+        : result.data.data;
+    }
+    const recordType = details.record_type || details.type || '';
+    return { eligible: recordType.toLowerCase() === 'pamuser', recordType };
+  }
+
+  // Folder: list-sf <uid> --roe-eligible --format=json
+  const result = await executeKeeperApiCommand(
+    `list-sf "${uid}" --roe-eligible --format=json`,
+    { userId, skipRateLimit: true, forgeSafe: true }
+  );
+  let rows = result.data?.data ?? [];
+  if (typeof rows === 'string') rows = JSON.parse(rows);
+  if (!Array.isArray(rows)) rows = [];
+  return {
+    eligible: isFolderRoeEligibleFromListSfRows(rows, uid),
+    roeResponse: rows
+  };
+}
+
+// Check if a record is pamUser or a folder is rotation-on-expiration eligible.
+// Used by the issue panel to decide whether to show the "Rotate password upon
+// expiration" checkbox on share-record / share-folder.
+resolver.define('checkRotationEligibility', async (req) => {
+  const userId = req?.context?.accountId;
+  const { type, uid } = req?.payload || {};
+
+  if (!uid) return validationError('uid', 'UID is required');
+  if (type !== 'record' && type !== 'folder') {
+    return validationError('type', 'type must be "record" or "folder"');
+  }
+
+  try {
+    const eligibility = await checkRoeEligibility(userId, type, uid);
+    return successResponse(eligibility);
+  } catch (err) {
+    if (err.rateLimited) {
+      return rateLimitError(err.limitType || 'minute', err.retryAfter || 60);
+    }
+    logger.error('checkRotationEligibility failed', { type, uid, error: err.message });
+    return successResponse({ eligible: false, error: err.message });
+  }
+});
+
+/**
  * Execute a simple Keeper command (called from config page for EPM, etc.)
  */
 resolver.define('executeKeeperCommand', async (req) => {
+  // KJ-26-03: This resolver forwards a caller-supplied command verb to
+  // Keeper Commander. Even with the KJ-26-05 allowlist it must be admin-only;
+  // it is invoked exclusively from the global (admin) config page.
+  const adminErr = await requireGlobalAdmin();
+  if (adminErr) return adminErr;
+
   const userId = req?.context?.accountId;
   
   // Handle double nesting: req.payload.payload
@@ -1781,8 +2207,23 @@ resolver.define('executeKeeperCommand', async (req) => {
     return validationError('command', 'Command is required');
   }
 
+  const ALLOWED_COMMAND_PREFIXES = [
+    'list', 'list-sf', 'ls', 'get', 'search',
+    'record-type-info', 'rti',
+    'nsf-list', 'nsf-get',
+    'epm',
+    'service-status',
+    'enterprise-info',
+  ];
+  // Strip newlines and control characters that could forge log entries
+  const sanitizedCommand = command.replace(/[\r\n\t\x00-\x1f\x7f]/g, ' ').trim();
+  const commandVerb = sanitizedCommand.split(/\s+/)[0].toLowerCase();
+  if (!ALLOWED_COMMAND_PREFIXES.some(p => commandVerb === p.toLowerCase())) {
+    return validationError('command', `Unknown command "${commandVerb}". Only approved commands are permitted.`);
+  }
+
   try {
-    const result = await executeKeeperApiCommand(command, { userId });
+    const result = await executeKeeperApiCommand(sanitizedCommand, { userId, forgeSafe: true });
     return result;
   } catch (err) {
     // Check for rate limit error
@@ -1793,12 +2234,210 @@ resolver.define('executeKeeperCommand', async (req) => {
   }
 });
 
+// ============================================================================
+// "Already processed outside Jira" — shared helpers (EPM + Device Approval)
+// ============================================================================
+
+// Label added to a Jira ticket when we detect that the underlying Keeper
+// request (EPM approval OR device-approval) was already actioned outside
+// Jira (e.g. directly in the Keeper Admin Console / vault). Used to
+// short-circuit future panel loads so admins don't see stale buttons.
+const PROCESSED_OUTSIDE_JIRA_LABEL = 'request-already-processed-outside-jira';
+
+/**
+ * Detect whether a Keeper Commander error message indicates that an EPM
+ * approval request no longer exists (i.e. it was approved or denied outside
+ * of Jira since the ticket was created). Keeper's CLI returns:
+ *   "Failed to approved \"<uid>\": Approval request does not exist or cannot be modified"
+ * which `parseKeeperErrorMessage()` typically trims to:
+ *   "Approval request does not exist or cannot be modified"
+ * We match defensively against both the trimmed and the original forms.
+ */
+function isEpmRequestNotFoundError(errorMessage) {
+  if (!errorMessage || typeof errorMessage !== 'string') return false;
+  const lower = errorMessage.toLowerCase();
+  return (
+    lower.includes('approval request does not exist') ||
+    lower.includes('cannot be modified')
+  );
+}
+
+/**
+ * Best-effort `epm sync-down` to refresh Commander's local view of pending
+ * EPM approvals before we attempt approve/deny. Without this, an approval
+ * that was actioned in another session can still appear locally and produce
+ * a confusing "request does not exist" error on the next call. We never
+ * fail the user-facing action on a sync-down failure — just log and proceed.
+ */
+async function runEpmSyncDown(userId) {
+  try {
+    await executeKeeperApiCommand('epm sync-down', { userId, skipRateLimit: true });
+  } catch (syncErr) {
+    logger.warn('epm sync-down failed; continuing with approve/deny anyway', {
+      error: syncErr.message
+    });
+  }
+}
+
+/**
+ * Fetch Keeper's current list of pending device approvals via
+ * `device-approve --reload --format=json`. Returns an array of
+ * `{ device_id, email, ... }` objects (possibly empty).
+ *
+ * `skipRateLimit: true` is intentional — this is an internal pre-check that
+ * runs on every Approve/Deny click and shouldn't count against the user's
+ * Commander rate limit.
+ */
+async function fetchPendingDeviceApprovals(userId) {
+  const result = await executeKeeperApiCommand(
+    'device-approve --reload --format=json',
+    { userId, skipRateLimit: true }
+  );
+  const raw = result?.data;
+  if (!raw) return [];
+  if (Array.isArray(raw.data)) return raw.data;
+  if (Array.isArray(raw)) return raw;
+  return [];
+}
+
+/**
+ * Decide whether `target` (an email or device ID, exactly what we'd pass to
+ * `device-approve <X> --approve|--deny`) is still in the pending list.
+ *
+ *   - emails are matched case-insensitively
+ *   - device IDs match exactly OR by partial prefix (Keeper's CLI itself
+ *     supports partial-prefix device ID matching)
+ */
+function isTargetPending(pendingList, target) {
+  if (!Array.isArray(pendingList) || pendingList.length === 0 || !target) {
+    return false;
+  }
+  // Reject very short non-email targets to prevent a malformed payload like
+  // target = "a" from sweeping up multiple unrelated devices.
+  const targetStr = String(target);
+  if (targetStr.length < 6 && !targetStr.includes('@')) {
+    return false;
+  }
+  const lowered = targetStr.toLowerCase();
+  const looksLikeEmail = lowered.includes('@');
+  return pendingList.some((entry) => {
+    if (!entry) return false;
+    if (looksLikeEmail) {
+      return String(entry.email || '').toLowerCase() === lowered;
+    }
+    // Only allow the user-supplied target as a prefix of the canonical device
+    // ID (CLI convention: user can type a shortened ID that expands to the
+    // full one). The reverse direction (short pending ID matches a longer
+    // target) is intentionally excluded to prevent false positives.
+    const id = String(entry.device_id || '');
+    return id === target || id.startsWith(target);
+  });
+}
+
+/**
+ * Mark the Jira ticket as resolved-outside-Jira: add the shared label so
+ * future panel loads skip the buttons, and post an audit comment so the
+ * activity history reflects what happened.
+ *
+ * @param {string} issueKey
+ * @param {string} identifier   Human-friendly identifier of the request:
+ *                              user email or device ID for device approvals,
+ *                              EPM approval/request UID for EPM.
+ * @param {string|null} formattedTimestamp
+ * @param {'epm'|'device'} kind  Drives the wording of the audit comment.
+ */
+async function markAlreadyProcessedOutsideJira(
+  issueKey,
+  identifier,
+  formattedTimestamp,
+  kind = 'device'
+) {
+  // Atomically add the label via Jira's `update` payload — no GET required,
+  // no race with concurrent label writes, and idempotent (Jira ignores
+  // duplicate adds).
+  try {
+    await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          update: { labels: [{ add: PROCESSED_OUTSIDE_JIRA_LABEL }] }
+        })
+      },
+      'Add processed-outside-jira label'
+    );
+  } catch (labelErr) {
+    logger.warn('Failed to add processed-outside-jira label', {
+      issueKey,
+      error: labelErr.message
+    });
+  }
+
+  // Post an audit comment summarising what happened.
+  try {
+    const ts = formattedTimestamp || new Date().toISOString();
+    const isEpm = kind === 'epm';
+    const title = isEpm
+      ? 'EPM Approval — Already Processed Outside Jira'
+      : 'Device Admin Approval — Already Processed Outside Jira';
+    const bodyText = isEpm
+      ? `Approval request "${identifier}" is no longer pending in Keeper as of ${ts}. ` +
+        'It appears to have already been approved or denied outside Jira ' +
+        '(e.g. via the Keeper Admin Console / vault). No action was taken from this ticket.'
+      : `Target "${identifier}" is no longer in Keeper's pending device-approval list ` +
+        `as of ${ts}. The request appears to have already been approved or denied ` +
+        'outside Jira (e.g. via the Keeper Admin Console). No action was taken from this ticket.';
+
+    const commentBody = {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'panel',
+          attrs: { panelType: 'warning' },
+          content: [
+            {
+              type: 'paragraph',
+              content: [
+                { type: 'text', text: title, marks: [{ type: 'strong' }] }
+              ]
+            },
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: bodyText }]
+            }
+          ]
+        }
+      ]
+    };
+    await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}/comment`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: commentBody })
+      },
+      'Add processed-outside-jira comment'
+    );
+  } catch (commentErr) {
+    logger.warn('Failed to add processed-outside-jira comment', {
+      issueKey,
+      error: commentErr.message
+    });
+  }
+}
+
 /**
  * Manual Keeper action trigger (called from issue panel)
  */
 resolver.define('executeKeeperAction', async (req) => {
   const userId = req?.context?.accountId;
   const { issueKey, command, commandDescription, parameters, formattedTimestamp } = req.payload;
+  // `mode` toggles command-builder routing between Classic and Nested Share Subfolders (NSF).
+  // Affects: record-add, record-update, share-folder, share-record, record-permission.
+  // Defaults to 'classic' so callers that don't pass it keep their pre-toggle behavior.
+  const mode = resolveVaultMode(req?.payload);
   
   logger.info('executeKeeperAction: Executing Keeper action', { 
     issueKey, 
@@ -1813,9 +2452,84 @@ resolver.define('executeKeeperAction', async (req) => {
   if (!command) {
     return validationError('command', 'Command is required');
   }
+
+  // KJ-26-03: Enforce server-side admin gate for privileged actions.
+  // The frontend hides admin controls for non-admins, but those restrictions
+  // are bypassable via direct invoke calls. `requireProjectAdmin` centralises
+  // the (group-membership OR ADMINISTER_PROJECTS) check and fails closed.
+  const ADMIN_GATED_COMMANDS = new Set(['record-add', 'record-update', 'share-record', 'share-folder', 'record-permission']);
+  const isAdminGated =
+    ADMIN_GATED_COMMANDS.has(command) ||
+    command.startsWith('device-approve') ||
+    command.startsWith('epm approval action');
+
+  if (isAdminGated) {
+    const adminErr = await requireProjectAdmin(issueKey);
+    if (adminErr) return adminErr;
+  }
+
+  // KJ-26-02: Validate that the submitted recordType is both supported by
+  // the app AND permitted by the user's enterprise role policy.  The first
+  // check (SUPPORTED_RECORD_TYPES) is synchronous and always enforced.  The
+  // second check (rti --effective) is best-effort: on failure, we allow the
+  // request through so older Commander installs don't break.
+  if (command === 'record-add' && parameters?.recordType) {
+    if (!SUPPORTED_RECORD_TYPES.has(parameters.recordType)) {
+      return validationError(
+        'recordType',
+        `Record type "${parameters.recordType}" is not supported by this application.`,
+      );
+    }
+    try {
+      const rtiResult = await executeKeeperApiCommand(
+        'record-type-info -lr --effective --format=json',
+        { userId, skipRateLimit: true, forgeSafe: true },
+      );
+      const rtiData = rtiResult?.data;
+      let rtiParsed = [];
+      if (rtiData?.data && Array.isArray(rtiData.data)) {
+        rtiParsed = rtiData.data;
+      } else if (rtiData?.message && typeof rtiData.message === 'string') {
+        rtiParsed = JSON.parse(rtiData.message);
+      } else if (rtiData?.data && typeof rtiData.data === 'string') {
+        rtiParsed = JSON.parse(rtiData.data);
+      }
+      if (Array.isArray(rtiParsed) && rtiParsed.length > 0) {
+        const effectiveIds = new Set(rtiParsed.map(r => r?.content).filter(Boolean));
+        if (!effectiveIds.has(parameters.recordType)) {
+          return errorResponse(
+            ERROR_CODES.VALIDATION_ERROR,
+            `Your enterprise role policy does not permit creating "${parameters.recordType}" records.`,
+            { recordType: parameters.recordType },
+          );
+        }
+      }
+    } catch (rtiErr) {
+      logger.warn('executeKeeperAction: rti --effective check failed, allowing request', {
+        error: rtiErr.message,
+      });
+    }
+  }
   
-  // Check if this is an EPM command and if the request is already expired or action was already taken
+
+  // KJ-26-03: Derive the approval context ONCE and reuse it across the
+  // pre-checks, audit comments, panel rendering, and label updates below.
+  // `command` is the descriptive string sent by the panel; decision/target/uid
+  // come from the structured params with a fallback to parsing `command`.
   const isEpmCommand = command.startsWith('epm approval action');
+  const isDeviceCommand = command.startsWith('device-approve');
+  const approvalDecision = normalizeApprovalDecision(
+    parameters?.epmDecision || parameters?.deviceDecision,
+    command
+  );
+  const isApprove = approvalDecision === 'approve';
+  const isDeny = approvalDecision === 'deny';
+  const epmApprovalUid =
+    parameters?.approvalUid || (isEpmCommand ? command.split(/\s+/).pop() : '') || '';
+  const deviceTarget =
+    parameters?.deviceTarget || extractDeviceTarget(command) || '';
+
+  // Check if this is an EPM command and if the request is already expired or action was already taken
   if (isEpmCommand) {
     // Check if any action label already exists (with rate limit retry)
     try {
@@ -1841,6 +2555,9 @@ resolver.define('executeKeeperAction', async (req) => {
         if (labels.includes('epm-expired')) {
           return epmError('expired');
         }
+        if (labels.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
+          return epmError('processed_outside');
+        }
       }
     } catch (error) {
       // If it's a structured error response, return it
@@ -1849,14 +2566,98 @@ resolver.define('executeKeeperAction', async (req) => {
       }
       // Otherwise, continue
     }
+
+    // Refresh Commander's local view of pending EPM approvals before we
+    // attempt approve/deny. This ensures requests that were actioned in
+    // another session are removed from the local cache, so we either succeed
+    // cleanly or fail with the canonical "Approval request does not exist"
+    // error (which the catch-block handler below converts into a structured
+    // "already processed outside Jira" response + label).
+    if (parameters?.epmDecision === 'approve' || parameters?.epmDecision === 'deny') {
+      await runEpmSyncDown(userId);
+    }
+  }
+
+  // Device admin approval requests (label: ITSM_device_admin_approval_requested)
+  // are actioned via Keeper Commander's `device-approve <user_email_or_device_id>
+  // --approve|--deny` command (see
+  // https://docs.keeper.io/en/keeperpam/commander-cli/command-reference/enterprise-management-commands#device-approve-command).
+  // Block re-execution once one of those commands has already succeeded.
+  if (isDeviceCommand) {
+    try {
+      const issueResponse = await requestJiraAsAppWithRetry(
+        route`/rest/api/3/issue/${issueKey}?fields=labels`,
+        {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        },
+        'Check device action labels'
+      );
+
+      if (issueResponse.ok) {
+        const issueData = await issueResponse.json();
+        const labels = issueData.fields?.labels || [];
+
+        if (labels.includes('device-approved')) {
+          return deviceError('approved');
+        }
+        if (labels.includes('device-denied')) {
+          return deviceError('denied');
+        }
+        if (labels.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
+          return deviceError('processed_outside');
+        }
+      }
+    } catch (error) {
+      if (error.success === false) {
+        return error;
+      }
+    }
+
+    // Pre-execution guard: confirm the target is still in Keeper's pending
+    // device-approval list. If it was approved/denied outside Jira between the
+    // ticket being created and now, mark the ticket and refuse the action so
+    // we never call approve/deny on a stale request.
+    const isApproveOrDeny =
+      parameters?.action === 'approve' || parameters?.action === 'deny';
+    if (isApproveOrDeny) {
+      const target = parameters?.email || parameters?.deviceTarget || extractDeviceTarget(command);
+      if (target) {
+        try {
+          const pending = await fetchPendingDeviceApprovals(userId);
+          if (!isTargetPending(pending, target)) {
+            await markAlreadyProcessedOutsideJira(
+              issueKey,
+              target,
+              formattedTimestamp,
+              'device'
+            );
+            return deviceError(
+              'processed_outside',
+              `${target} is not in Keeper's pending device-approval list anymore. ` +
+                'It looks like the request was already approved or denied outside Jira.'
+            );
+          }
+        } catch (precheckErr) {
+          // Treat the pre-check as best-effort: if Keeper is unreachable here
+          // we don't want to permanently block legitimate approvals. Log and
+          // let the actual approve/deny call surface the real error.
+          logger.warn(
+            'Device approval pre-check failed; proceeding to attempt action',
+            { issueKey, target, error: precheckErr.message }
+          );
+        }
+      }
+    }
   }
   
-  // Validate share-record: prevent sharing with record owner
-  // Sharing with owner causes issues: revokes owner from record (moves to deleted items) and then share fails
-  if (command === 'share-record' && parameters.record && parameters.user && parameters.action !== 'cancel') {
+  // Validate share-record: prevent sharing with record owner (Classic only).
+  // In NSF mode Commander already rejects share-to-owner, and the extra
+  // `get` round-trip would push us past Forge's 25s resolver timeout.
+  if (command === 'share-record' && mode !== 'nsf' && parameters.record && parameters.user && parameters.action !== 'cancel') {
     try {
       // Fetch record details to get owner email (skip rate limit for internal validation)
-      const recordResult = await executeKeeperApiCommand(`get "${parameters.record}" --format=json`, { userId, skipRateLimit: true });
+      const recordResult = await executeKeeperApiCommand(`get "${parameters.record}" --format=json`, { userId, skipRateLimit: true, forgeSafe: true });
       const recordApiData = recordResult.data;
       
       let recordOwnerEmail = null;
@@ -1901,13 +2702,54 @@ resolver.define('executeKeeperAction', async (req) => {
     }
   }
 
+  // Re-check rotation eligibility server-side before building the command.
+  // Any invoke() caller can pass rotate_on_expiration; we verify it here
+  // using the same checkRoeEligibility helper as the UI-facing resolver.
+  if (parameters?.rotate_on_expiration === true &&
+      (command === 'share-record' || command === 'share-folder')) {
+    const roeType = (command === 'share-record' && parameters.record) ? 'record' : 'folder';
+    const roeUid = roeType === 'record'
+      ? parameters.record
+      : (parameters.folder || parameters.sharedFolder);
+
+    if (!roeUid) {
+      return errorResponse(
+        ERROR_CODES.VALIDATION_REQUIRED_FIELD,
+        'rotate-on-expiration requires a record or folder UID'
+      );
+    }
+
+    try {
+      const { eligible } = await checkRoeEligibility(userId, roeType, roeUid);
+      if (!eligible) {
+        return errorResponse(
+          ERROR_CODES.VALIDATION_INVALID_FORMAT,
+          'rotate-on-expiration is not supported for this record or folder',
+          { uid: roeUid, type: roeType, reason: 'not_roe_eligible' }
+        );
+      }
+    } catch (roeCheckErr) {
+      if (roeCheckErr.rateLimited) {
+        return rateLimitError(roeCheckErr.limitType || 'minute', roeCheckErr.retryAfter || 60);
+      }
+      logger.warn('executeKeeperAction: ROE eligibility re-check failed, rejecting to be safe', {
+        roeType, roeUid, error: roeCheckErr.message
+      });
+      return errorResponse(
+        ERROR_CODES.VALIDATION_INVALID_FORMAT,
+        'Could not verify rotation eligibility. Please try again.',
+        { uid: roeUid, type: roeType, reason: 'eligibility_check_failed' }
+      );
+    }
+  }
+
   try {
     // Build dynamic command based on action and parameters
     // This is inside try block so validation errors are properly caught
-    const dynamicCommand = buildKeeperCommand(command, parameters || {}, issueKey);
+    const dynamicCommand = buildKeeperCommand(command, parameters || {}, issueKey, { mode });
 
     // Call Keeper API using v2 async queue (with rate limiting)
-    const result = await executeKeeperApiCommand(dynamicCommand, { userId });
+    const result = await executeKeeperApiCommand(dynamicCommand, { userId, forgeSafe: true });
     const data = result.data;
 
     // Extract record_uid if this is a record-add command
@@ -1933,13 +2775,25 @@ resolver.define('executeKeeperAction', async (req) => {
 
     // Check if this is an EPM command
     const isEpmCommand = command.startsWith('epm approval action');
-    
+    // Detect device admin approval commands; these always add an audit comment
+    // and a `device-approved` / `device-denied` label, just like EPM does.
+    // Both approve and deny use the same `device-approve` command differentiated
+    // by the `--approve` / `--deny` flag.
+    const isDeviceCommand = command.startsWith('device-approve');
+
+    // After the structured-params refactoring `command` is just the action
+    // name (e.g. 'device-approve'), not the full CLI string. Derive the
+    // approve/deny decision from the structured parameters so every
+    // downstream label, comment, and pre-check works correctly.
+    const epmDecision = isEpmCommand ? parameters?.epmDecision : null;
+    const deviceDecision = isDeviceCommand ? parameters?.action : null;
+
     // Only add comment for main record creation, not for records created as references
     // Check if this is a main record creation (not just a reference record)
     // Records created as references will have skipComment: true parameter
     const isMainRecordCreation = !parameters.skipComment;
-    
-    if (isMainRecordCreation || isEpmCommand) {
+
+    if (isMainRecordCreation || isEpmCommand || isDeviceCommand) {
       // Get current user info for the comment
       const currentUser = await getCurrentUser();
       
@@ -1962,12 +2816,21 @@ resolver.define('executeKeeperAction', async (req) => {
       // Set command-specific messages
       // Handle EPM commands first
       if (isEpmCommand) {
-        if (command.includes('--approve')) {
+        if (epmDecision === 'approve') {
           actionMessage = `Endpoint privilege approval request has been approved`;
-          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
-        } else if (command.includes('--deny')) {
+          actionDescription = `Endpoint Privilege Approval: Approved request ${parameters?.approvalUid || ''}`;
+        } else if (epmDecision === 'deny') {
           actionMessage = `Endpoint privilege approval request has been denied`;
-          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters.cliCommand ? parameters.cliCommand.split(' ').pop() : ''}`;
+          actionDescription = `Endpoint Privilege Approval: Denied request ${parameters?.approvalUid || ''}`;
+        }
+      } else if (isDeviceCommand) {
+        const target = parameters?.email || parameters?.deviceTarget || '';
+        if (deviceDecision === 'approve') {
+          actionMessage = 'Device admin approval request has been approved';
+          actionDescription = `Device Admin Approval: Approved ${target}`;
+        } else if (deviceDecision === 'deny') {
+          actionMessage = 'Device admin approval request has been denied';
+          actionDescription = `Device Admin Approval: Denied ${deviceTarget}`;
         }
       } else {
         switch (command) {
@@ -2016,11 +2879,13 @@ resolver.define('executeKeeperAction', async (req) => {
               actionMessage += ` - Permissions: ${recordPerms.join(', ')}`;
             }
             
-            // Add expiration info
             if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
               actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
             } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
               actionMessage += ` - Expires in: ${parameters.expire_in}`;
+            }
+            if (parameters.rotate_on_expiration) {
+              actionMessage += ' | Password will auto-rotate upon expiration';
             }
           }
           break;
@@ -2062,11 +2927,13 @@ resolver.define('executeKeeperAction', async (req) => {
               actionMessage += ` - Permissions: ${folderPerms.join(', ')}`;
             }
             
-            // Add expiration info
             if (parameters.expiration_type === 'expire-at' && parameters.expire_at) {
               actionMessage += ` - Expires at: ${parameters.expire_at.replace('T', ' ')}`;
             } else if (parameters.expiration_type === 'expire-in' && parameters.expire_in) {
               actionMessage += ` - Expires in: ${parameters.expire_in}`;
+            }
+            if (parameters.rotate_on_expiration) {
+              actionMessage += ' | Password will auto-rotate upon expiration';
             }
           }
           break;
@@ -2079,10 +2946,16 @@ resolver.define('executeKeeperAction', async (req) => {
       // Build ADF content with panel (matching save/reject request format)
       let panelTitle = 'Keeper Request Approved and Executed';
       if (isEpmCommand) {
-        if (command.includes('--approve')) {
+        if (epmDecision === 'approve') {
           panelTitle = 'Endpoint Privilege Approval Request - Approved';
-        } else if (command.includes('--deny')) {
+        } else if (epmDecision === 'deny') {
           panelTitle = 'Endpoint Privilege Approval Request - Denied';
+        }
+      } else if (isDeviceCommand) {
+        if (deviceDecision === 'approve') {
+          panelTitle = 'Device Admin Approval Request - Approved';
+        } else if (deviceDecision === 'deny') {
+          panelTitle = 'Device Admin Approval Request - Denied';
         }
       } else if (isShareInvitationPending) {
         panelTitle = 'Keeper Request - Share Invitation Sent';
@@ -2132,7 +3005,9 @@ resolver.define('executeKeeperAction', async (req) => {
       
       // Use different panel types for different scenarios
       let panelType = 'success';
-      if (isEpmCommand && command.includes('--deny')) {
+      if (isEpmCommand && epmDecision === 'deny') {
+        panelType = 'warning';
+      } else if (isDeviceCommand && deviceDecision === 'deny') {
         panelType = 'warning';
       } else if (isShareInvitationPending) {
         panelType = 'info';
@@ -2157,15 +3032,60 @@ resolver.define('executeKeeperAction', async (req) => {
         ]
       };
 
-      // For EPM commands, add appropriate label to ALL tickets with same request_uid
+      // For EPM commands, add appropriate label to the current ticket (always),
+      // and to any sibling tickets that share a `request-<uid>` label (legacy
+      // fan-out for environments that tagged tickets with the Keeper request UID).
       if (isEpmCommand) {
         try {
-          const newLabel = command.includes('--approve') ? 'epm-approved' : command.includes('--deny') ? 'epm-denied' : '';
+          const newLabel = epmDecision === 'approve'
+            ? 'epm-approved'
+            : epmDecision === 'deny'
+              ? 'epm-denied'
+              : '';
           if (newLabel) {
-            const requestUid = command.split(/\s+/).pop();
-            const sanitizedUid = (requestUid || '').replace(/[^a-zA-Z0-9_-]/g, '-');
-            const uidLabel = `request-${sanitizedUid}`;
-            if (sanitizedUid) {
+            const requestUid = parameters?.approvalUid || '';
+            const sanitizedUid = (requestUid).replace(/[^a-zA-Z0-9_-]/g, '-');
+            const uidLabel = sanitizedUid ? `request-${sanitizedUid}` : '';
+
+            const updatedKeys = new Set();
+
+            // 1. Always update the current ticket (covers ITSM-created tickets
+            //    that only carry `ITSM_approval-request-created` and do not
+            //    include `request-<uid>`).
+            try {
+              const currentLabelsResponse = await requestJiraAsAppWithRetry(
+                route`/rest/api/3/issue/${issueKey}?fields=labels`,
+                { method: 'GET', headers: { 'Accept': 'application/json' } },
+                'Fetch labels before EPM label update'
+              );
+              if (currentLabelsResponse.ok) {
+                const currentLabelsData = await currentLabelsResponse.json();
+                const currentLabels = currentLabelsData.fields?.labels || [];
+                const alreadyActioned =
+                  currentLabels.includes('epm-approved') ||
+                  currentLabels.includes('epm-denied') ||
+                  currentLabels.includes('epm-expired');
+                if (!alreadyActioned && !currentLabels.includes(newLabel)) {
+                  await requestJiraAsAppWithRetry(
+                    route`/rest/api/3/issue/${issueKey}`,
+                    {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        update: { labels: [{ add: newLabel }] }
+                      })
+                    },
+                    'Update EPM label on current ticket'
+                  );
+                }
+                updatedKeys.add(issueKey);
+              }
+            } catch (currentLabelErr) {
+              logger.error('Failed to add EPM label on current ticket', currentLabelErr);
+            }
+
+            // 2. Fan out to any other tickets that share `request-<uid>`.
+            if (uidLabel) {
               const searchResponse = await requestJiraAsAppWithRetry(
                 route`/rest/api/3/search/jql`,
                 {
@@ -2181,21 +3101,27 @@ resolver.define('executeKeeperAction', async (req) => {
               if (searchResponse.ok) {
                 const searchResults = await searchResponse.json();
                 const issuesToUpdate = (searchResults.issues || []).filter((issue) => {
+                  if (updatedKeys.has(issue.key)) return false;
                   const labels = issue.fields?.labels || [];
-                  return !labels.includes('epm-approved') && !labels.includes('epm-denied') && !labels.includes('epm-expired');
+                  return (
+                    !labels.includes('epm-approved') &&
+                    !labels.includes('epm-denied') &&
+                    !labels.includes('epm-expired')
+                  );
                 });
                 for (const issue of issuesToUpdate) {
-                  const currentLabels = issue.fields?.labels || [];
-                  const updatedLabels = [...currentLabels, newLabel];
                   await requestJiraAsAppWithRetry(
                     route`/rest/api/3/issue/${issue.key}`,
                     {
                       method: 'PUT',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ fields: { labels: updatedLabels } })
+                      body: JSON.stringify({
+                        update: { labels: [{ add: newLabel }] }
+                      })
                     },
-                    'Update EPM label'
+                    'Update EPM label on sibling ticket'
                   );
+                  updatedKeys.add(issue.key);
                 }
               }
             }
@@ -2204,7 +3130,35 @@ resolver.define('executeKeeperAction', async (req) => {
           logger.error('Failed to add EPM label', labelErr);
         }
       }
-      
+
+      // For device admin approval commands, add `device-approved` / `device-denied`
+      // to the current ticket so future invocations are blocked and the panel
+      // can show the correct state on reload.
+      if (isDeviceCommand) {
+        try {
+          const newLabel = deviceDecision === 'approve'
+            ? 'device-approved'
+            : deviceDecision === 'deny'
+              ? 'device-denied'
+              : '';
+          if (newLabel) {
+            await requestJiraAsAppWithRetry(
+              route`/rest/api/3/issue/${issueKey}`,
+              {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  update: { labels: [{ add: newLabel }] }
+                })
+              },
+              'Update device approval label'
+            );
+          }
+        } catch (labelErr) {
+          logger.error('Failed to add device approval label', labelErr);
+        }
+      }
+
       // Add comment back to Jira using ADF format (after label is set, with rate limit retry)
       await requestJiraAsAppWithRetry(
         route`/rest/api/3/issue/${issueKey}/comment`,
@@ -2234,13 +3188,22 @@ resolver.define('executeKeeperAction', async (req) => {
   } catch (err) {
     // Check for specific error types and provide user-friendly messages
     const errorMessage = err.message || String(err);
-    
+
     // Check if this is an input validation error
     if (errorMessage.startsWith('Input validation failed:')) {
       const validationDetails = errorMessage.replace('Input validation failed: ', '');
       return validationError('parameters', validationDetails);
     }
-    
+
+    // NSF unavailable: surface structured error so the UI reverts the toggle.
+    if (mode === 'nsf' && isKeeperNsfUnavailableError(err)) {
+      logger.error('Nested Shared Folder mode not available on this vault for executeKeeperAction', {
+        message: err.message,
+        command
+      });
+      return nsfNotAvailableError(err.message);
+    }
+
     // Check if this is a rate limit error
     if (err.rateLimited) {
       return rateLimitError(
@@ -2267,7 +3230,69 @@ resolver.define('executeKeeperAction', async (req) => {
         { troubleshooting: ['Revoke existing access for this user first', 'Then grant the new access level'] }
       );
     }
-    
+
+    // Rotation-on-expiration: Commander rejects the flag when the target record
+    // is not a pamUser with rotation fully configured. The CLI shows
+    // "rotate-on-expiration requires a pamUser record..." but the HTTP API
+    // returns a generic 500 with just the record UID. Catch both cases.
+    if (errorMessage && (
+      errorMessage.includes('rotate-on-expiration requires a pamUser record with rotation configured') ||
+      (command && command.includes('--rotate-on-expiration') && errorMessage.includes('500'))
+    )) {
+      return errorResponse(
+        ERROR_CODES.KEEPER_PERMISSION_DENIED,
+        'Rotate-on-expiration failed — the target record requires a fully configured PAM User with rotation enabled (linked PAM config/resource, enabled state, and an active Gateway).',
+        { troubleshooting: [
+          'Verify the record is of type pamUser',
+          'Ensure rotation is enabled for that record (pam rotation edit)',
+          'Check that a Keeper Gateway is active and connected'
+        ] }
+      );
+    }
+
+    // EPM-specific: Keeper returns "Approval request does not exist or cannot
+    // be modified" when the underlying request was already actioned (in
+    // another session, the Admin Console, or via another integration). Treat
+    // this as "already processed outside Jira" — tag the ticket with the
+    // shared label, post an audit comment, and return a structured error so
+    // the panel can render a friendly resolved-state message instead of the
+    // raw Keeper error.
+    if (isEpmCommand && isEpmRequestNotFoundError(errorMessage)) {
+      const requestUid =
+        parameters?.approvalUid ||
+        parameters?.request_uid ||
+        parameters?.approval_uid ||
+        command.split(/\s+/).pop();
+      try {
+        await markAlreadyProcessedOutsideJira(
+          issueKey,
+          requestUid,
+          formattedTimestamp,
+          'epm'
+        );
+      } catch (markErr) {
+        logger.warn('Failed to mark EPM ticket as processed-outside-jira', {
+          issueKey,
+          error: markErr.message
+        });
+      }
+      return epmError(
+        'processed_outside',
+        `EPM approval request "${requestUid}" is no longer pending in Keeper. ` +
+          'It looks like the request was already approved or denied outside Jira.'
+      );
+    }
+
+    // Strip CLI-internal hint that is meaningless to Jira users.
+    if (errorMessage && errorMessage.includes('Use --force to bypass password policy warnings')) {
+      const cleaned = errorMessage
+        .split('\n')
+        .filter(line => !line.includes('Use --force to bypass password policy warnings'))
+        .join('\n')
+        .trim();
+      return keeperError(cleaned || errorMessage, err);
+    }
+
     // Return Keeper error with automatic error type detection
     return keeperError(errorMessage, err);
   }
@@ -2324,6 +3349,11 @@ resolver.define('rejectKeeperRequest', async (req) => {
   if (!issueKey) {
     return validationError('issueKey', 'Issue key is required');
   }
+
+  // KJ-26-03: Rejecting a request is a state-changing approver action; gate it
+  // server-side like executeKeeperAction.
+  const adminErr = await requireProjectAdmin(issueKey);
+  if (adminErr) return adminErr;
   
   if (!rejectionReason || !rejectionReason.trim()) {
     return validationError('rejectionReason', 'Rejection reason is required');
@@ -2454,272 +3484,46 @@ resolver.define('activateKeeperPanel', async (req) => {
 });
 
 /**
- * Get user role - check if current user is admin using Jira permissions API
+ * Get user role - check if current user is a Jira admin for the project.
+ *
+ * KJ-26-03: Delegates to `verifyProjectAdmin`, which prefers Jira group
+ * membership (reliable across all plan tiers) and falls back to
+ * `ADMINISTER_PROJECTS` when the user isn't in an admin group. Returns the
+ * same response shape callers already consume so the issue panel is
+ * unchanged.
  */
 resolver.define('getUserRole', async (req) => {
   const { issueKey } = req.payload;
-  
   if (!issueKey) {
     throw new Error('Issue key is required');
   }
-  
+
   try {
-    // Extract project key from issue key (e.g., "DM-5" -> "DM")
-    const projectKey = issueKey.split('-')[0];
-    
-    if (!projectKey) {
-      throw new Error('Unable to extract project key from issue key');
-    }
-    
-    let userApiResponse = null;
-    let permissionsApiResponse = null;
-    
-    // Get current user info
-    try {
-      const userData = await getCurrentUser();
-        
-      if (userData && Object.keys(userData).length > 0) {
-        userApiResponse = userData;
-      }
-    } catch (userErr) {
-    }
-    
-    // Get permissions data (with rate limit retry)
-    try {
-      const permResponse = await requestJiraAsUserWithRetry(
-        route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=ADMINISTER_PROJECTS`,
-        {},
-        'Check admin permissions'
-      );
-      
-      if (permResponse && permResponse.ok) {
-        const permissionsData = await permResponse.json();
-        
-        if (permissionsData && Object.keys(permissionsData).length > 0) {
-          permissionsApiResponse = permissionsData;
-        }
-      }
-    } catch (permErr) {
-    }
-    
-    // Process results if we have data
-    if ((userApiResponse && Object.keys(userApiResponse).length > 0) || 
-        (permissionsApiResponse && Object.keys(permissionsApiResponse).length > 0)) {
-      
-      const hasAdminPermission = permissionsApiResponse?.permissions?.ADMINISTER_PROJECTS?.havePermission === true;
-      
-      return {
-        success: true,
-        isAdmin: hasAdminPermission,
-        adminCheckMethod: 'project_permissions',
-        userKey: userApiResponse?.accountId || userApiResponse?.key || 'unknown',
-        displayName: userApiResponse?.displayName || userApiResponse?.name || userApiResponse?.emailAddress || 'User',
-        projectKey: projectKey
-      };
-    }
-    
-    // Fallback if no data available
-    throw new Error('Unable to retrieve user or permissions data');
-    
+    const verdict = await verifyProjectAdmin(issueKey);
+    return {
+      success: !verdict.error,
+      isAdmin: verdict.isAdmin,
+      adminCheckMethod: verdict.adminCheckMethod,
+      userKey: verdict.userKey || 'unknown',
+      displayName: verdict.displayName,
+      projectKey: verdict.projectKey,
+      ...(verdict.error ? { error: verdict.error } : {}),
+    };
   } catch (err) {
-    
-    // Try to get project key even on error
-    let projectKey = null;
-    try {
-      projectKey = issueKey.split('-')[0];
-    } catch (projectKeyError) {
-      // Ignore extraction error
-    }
-    
-    // Default to non-admin on error
+    logger.error('getUserRole: unexpected failure', { error: err.message, issueKey });
     return {
       success: false,
       isAdmin: false,
       adminCheckMethod: 'error_fallback',
       userKey: null,
       displayName: 'User',
-      projectKey: projectKey,
-      error: err.message
+      projectKey: issueKey ? issueKey.split('-')[0] : null,
+      error: err.message,
     };
   }
 });
 
-/**
- * Get web trigger URL using Forge SDK
- * Returns URL and token separately - token should be used in Authorization header
- */
-resolver.define('getWebTriggerUrl', async () => {
-  try {
-    const url = await webTrigger.getUrl('keeper-alert-trigger');
-    const config = await storage.get('webTriggerConfig');
-    
-    return {
-      success: true,
-      url: url,
-      hasToken: !!(config && config.webhookToken),
-      // Include token for display/copy in UI (to configure in Keeper webhook settings)
-      bearerToken: config?.webhookToken || null,
-      authHeader: config?.webhookToken ? `Bearer ${config.webhookToken}` : null
-    };
-  } catch (err) {
-    throw new Error(`Failed to get web trigger URL: ${err.message}`);
-  }
-});
 
-/**
- * Get web trigger configuration
- * Note: webhookToken is included so UI can show if token is configured
- */
-resolver.define('getWebTriggerConfig', async () => {
-  const config = await storage.get('webTriggerConfig');
-  if (!config) return {};
-  
-  // Return config with token presence indicator (not the actual token for security)
-  return {
-    projectKey: config.projectKey,
-    issueType: config.issueType,
-    hasWebhookToken: !!config.webhookToken,
-    webhookTokenPreview: config.webhookToken 
-      ? `${config.webhookToken.substring(0, 8)}...${config.webhookToken.substring(config.webhookToken.length - 4)}`
-      : null
-  };
-});
-
-/**
- * Save web trigger configuration
- */
-resolver.define('setWebTriggerConfig', async (req) => {
-  let payload = req?.payload?.payload || req?.payload || req;
-  
-  if (!payload) {
-    throw new Error('No payload provided');
-  }
-  
-  const projectKey = payload.projectKey;
-  const issueType = payload.issueType;
-  
-  logger.info('setWebTriggerConfig: Saving web trigger configuration', { projectKey, issueType });
-  
-  // Get existing config to preserve the token if not being changed
-  const existingConfig = await storage.get('webTriggerConfig') || {};
-  
-  const configToSave = { 
-    projectKey, 
-    issueType,
-    // Preserve existing token unless explicitly clearing it
-    webhookToken: existingConfig.webhookToken
-  };
-  
-  await storage.set('webTriggerConfig', configToSave);
-  
-  logger.info('setWebTriggerConfig: Web trigger configuration saved');
-  return { success: true, message: 'Web trigger configuration saved successfully' };
-});
-
-/**
- * Generate or regenerate webhook authentication token
- * This creates a new secure token that must be included in the Authorization header
- * Format: Authorization: Bearer <token>
- */
-resolver.define('generateWebhookToken', async (req) => {
-  logger.info('generateWebhookToken: Generating new webhook authentication token');
-  
-  try {
-    // Generate a new secure token
-    const newToken = generateWebhookToken();
-    
-    // Get existing config
-    const existingConfig = await storage.get('webTriggerConfig') || {};
-    
-    // Update config with new token
-    const updatedConfig = {
-      ...existingConfig,
-      webhookToken: newToken,
-      tokenGeneratedAt: new Date().toISOString()
-    };
-    
-    await storage.set('webTriggerConfig', updatedConfig);
-    
-    // Get the webhook URL
-    const webhookUrl = await webTrigger.getUrl('keeper-alert-trigger');
-    
-    logger.info('generateWebhookToken: Webhook token generated successfully');
-    
-    return {
-      success: true,
-      message: 'Webhook token generated successfully. Configure your Keeper webhook with the Authorization header.',
-      webhookUrl: webhookUrl,
-      bearerToken: newToken,
-      authHeader: `Bearer ${newToken}`,
-      tokenPreview: `${newToken.substring(0, 8)}...${newToken.substring(newToken.length - 4)}`,
-      generatedAt: updatedConfig.tokenGeneratedAt,
-      instructions: 'Add this header to your Keeper webhook configuration: Authorization: Bearer <token>'
-    };
-  } catch (err) {
-    logger.error('generateWebhookToken: Failed to generate webhook token', { error: err.message });
-    throw new Error(`Failed to generate webhook token: ${err.message}`);
-  }
-});
-
-/**
- * Revoke webhook token (disable token authentication)
- * WARNING: This makes the webhook URL accessible without authentication
- */
-resolver.define('revokeWebhookToken', async () => {
-  try {
-    // Get existing config
-    const existingConfig = await storage.get('webTriggerConfig') || {};
-    
-    // Remove token from config
-    const updatedConfig = {
-      projectKey: existingConfig.projectKey,
-      issueType: existingConfig.issueType
-      // Deliberately not including webhookToken
-    };
-    
-    await storage.set('webTriggerConfig', updatedConfig);
-    
-    return {
-      success: true,
-      message: 'Webhook token revoked. WARNING: The webhook URL is now accessible without authentication.',
-      warning: 'Token authentication disabled. Consider generating a new token for security.'
-    };
-  } catch (err) {
-    throw new Error(`Failed to revoke webhook token: ${err.message}`);
-  }
-});
-
-/**
- * Get webhook audit logs
- * Returns the last 100 webhook attempts for monitoring
- */
-resolver.define('getWebhookAuditLogs', async () => {
-  try {
-    const logs = await storage.get('webhook-audit-log') || [];
-    return {
-      success: true,
-      logs: logs,
-      count: logs.length
-    };
-  } catch (err) {
-    throw new Error(`Failed to get webhook audit logs: ${err.message}`);
-  }
-});
-
-/**
- * Clear webhook audit logs
- */
-resolver.define('clearWebhookAuditLogs', async () => {
-  try {
-    await storage.delete('webhook-audit-log');
-    return {
-      success: true,
-      message: 'Webhook audit logs cleared'
-    };
-  } catch (err) {
-    throw new Error(`Failed to clear webhook audit logs: ${err.message}`);
-  }
-});
 
 /**
  * Get current user's rate limit status
@@ -2739,615 +3543,123 @@ resolver.define('getRateLimitStatus', async (req) => {
   }
 });
 
-/**
- * Get all Jira projects
- */
-resolver.define('getJiraProjects', async () => {
-  try {
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/project`,
-      {},
-      'Get Jira projects'
-    );
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch projects: ${response.status}`);
-    }
-    
-    const projects = await response.json();
-    
-    return {
-      success: true,
-      projects: projects || []
-    };
-  } catch (err) {
-    throw new Error(`Failed to fetch Jira projects: ${err.message}`);
-  }
-});
 
 /**
- * Get issue types for a specific project
+ * Get ITSM ticket data from issue description.
+ * Tickets created by the JIRA ITSM Forge app embed the original alert payload
+ * as a JSON code block in the issue description. This resolver fetches that
+ * payload (and the ticket's labels) so the issue panel can render the right
+ * UI for each ITSM_<audit_event> label (e.g. EPM approval, SSO device approval).
  */
-resolver.define('getProjectIssueTypes', async (req) => {
-  let payload = req?.payload?.payload || req?.payload || req;
-  
-  if (!payload || !payload.projectKey) {
-    throw new Error('Project key is required');
-  }
-  
-  const { projectKey } = payload;
-  
-  try {
-    // Get project details which includes issue types (with rate limit retry)
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/project/${projectKey}`,
-      {},
-      'Get project issue types'
-    );
-    
-    if (!response.ok) {
-      throw new Error(`Failed to fetch project: ${response.status}`);
-    }
-    
-    const project = await response.json();
-    
-    // Extract issue types from project
-    const issueTypes = project.issueTypes || [];
-    
-    return {
-      success: true,
-      issueTypes: issueTypes
-    };
-  } catch (err) {
-    throw new Error(`Failed to fetch issue types: ${err.message}`);
-  }
-});
-
-/**
- * Test web trigger by creating a test issue
- */
-resolver.define('testWebTrigger', async (req) => {
-  let payload = req?.payload?.payload || req?.payload || req;
-  
-  if (!payload) {
-    throw new Error('No payload provided');
-  }
-  
-  const { projectKey, issueType } = payload;
-  
-  if (!projectKey || !issueType) {
-    throw new Error('Project key and issue type are required');
-  }
-  
-  try {
-    // Create a test issue (with rate limit retry)
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            project: {
-              key: projectKey
-            },
-            summary: `Keeper Security Alert - Test Trigger [${new Date().toISOString()}]`,
-            description: {
-              type: 'doc',
-              version: 1,
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: 'This is a test issue created by the Keeper Security web trigger. This confirms that your web trigger configuration is working correctly.'
-                    }
-                  ]
-                }
-              ]
-            },
-            issuetype: {
-              name: issueType
-            },
-            labels: ['keeper-webhook', 'keeper-test']
-          }
-        })
-      },
-      'Create test issue'
-    );
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to create test issue: ${response.status} - ${errorText}`);
-    }
-    
-    const issue = await response.json();
-    
-    return {
-      success: true,
-      message: 'Test issue created successfully!',
-      issueKey: issue.key,
-      issueUrl: issue.self
-    };
-  } catch (err) {
-    throw new Error(`Failed to test web trigger: ${err.message}`);
-  }
-});
-
-/**
- * Test web trigger with full payload (simulating actual webhook call)
- */
-resolver.define('testWebTriggerWithPayload', async (req) => {
-  let payload = req?.payload?.payload || req?.payload || req;
-  
-  if (!payload) {
-    throw new Error('No payload provided');
-  }
-  
-  try {
-    // Get the web trigger configuration
-    const config = await storage.get('webTriggerConfig');
-    
-    if (!config || !config.projectKey || !config.issueType) {
-      throw new Error('Web trigger not configured. Please configure project and issue type first.');
-    }
-    
-    // Extract alert details from payload
-    const summary = payload.summary || payload.alert_name || payload.message || `Keeper Security Alert - ${new Date().toISOString()}`;
-    const description = payload.description || payload.message || 'A security alert was received from Keeper Security.';
-    const alertType = payload.alertType || payload.alert_type || 'security_alert';
-    const severity = payload.severity || 'medium';
-    const source = payload.source || 'keeper_security';
-    
-    // Build detailed description in ADF format
-    const adfDescription = {
-      type: 'doc',
-      version: 1,
-      content: [
-        {
-          type: 'paragraph',
-          content: [
-            {
-              type: 'text',
-              text: description
-            }
-          ]
-        },
-        {
-          type: 'paragraph',
-          content: [
-            {
-              type: 'text',
-              text: '\n\nAlert Details:',
-              marks: [{ type: 'strong' }]
-            }
-          ]
-        },
-        {
-          type: 'bulletList',
-          content: [
-            {
-              type: 'listItem',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: `Alert Type: ${alertType}`,
-                      marks: [{ type: 'strong' }]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              type: 'listItem',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: `Severity: ${severity.toUpperCase()}`,
-                      marks: [{ type: 'strong' }]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              type: 'listItem',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: `Source: ${source}`
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              type: 'listItem',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [
-                    {
-                      type: 'text',
-                      text: `Timestamp: ${payload.timestamp || new Date().toISOString()}`
-                    }
-                  ]
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    };
-    
-    // Add user information if present
-    if (payload.user || payload.username) {
-      const userEmail = payload.user?.email || payload.username || 'Unknown';
-      adfDescription.content.push({
-        type: 'paragraph',
-        content: [
-          {
-            type: 'text',
-            text: `\nUser: ${userEmail}`
-          }
-        ]
-      });
-    }
-    
-    // Add additional details if present
-    if (payload.details) {
-      adfDescription.content.push({
-        type: 'paragraph',
-        content: [
-          {
-            type: 'text',
-            text: '\n\nAdditional Information:',
-            marks: [{ type: 'strong' }]
-          }
-        ]
-      });
-      adfDescription.content.push({
-        type: 'codeBlock',
-        attrs: { language: 'json' },
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(payload.details, null, 2)
-          }
-        ]
-      });
-    }
-    
-    // Determine labels based on payload
-    const labels = ['keeper-webhook'];
-    if (payload.source === 'keeper_admin_test' || payload.details?.test) {
-      labels.push('keeper-webhook-test');
-    }
-    if (severity) {
-      labels.push(`severity-${severity.toLowerCase()}`);
-    }
-    if (alertType) {
-      labels.push(alertType.toLowerCase().replace(/_/g, '-'));
-    }
-    
-    // Create the Jira issue (with rate limit retry)
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/issue`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            project: {
-              key: config.projectKey
-            },
-            summary: summary,
-            description: adfDescription,
-            issuetype: {
-              name: config.issueType
-            },
-            labels: labels
-          }
-        })
-      },
-      'Create webhook issue'
-    );
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to create issue: ${errorText}`);
-    }
-    
-    const issue = await response.json();
-    
-    // For EPM approval requests (test or real), assign to a project admin
-    if (payload.category === 'endpoint_privilege_manager' && payload.audit_event === 'approval_request_created') {
-      try {
-        // Get project admins
-        const projectKey = config.projectKey;
-        
-        // Get project roles (with rate limit retry)
-        const rolesResponse = await requestJiraAsAppWithRetry(
-          route`/rest/api/3/project/${projectKey}/role`,
-          {},
-          'Get project roles for assignment'
-        );
-        const roles = await rolesResponse.json();
-        
-        // Find admin role
-        let adminRoleUrl = null;
-        const possibleAdminRoleNames = ['Administrators', 'Administrator', 'Admins', 'Project Administrators', 'administrators'];
-        
-        for (const roleName of possibleAdminRoleNames) {
-          if (roles && roles[roleName]) {
-            adminRoleUrl = roles[roleName];
-            break;
-          }
-        }
-        
-        if (adminRoleUrl) {
-          // Extract role ID
-          const roleIdMatch = adminRoleUrl.match(/role\/(\d+)/);
-          if (roleIdMatch) {
-            const roleId = roleIdMatch[1];
-            
-            // Get role details with actors (with rate limit retry)
-            const roleDetailsResponse = await requestJiraAsAppWithRetry(
-              route`/rest/api/3/project/${projectKey}/role/${roleId}`,
-              {},
-              'Get role details for assignment'
-            );
-            const roleDetails = await roleDetailsResponse.json();
-            
-            // Find first active admin user
-            if (roleDetails && roleDetails.actors && roleDetails.actors.length > 0) {
-              let assigneeAccountId = null;
-              
-              for (const actor of roleDetails.actors) {
-                if (actor.actorUser && actor.actorUser.accountId) {
-                  assigneeAccountId = actor.actorUser.accountId;
-                  break;
-                } else if (actor.id) {
-                  assigneeAccountId = actor.id;
-                  break;
-                } else if (actor.accountId) {
-                  assigneeAccountId = actor.accountId;
-                  break;
-                }
-              }
-              
-              // Assign ticket to admin (with rate limit retry)
-              if (assigneeAccountId) {
-                await requestJiraAsAppWithRetry(
-                  route`/rest/api/3/issue/${issue.key}`,
-                  {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      fields: {
-                        assignee: {
-                          accountId: assigneeAccountId
-                        }
-                      }
-                    })
-                  },
-                  'Assign EPM ticket to admin'
-                );
-                logger.info('Assigned EPM ticket to project admin', { issueKey: issue.key });
-              }
-            }
-          }
-        }
-      } catch (assignError) {
-        logger.error('Failed to assign ticket to project admin', assignError);
-        // Don't fail the entire test if assignment fails
-      }
-    }
-    
-    return {
-      success: true,
-      message: 'Issue created successfully via webhook test',
-      issueKey: issue.key,
-      issueId: issue.id,
-      labels: labels
-    };
-    
-  } catch (error) {
-    throw new Error(`Failed to test web trigger: ${error.message}`);
-  }
-});
-
-/**
- * Fetch tickets created by webhook (with keeper-webhook label)
- */
-resolver.define('getWebhookTickets', async (req) => {
-  try {
-    const config = await storage.get('webTriggerConfig');
-    
-    if (!config || !config.projectKey) {
-      return {
-        success: false,
-        message: 'Web trigger not configured',
-        issues: []
-      };
-    }
-    
-    // Build JQL to find issues with keeper-webhook label in configured project
-    const jql = `project = ${config.projectKey} AND labels = keeper-webhook ORDER BY created DESC`;
-    
-    // Fetch issues using the new JQL enhanced search API (with rate limit retry)
-    const response = await requestJiraAsAppWithRetry(
-      route`/rest/api/3/search/jql`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jql: jql,
-          maxResults: 100,
-          fields: ['summary', 'created', 'description', 'status', 'labels', 'key', 'issuetype']
-        })
-      },
-      'Search webhook tickets'
-    );
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to fetch webhook tickets: ${errorText}`);
-    }
-    
-    const data = await response.json();
-    
-    // Format the issues for frontend consumption
-    const issues = data.issues.map(issue => {
-      // Extract JSON payload from description if it exists
-      let jsonPayload = null;
-      try {
-        // The description is in ADF format, look for codeBlock with JSON
-        const description = issue.fields.description;
-        if (description && description.content) {
-          const codeBlock = description.content.find(
-            block => block.type === 'codeBlock' && block.attrs?.language === 'json'
-          );
-          if (codeBlock && codeBlock.content && codeBlock.content[0]?.text) {
-            jsonPayload = JSON.parse(codeBlock.content[0].text);
-          }
-        }
-      } catch (e) {
-        logger.error('Failed to parse JSON from description', e);
-      }
-      
-      // Extract request UID - check multiple possible field names
-      // 1. Basic webhook payload uses: request_uid
-      // 2. Enriched EPM data uses: approval_uid
-      // 3. Fallback: extract from labels (format: request-<uid>)
-      let requestUid = jsonPayload?.request_uid || jsonPayload?.approval_uid || null;
-      if (!requestUid) {
-        const labels = issue.fields.labels || [];
-        const requestLabel = labels.find(label => label.startsWith('request-'));
-        if (requestLabel) {
-          requestUid = requestLabel.replace('request-', '');
-        }
-      }
-      
-      // Extract username - check multiple possible field names
-      // 1. Basic webhook payload uses: username
-      // 2. Enriched EPM data uses: account_info.Username
-      let username = jsonPayload?.username || 
-                     jsonPayload?.account_info?.Username || 
-                     null;
-      
-      // If this is enriched EPM data, try to get additional info
-      const isEpmEnriched = !!jsonPayload?.approval_uid || !!jsonPayload?.account_info;
-      
-      // For description, prefer specific fields over summary
-      let ticketDescription = issue.fields.summary;
-      if (jsonPayload) {
-        if (jsonPayload.description) {
-          ticketDescription = jsonPayload.description;
-        } else if (isEpmEnriched && jsonPayload.approval_type) {
-          // For EPM tickets, create a meaningful description
-          ticketDescription = `${jsonPayload.approval_type || 'EPM'} Request - ${requestUid || 'Unknown'}`;
-          if (username) {
-            ticketDescription = `${username} - ${ticketDescription}`;
-          }
-        }
-      }
-      
-      return {
-        key: issue.key,
-        id: issue.id,
-        summary: issue.fields.summary,
-        created: issue.fields.created,
-        status: issue.fields.status?.name || 'Unknown',
-        labels: issue.fields.labels || [],
-        issueType: issue.fields.issuetype?.name || 'Unknown',
-        description: ticketDescription,
-        requestUid: requestUid,
-        agentUid: jsonPayload?.agent_uid || jsonPayload?.account_info?.agent_uid || null,
-        username: username,
-        category: jsonPayload?.category || (isEpmEnriched ? 'endpoint_privilege_manager' : null),
-        auditEvent: jsonPayload?.audit_event || (isEpmEnriched ? 'approval_request_created' : null),
-        alertName: jsonPayload?.alert_name || (isEpmEnriched ? 'EPM Approval Request' : null)
-      };
-    });
-    
-    return {
-      success: true,
-      issues: issues,
-      total: data.total
-    };
-    
-  } catch (error) {
-    logger.error('Error fetching webhook tickets', error);
-    throw new Error(`Failed to fetch webhook tickets: ${error.message}`);
-  }
-});
-
-/**
- * Get webhook payload data from current issue description
- */
-resolver.define('getWebhookPayload', async (req) => {
+resolver.define('getItsmTicketData', async (req) => {
   const issueKey = req.payload?.issueKey;
-  
+
   if (!issueKey) {
     throw new Error('Issue key is required');
   }
-  
+
   try {
-    // Fetch the issue with description field (with rate limit retry)
     const response = await requestJiraAsAppWithRetry(
       route`/rest/api/3/issue/${issueKey}?fields=description,labels`,
       {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       },
-      'Get webhook payload'
+      'Get ITSM ticket data'
     );
-    
+
     if (!response.ok) {
       throw new Error(`Failed to fetch issue: ${response.statusText}`);
     }
-    
+
     const issue = await response.json();
     const description = issue.fields?.description;
     const labels = issue.fields?.labels || [];
-    
-    // Extract JSON payload from description
-    let webhookPayload = null;
+
+    let payload = null;
     if (description && description.content) {
       const codeBlock = description.content.find(
         block => block.type === 'codeBlock' && block.attrs?.language === 'json'
       );
       if (codeBlock && codeBlock.content && codeBlock.content[0]?.text) {
         try {
-          webhookPayload = JSON.parse(codeBlock.content[0].text);
+          payload = JSON.parse(codeBlock.content[0].text);
         } catch (e) {
-          logger.error('Failed to parse webhook payload', e);
+          logger.error('Failed to parse ITSM ticket payload', e);
         }
       }
     }
-    
+
     return {
       success: true,
-      payload: webhookPayload,
-      labels: labels
+      payload,
+      labels
     };
-    
+
   } catch (error) {
-    logger.error('Error fetching webhook payload', error);
-    throw new Error(`Failed to fetch webhook payload: ${error.message}`);
+    logger.error('Error fetching ITSM ticket data', error);
+    throw new Error(`Failed to fetch ITSM ticket data: ${error.message}`);
   }
 });
+
+function redactEpmApprovalDetails(value) {
+  if (Array.isArray(value)) {
+    return value.map(redactEpmApprovalDetails);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return Object.entries(value).reduce((acc, [key, entryValue]) => {
+    if (/filehash/i.test(key)) {
+      acc[key] = ['[REDACTED]'];
+      return acc;
+    }
+
+    if (/commandline/i.test(key) && typeof entryValue === 'string') {
+      acc[key] = entryValue.replace(/\s+.+$/, ' [ARGS REDACTED]');
+      return acc;
+    }
+
+    acc[key] = redactEpmApprovalDetails(entryValue);
+    return acc;
+  }, {});
+}
+
+resolver.define('getEpmApprovalDetails', async (req) => {
+  const requestUid = req.payload?.requestUid;
+
+  if (!requestUid) {
+    return { success: false, message: 'Request UID is required' };
+  }
+
+  try {
+    const details = await fetchEpmApprovalDetails(requestUid);
+    if (!details) {
+      return {
+        success: false,
+        message: 'EPM approval details were not available from Keeper Commander'
+      };
+    }
+
+    return {
+      success: true,
+      details,
+      redactedDetails: redactEpmApprovalDetails(details)
+    };
+  } catch (error) {
+    logger.warn('Failed to fetch EPM approval details', {
+      requestUid,
+      error: error.message
+    });
+    return {
+      success: false,
+      message: 'Failed to fetch EPM approval details'
+    };
+  }
+});
+
 
 /**
  * Check if EPM request is already expired (has the issue property)
@@ -3450,6 +3762,17 @@ resolver.define('checkEpmActionTaken', async (req) => {
         message: 'Request already expired'
       };
     }
+
+    if (labels.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
+      return {
+        success: true,
+        actionTaken: true,
+        action: 'processed_outside',
+        message:
+          'This EPM approval request was already processed outside Jira ' +
+          '(no longer pending in Keeper).'
+      };
+    }
     
     // No action label found
     return { 
@@ -3467,6 +3790,172 @@ resolver.define('checkEpmActionTaken', async (req) => {
       action: null,
       message: err.message 
     };
+  }
+});
+
+/**
+ * Check if a device admin approval action was already taken on this ticket.
+ * Looks for the `device-approved` / `device-denied` labels added by the
+ * executeKeeperAction resolver after a successful Commander call.
+ */
+resolver.define('checkDeviceActionTaken', async (req) => {
+  const { issueKey } = req.payload;
+
+  if (!issueKey) {
+    throw new Error('Issue key is required');
+  }
+
+  try {
+    const issueResponse = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}?fields=labels`,
+      {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      },
+      'Check device action labels'
+    );
+
+    if (!issueResponse.ok) {
+      throw new Error('Failed to fetch issue details');
+    }
+
+    const issueData = await issueResponse.json();
+    const labels = issueData.fields?.labels || [];
+
+    if (labels.includes('device-approved')) {
+      return {
+        success: true,
+        actionTaken: true,
+        action: 'approved',
+        message: 'Device request already approved'
+      };
+    }
+
+    if (labels.includes('device-denied')) {
+      return {
+        success: true,
+        actionTaken: true,
+        action: 'denied',
+        message: 'Device request already denied'
+      };
+    }
+
+    if (labels.includes(PROCESSED_OUTSIDE_JIRA_LABEL)) {
+      return {
+        success: true,
+        actionTaken: true,
+        action: 'processed_outside',
+        message:
+          'This device approval request was already processed outside Jira ' +
+          '(no longer in Keeper\'s pending list).'
+      };
+    }
+
+    return {
+      success: true,
+      actionTaken: false,
+      action: null,
+      message: 'No action taken yet'
+    };
+
+  } catch (err) {
+    logger.error('Error checking device action', err);
+    return {
+      success: false,
+      actionTaken: false,
+      action: null,
+      message: err.message
+    };
+  }
+});
+
+/**
+ * Check whether the device referenced by this ticket is still in Keeper's
+ * pending device-approval list. Called by DeviceApprovalPanel on load so we
+ * can skip the Approve/Deny buttons (and tag the ticket) if an admin already
+ * actioned the request outside Jira
+ */
+resolver.define('checkDevicePendingStatus', async (req) => {
+  const userId = req?.context?.accountId;
+  const issueKey = req.payload?.issueKey;
+
+  if (!issueKey) {
+    return { success: false, message: 'Issue key is required' };
+  }
+
+  try {
+    // Reuse the same description-payload extraction the panel uses.
+    const issueResp = await requestJiraAsAppWithRetry(
+      route`/rest/api/3/issue/${issueKey}?fields=description,labels`,
+      { method: 'GET', headers: { Accept: 'application/json' } },
+      'Get ITSM ticket data for device pending check'
+    );
+    if (!issueResp.ok) {
+      return { success: false, message: `Failed to fetch issue: ${issueResp.statusText}` };
+    }
+    const issue = await issueResp.json();
+    const description = issue.fields?.description;
+
+    let payload = null;
+    if (description?.content) {
+      const codeBlock = description.content.find(
+        (b) => b.type === 'codeBlock' && b.attrs?.language === 'json'
+      );
+      if (codeBlock?.content?.[0]?.text) {
+        try {
+          payload = JSON.parse(codeBlock.content[0].text);
+        } catch (e) {
+          logger.warn('Failed to parse ITSM payload for pending check', { issueKey });
+        }
+      }
+    }
+
+    if (!payload) {
+      return { success: false, message: 'No ITSM payload found on this ticket' };
+    }
+
+    // Same precedence as DeviceApprovalPanel.getDeviceTarget().
+    const target =
+      payload.username ||
+      payload.email ||
+      payload.user?.email ||
+      payload.account_info?.Username ||
+      payload.device_id ||
+      payload.deviceId ||
+      payload.device_uid ||
+      payload.encrypted_device_token ||
+      payload.device_token ||
+      null;
+
+    if (!target) {
+      return {
+        success: false,
+        message: 'Could not resolve a user email or device ID from the ticket payload'
+      };
+    }
+
+    const pending = await fetchPendingDeviceApprovals(userId);
+    const isPending = isTargetPending(pending, target);
+
+    if (!isPending) {
+      // Persist the resolved state on the ticket so subsequent loads short-circuit
+      // via checkDeviceActionTaken instead of hitting Keeper again.
+      await markAlreadyProcessedOutsideJira(issueKey, target, null, 'device');
+      return {
+        success: true,
+        pending: false,
+        target,
+        alreadyProcessed: true,
+        message:
+          `${target} is no longer in Keeper's pending device-approval list. ` +
+          'The request was already processed outside Jira.'
+      };
+    }
+
+    return { success: true, pending: true, target };
+  } catch (err) {
+    logger.error('Error checking device pending status', err);
+    return { success: false, message: err.message };
   }
 });
 
@@ -4246,25 +4735,79 @@ resolver.define('clearStoredRequestData', async (req) => {
   }
 });
 
+// ============================================================================
+// KJ-26-03: Per-surface resolver isolation
+// ============================================================================
+//
+// Both the global admin page (`keeperResolver` -> handler) and the issue panel
+// (`keeperIssueResolver` -> issuePanelHandler) are backed by the SAME resolver
+// registry, so historically either surface could invoke ANY resolver by name.
+// Server-side admin guards already block the sensitive actions, but we add a
+// second layer here: each exported handler only dispatches the resolver names
+// that its surface legitimately calls. A forged invoke for an out-of-surface
+// resolver (e.g. `getConfig` from the issue panel) is rejected before the
+// resolver body runs. Allowlists are derived from the two frontends'
+// `invoke(...)` call sites and must be kept in sync when adding resolvers.
+
+// Global admin configuration page (static/keeper-ui).
+const GLOBAL_PAGE_RESOLVERS = new Set([
+  'getConfig',
+  'setConfig',
+  'testConnection',
+  'getGlobalUserRole',
+  'executeKeeperCommand',
+]);
+
+// Jira issue panel (static/keeper-issue-ui). `getRateLimitStatus` is read-only
+// diagnostics and lives here (not currently invoked by either UI bundle).
+const ISSUE_PANEL_RESOLVERS = new Set([
+  'getIssueContext',
+  'activateKeeperPanel',
+  'getKeeperRecords',
+  'getKeeperFolders',
+  'getRecordTypes',
+  'getKeeperRecordDetails',
+  'getUserRole',
+  'getStoredRequestData',
+  'storeRequestData',
+  'clearStoredRequestData',
+  'getProjectAdmins',
+  'executeKeeperAction',
+  'checkRotationEligibility',
+  'rejectKeeperRequest',
+  'getItsmTicketData',
+  'getEpmApprovalDetails',
+  'addEpmExpiredComment',
+  'checkEpmExpired',
+  'checkEpmActionTaken',
+  'checkDeviceActionTaken',
+  'checkDevicePendingStatus',
+  'getRateLimitStatus',
+]);
 
 /**
- * Web trigger handler - modularized implementation
- * 
- * Enhanced with API integration for fetching EPM approval details
- * See: modules/webhookHandler.js for full implementation
- * 
- * Features:
- * - Fetches detailed approval data from Keeper API
- * - Auto-sync fallback (epm sync-down) if data doesn't exist
- * - Creates enriched tickets with detailed information
- * - Graceful fallback to webhook payload if API unavailable
- * - Auto-assigns to project admin
+ * Wrap the shared resolver dispatch so a given Forge function only services the
+ * resolver names allowlisted for its surface. The dispatch arg shape matches
+ * `@forge/resolver`'s `getDefinitions()` (`{ call: { functionKey }, ... }`).
+ * @param {string} surface - label for diagnostics
+ * @param {Set<string>} allowed - resolver names permitted on this surface
  */
-export { webTriggerHandler };
+function restrictResolverSurface(surface, allowed) {
+  const dispatch = resolver.getDefinitions();
+  return async (event, backendRuntimePayload) => {
+    const functionKey = event?.call?.functionKey;
+    if (!allowed.has(functionKey)) {
+      logger.warn('Blocked cross-surface resolver invocation', { surface, functionKey });
+      return errorResponse(
+        ERROR_CODES.AUTH_PERMISSION_DENIED,
+        'This action is not available from this context.',
+        { resolver: functionKey, surface }
+      );
+    }
+    return dispatch(event, backendRuntimePayload);
+  };
+}
 
-// Export resolver for frontend calls
-// Note: webTriggerHandler now imported from modules/webhookHandler.js
-export const handler = resolver.getDefinitions();
+export const handler = restrictResolverSurface('global-page', GLOBAL_PAGE_RESOLVERS);
 
-// Export same resolver for issue panel - they can share the same functions
-export const issuePanelHandler = resolver.getDefinitions();
+export const issuePanelHandler = restrictResolverSurface('issue-panel', ISSUE_PANEL_RESOLVERS);
