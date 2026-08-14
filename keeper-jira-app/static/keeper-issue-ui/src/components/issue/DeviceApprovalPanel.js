@@ -199,7 +199,7 @@ const DeviceApprovalPanel = ({ issueContext }) => {
         issueContext.issueKey,
         'device-approve',
         description,
-        { email: target, action: verb },
+        { deviceTarget: target, deviceDecision: verb },
         new Date().toLocaleString('en-US', {
           month: '2-digit',
           day: '2-digit',

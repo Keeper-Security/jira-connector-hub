@@ -6,7 +6,7 @@
  */
 
 const READ_ONLY_COMMAND_VERBS = new Set([
-  'list', 'ls', 'get', 'search', 'tree', 'cd',
+  'list', 'list-sf', 'ls', 'get', 'search', 'tree', 'cd',
   'nsf-list', 'nsf-get',
   'record-type-info', 'rti',
   'service-status',

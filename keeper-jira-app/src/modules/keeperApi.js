@@ -700,6 +700,35 @@ async function getRequestResult(baseUrl, apiKey, requestId) {
  *   Forge resolvers respond before the 25s hard-kill.
  * @returns {Promise<Object>} - Command result
  */
+// Shared message so the loop guard and the result-fetch guard stay in sync.
+function pollDeadlineExceededError(requestId) {
+  return new Error(
+    `Keeper command did not complete within ${API_CONFIG.polling.forgeMaxTotalWaitMs}ms (Forge resolver limit). ` +
+    `Request ${requestId} may still be running on the service. ` +
+    `Common causes: ngrok/tunnel latency, service queue backlog, or slow nsf-* commands.`
+  );
+}
+
+// Race a promise against the shared pollDeadline so a slow network call
+// (not just a slow status transition) can't silently push us past the
+// Forge-safe cap and into Forge's own opaque 25s hard-kill. No-op when
+// pollDeadline is null (non-forgeSafe calls keep their original behavior).
+async function withPollDeadline(promise, pollDeadline, requestId) {
+  if (!pollDeadline) return promise;
+
+  let timer;
+  const deadlineTimeout = new Promise((_, reject) => {
+    const remainingMs = Math.max(pollDeadline - Date.now(), 0);
+    timer = setTimeout(() => reject(pollDeadlineExceededError(requestId)), remainingMs);
+  });
+
+  try {
+    return await Promise.race([promise, deadlineTimeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
   const forgeSafe = options.forgeSafe === true;
   const {
@@ -727,11 +756,7 @@ async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
 
   while (attempts < maxAttempts) {
     if (pollDeadline && Date.now() >= pollDeadline) {
-      throw new Error(
-        `Keeper command did not complete within ${API_CONFIG.polling.forgeMaxTotalWaitMs}ms (Forge resolver limit). ` +
-        `Request ${requestId} may still be running on the service. ` +
-        `Common causes: ngrok/tunnel latency, service queue backlog, or slow nsf-* commands.`
-      );
+      throw pollDeadlineExceededError(requestId);
     }
 
     attempts++;
@@ -741,8 +766,14 @@ async function executeCommandAsync(baseUrl, apiKey, command, options = {}) {
 
     // Check terminal states
     if (status === API_CONFIG.requestStates.COMPLETED) {
-      // Step 4: Get and return the result
-      const result = await getRequestResult(baseUrl, apiKey, requestId);
+      // Step 4: Get and return the result. Guarded by the same deadline --
+      // a slow result call must not be able to run past the Forge-safe cap
+      // just because the status check that preceded it was on time.
+      const result = await withPollDeadline(
+        getRequestResult(baseUrl, apiKey, requestId),
+        pollDeadline,
+        requestId
+      );
       return result;
     }
 

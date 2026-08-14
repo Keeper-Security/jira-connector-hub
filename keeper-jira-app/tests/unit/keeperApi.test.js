@@ -14,7 +14,7 @@ const {
 describe('READ_ONLY_COMMAND_VERBS', () => {
   test('contains expected read-only verbs', () => {
     const expected = [
-      'list', 'ls', 'get', 'search', 'tree', 'cd',
+      'list', 'list-sf', 'ls', 'get', 'search', 'tree', 'cd',
       'nsf-list', 'nsf-get',
       'record-type-info', 'rti',
       'service-status',
@@ -36,6 +36,7 @@ describe('READ_ONLY_COMMAND_VERBS', () => {
 describe('getRateLimitBucketForCommand', () => {
   test('classifies read-only verbs as "read"', () => {
     expect(getRateLimitBucketForCommand('list')).toBe('read');
+    expect(getRateLimitBucketForCommand('list-sf')).toBe('read');
     expect(getRateLimitBucketForCommand('get')).toBe('read');
     expect(getRateLimitBucketForCommand('search')).toBe('read');
     expect(getRateLimitBucketForCommand('nsf-list')).toBe('read');
@@ -71,6 +72,13 @@ describe('getRateLimitBucketForCommand', () => {
     expect(getRateLimitBucketForCommand('list -sf')).toBe('read');
     expect(getRateLimitBucketForCommand('record-add --title "My Record"')).toBe('write');
     expect(getRateLimitBucketForCommand('share-record -e alice@example.com')).toBe('write');
+  });
+
+  // KJ-26-11: checkRoeEligibility's folder-eligibility path uses list-sf, not
+  // list -sf. Without this classification it silently fell into the
+  // conservative write bucket (5/min) instead of read (30/min).
+  test('classifies list-sf (folder ROE eligibility check) as "read"', () => {
+    expect(getRateLimitBucketForCommand('list-sf "UID123" --roe-eligible --format=json')).toBe('read');
   });
 
   test('handles leading/trailing whitespace in command', () => {

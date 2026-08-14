@@ -273,14 +273,14 @@ this-device timeout 30d`}
                     With Ngrok Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -ng="&lt;ngrok-auth-token&gt;" -cd="&lt;custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-subtitle-bold">
                     With Cloudflare Tunneling:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
                   </code>
                   
                   <p className="setup-cli-note">

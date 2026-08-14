@@ -5204,9 +5204,9 @@ const IssuePanel = () => {
                       {!(isAdmin && formData.action === 'cancel') && (
                         <RequirementsBlock
                           showInfoMessage={formData.action !== 'cancel'}
-                          infoMessage={!isAdmin
-                            ? 'Provide your requirement and justification for this request. An admin will review and process it.'
-                            : undefined}
+                          infoMessage={isAdmin
+                            ? 'Select record or shared folder. If you are not sure about the record or folder, provide your requirement in the following text area.'
+                            : 'Provide your requirement and justification for this request. An admin will review and process it.'}
                           requirementsRequired={!isAdmin}
                           requirementsValue={formData.requirements}
                           onRequirementsChange={(e) => handleInputChange('requirements', e.target.value)}
@@ -5369,11 +5369,11 @@ const IssuePanel = () => {
 
                       {/* Info message and requirement text area for share-folder and record-permission actions */}
                       <RequirementsBlock
-                        infoMessage={!isAdmin
-                          ? (selectedAction.value === 'record-permission'
+                        infoMessage={isAdmin
+                          ? 'Select a shared folder. If you are not sure about the folder, provide your requirement in the following text area.'
+                          : (selectedAction.value === 'record-permission'
                             ? 'Provide your requirement and justification for changing folder permissions. An admin will review and process it.'
-                            : 'Provide your requirement and justification for accessing a folder. An admin will review and process it.')
-                          : undefined}
+                            : 'Provide your requirement and justification for accessing a folder. An admin will review and process it.')}
                         requirementsRequired={!isAdmin}
                         requirementsValue={formData.requirements}
                         onRequirementsChange={(e) => handleInputChange('requirements', e.target.value)}
