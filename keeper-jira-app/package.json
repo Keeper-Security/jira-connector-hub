@@ -22,7 +22,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:security": "jest --testPathPattern=security",
-    "test:unit": "jest --testPathPattern=unit"
+    "test:unit": "jest --testPathPattern=unit",
+    "test:integration": "jest --testPathPattern=integration"
   },
   "devDependencies": {
     "eslint": "^8.56.0",

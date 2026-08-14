@@ -304,6 +304,11 @@ async function getCurrentUser() {
  * real secret remains server-side in Forge storage.
  */
 resolver.define('getConfig', async () => {
+  // KJ-26-11: Matches setConfig/testConnection/executeKeeperCommand -- only
+  // Jira admins may see the Commander tunnel URL and API key tail.
+  const adminErr = await requireGlobalAdmin();
+  if (adminErr) return adminErr;
+
   // One-shot cleanup of webhook storage left by pre-ITSM versions.
   const migrated = await storage.get('postWebhookMigrationDone');
   if (!migrated) {
@@ -2132,7 +2137,7 @@ async function checkRoeEligibility(userId, type, uid) {
   if (type === 'record') {
     const result = await executeKeeperApiCommand(
       `get "${uid}" --format=json`,
-      { userId, skipRateLimit: true, forgeSafe: true }
+      { userId, forgeSafe: true }
     );
     let details = {};
     if (result.data?.data) {
@@ -2147,7 +2152,7 @@ async function checkRoeEligibility(userId, type, uid) {
   // Folder: list-sf <uid> --roe-eligible --format=json
   const result = await executeKeeperApiCommand(
     `list-sf "${uid}" --roe-eligible --format=json`,
-    { userId, skipRateLimit: true, forgeSafe: true }
+    { userId, forgeSafe: true }
   );
   let rows = result.data?.data ?? [];
   if (typeof rows === 'string') rows = JSON.parse(rows);
@@ -2211,7 +2216,6 @@ resolver.define('executeKeeperCommand', async (req) => {
     'list', 'list-sf', 'ls', 'get', 'search',
     'record-type-info', 'rti',
     'nsf-list', 'nsf-get',
-    'epm',
     'service-status',
     'enterprise-info',
   ];
@@ -2618,10 +2622,14 @@ resolver.define('executeKeeperAction', async (req) => {
     // device-approval list. If it was approved/denied outside Jira between the
     // ticket being created and now, mark the ticket and refuse the action so
     // we never call approve/deny on a stale request.
+    // KJ-DA-01: Prefer the canonical `deviceDecision` param, falling back to
+    // the legacy `action` name so a briefly-live older UI bundle (pre-rename)
+    // doesn't silently skip this pre-check.
+    const preCheckDecision = parameters?.deviceDecision || parameters?.action;
     const isApproveOrDeny =
-      parameters?.action === 'approve' || parameters?.action === 'deny';
+      preCheckDecision === 'approve' || preCheckDecision === 'deny';
     if (isApproveOrDeny) {
-      const target = parameters?.email || parameters?.deviceTarget || extractDeviceTarget(command);
+      const target = parameters?.deviceTarget || parameters?.email || extractDeviceTarget(command);
       if (target) {
         try {
           const pending = await fetchPendingDeviceApprovals(userId);
@@ -2786,7 +2794,9 @@ resolver.define('executeKeeperAction', async (req) => {
     // approve/deny decision from the structured parameters so every
     // downstream label, comment, and pre-check works correctly.
     const epmDecision = isEpmCommand ? parameters?.epmDecision : null;
-    const deviceDecision = isDeviceCommand ? parameters?.action : null;
+    // KJ-DA-01: Prefer the canonical `deviceDecision` param (see
+    // buildDeviceApproveCommand), falling back to the legacy `action` name.
+    const deviceDecision = isDeviceCommand ? (parameters?.deviceDecision || parameters?.action) : null;
 
     // Only add comment for main record creation, not for records created as references
     // Check if this is a main record creation (not just a reference record)
@@ -2824,13 +2834,13 @@ resolver.define('executeKeeperAction', async (req) => {
           actionDescription = `Endpoint Privilege Approval: Denied request ${parameters?.approvalUid || ''}`;
         }
       } else if (isDeviceCommand) {
-        const target = parameters?.email || parameters?.deviceTarget || '';
+        const target = parameters?.deviceTarget || parameters?.email || '';
         if (deviceDecision === 'approve') {
           actionMessage = 'Device admin approval request has been approved';
           actionDescription = `Device Admin Approval: Approved ${target}`;
         } else if (deviceDecision === 'deny') {
           actionMessage = 'Device admin approval request has been denied';
-          actionDescription = `Device Admin Approval: Denied ${deviceTarget}`;
+          actionDescription = `Device Admin Approval: Denied ${target}`;
         }
       } else {
         switch (command) {
