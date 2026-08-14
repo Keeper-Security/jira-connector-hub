@@ -267,8 +267,8 @@ describe('Path Traversal in Inputs', () => {
       notes: payload
     }, 'TEST-1');
     
-    // Notes can contain path references - they're just text
-    expect(command).toContain('Notes=');
+    // Notes are single-quoted; path references are just literal text.
+    expect(command).toContain("--notes='");
   });
 });
 
@@ -290,8 +290,8 @@ describe('Full Command Safety', () => {
     // Command should contain escaped versions
     // Check that dangerous patterns are escaped (have backslash before them)
     expect(command).not.toMatch(/[^\\]";\s*rm/);
-    // The $ should be escaped - check for \$ before (cat
-    expect(command).toContain('\\$(cat');
+    // Notes are single-quoted so $(cat) is safe without backslash-escaping.
+    expect(command).toContain("--notes='$(cat /etc/passwd)'");
     expect(command).not.toMatch(/[^\\]`id`/);
   });
 

@@ -20,8 +20,10 @@ const LOG_LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 const config = {
   // Default log level (change to DEBUG for more verbose logging)
   level: LOG_LEVELS.INFO,
-  // Sensitive field names to redact
-  sensitiveKeys: ['apiKey', 'api_key', 'password', 'token', 'secret', 'authorization'],
+  // Sensitive field names to redact. KJ-26-08: `email` and `login` added so
+  // PII / credential identifiers (e.g. `userEmail`, `loginName`) are
+  // redacted via substring match in `isSensitiveKey`.
+  sensitiveKeys: ['apiKey', 'api_key', 'password', 'token', 'secret', 'authorization', 'email', 'login'],
 };
 
 // === SANITIZATION ===
@@ -30,8 +32,14 @@ const config = {
  * @param {string} key - Key name to check
  * @returns {boolean} - True if key is sensitive
  */
-const isSensitiveKey = (key) =>
-  config.sensitiveKeys.some(k => key.toLowerCase().includes(k));
+// Case-insensitive substring match. Both the input key and each entry in
+// `sensitiveKeys` are lowercased before comparison — previously only the
+// input was lowercased, so mixed-case entries (e.g. `apiKey`) silently
+// failed to match. This is a strict-tightening fix for KJ-26-08.
+const isSensitiveKey = (key) => {
+  const lowered = key.toLowerCase();
+  return config.sensitiveKeys.some(k => lowered.includes(k.toLowerCase()));
+};
 
 /**
  * Sanitize data for logging (redact sensitive fields)

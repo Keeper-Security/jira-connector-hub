@@ -10,14 +10,24 @@ export const activateKeeperPanel = async (issueKey) => {
   return await invoke("activateKeeperPanel", { issueKey });
 };
 
-// Get keeper records
-export const getKeeperRecords = async () => {
-  return await invoke("getKeeperRecords");
+// Get keeper records.
+// `mode` selects the vault type: 'classic' uses Commander `list`, 'nsf' uses
+// `nsf-list --records` (Nested Shared Folder). Defaults to 'classic'.
+export const getKeeperRecords = async (mode = 'classic') => {
+  return await invoke("getKeeperRecords", { mode });
 };
 
-// Get keeper folders
-export const getKeeperFolders = async () => {
-  return await invoke("getKeeperFolders");
+// Get keeper folders.
+// `mode` selects the vault type: 'classic' uses Commander `ls -f`, 'nsf' uses
+// `nsf-list --folders` (Nested Shared Folder). Defaults to 'classic'.
+export const getKeeperFolders = async (mode = 'classic') => {
+  return await invoke("getKeeperFolders", { mode });
+};
+
+// Get record types permitted by the user's enterprise role policy,
+// intersected with the app's supported set (KJ-26-02).
+export const getRecordTypes = async () => {
+  return await invoke("getRecordTypes");
 };
 
 // Get keeper record details
@@ -62,13 +72,17 @@ export const getProjectAdmins = async (projectKey, issueKey) => {
   });
 };
 
-// Execute keeper action
-export const executeKeeperAction = async (issueKey, command, commandDescription, parameters, formattedTimestamp = null) => {
+// Execute keeper action.
+// `mode` ('classic' | 'nsf') controls whether the resolver/commandBuilder routes
+// `record-add` and `record-update` to their NSF variants
+// (`nsf-record-add`, `nsf-record-update`). Defaults to 'classic'.
+export const executeKeeperAction = async (issueKey, command, commandDescription, parameters, formattedTimestamp = null, mode = 'classic') => {
   const payload = {
     issueKey,
     command,
     commandDescription,
-    parameters
+    parameters,
+    mode
   };
   
   if (formattedTimestamp) {
@@ -78,17 +92,30 @@ export const executeKeeperAction = async (issueKey, command, commandDescription,
   return await invoke("executeKeeperAction", payload);
 };
 
+// Check if a record (pamUser) or folder (ROE-eligible) supports rotate-on-expiration.
+export const checkRotationEligibility = async (type, uid) => {
+  return await invoke("checkRotationEligibility", { type, uid });
+};
+
 // Reject keeper request
-export const rejectKeeperRequest = async (issueKey, rejectionReason) => {
+export const rejectKeeperRequest = async (issueKey, rejectionReason, formattedTimestamp = null) => {
   return await invoke("rejectKeeperRequest", {
     issueKey,
-    rejectionReason
+    rejectionReason,
+    formattedTimestamp
   });
 };
 
-// Get webhook payload data from issue description
-export const getWebhookPayload = async (issueKey) => {
-  return await invoke("getWebhookPayload", { issueKey });
+// Fetch payload data + labels for an ITSM-created ticket. The companion
+// JIRA ITSM Forge app embeds the original Keeper alert as a JSON code block
+// inside the issue description; the panel uses this to render context for the
+// Approve/Deny workflow.
+export const getItsmTicketData = async (issueKey) => {
+  return await invoke("getItsmTicketData", { issueKey });
+};
+
+export const getEpmApprovalDetails = async (requestUid) => {
+  return await invoke("getEpmApprovalDetails", { requestUid });
 };
 
 export const addEpmExpiredComment = async (issueKey, formattedTimestamp) => {
@@ -101,5 +128,20 @@ export const checkEpmExpired = async (issueKey) => {
 
 export const checkEpmActionTaken = async (issueKey) => {
   return await invoke("checkEpmActionTaken", { issueKey });
+};
+
+// Check if a device admin approval action has already been taken on this ticket.
+// Used by DeviceApprovalPanel to short-circuit and show the already-actioned state
+// without re-running the device-approve / device-deny Commander command.
+export const checkDeviceActionTaken = async (issueKey) => {
+  return await invoke("checkDeviceActionTaken", { issueKey });
+};
+
+// Pre-flight check: ask the backend to verify the user/device on this ticket
+// is still in Keeper's pending device-approval list (`device-approve --reload
+// `request-already-processed-outside-jira` label + audit comment, and the
+// panel hides the Approve/Deny buttons.
+export const checkDevicePendingStatus = async (issueKey) => {
+  return await invoke("checkDevicePendingStatus", { issueKey });
 };
 
