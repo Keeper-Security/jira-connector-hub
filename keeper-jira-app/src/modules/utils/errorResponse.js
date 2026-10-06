@@ -140,14 +140,15 @@ const TROUBLESHOOTING = {
   
   // Connection
   [ERROR_CODES.CONNECTION_FAILED]: [
-    'Verify your tunnel (ngrok/Cloudflare) is running',
+    'Verify your tunnel (ngrok/Cloudflare/Tailscale) is running',
     'Check that the Keeper Commander service is active',
     'Verify the API URL in Global Settings is correct'
   ],
   [ERROR_CODES.CONNECTION_TUNNEL_OFFLINE]: [
-    'Start your tunnel service (ngrok or Cloudflare)',
+    'Start your tunnel service (ngrok, Cloudflare, or Tailscale Funnel)',
     'If using ngrok free tier, the URL changes on restart - update Global Settings',
-    'Consider using a paid ngrok plan or Cloudflare for stable URLs'
+    'Tailscale Funnel URLs can also change if the device re-authenticates as a new node - update Global Settings if so',
+    'Consider using a paid ngrok plan, Cloudflare, or a reusable Tailscale auth key for stable URLs'
   ],
   [ERROR_CODES.CONNECTION_TIMEOUT]: [
     'The service may be slow to respond',
@@ -342,8 +343,10 @@ function connectionError(message, originalError = null) {
   const lowerMessage = (message || '').toLowerCase();
   const errorString = originalError?.message?.toLowerCase() || '';
   
-  if (lowerMessage.includes('ngrok') || 
-      lowerMessage.includes('tunnel') || 
+  if (lowerMessage.includes('ngrok') ||
+      lowerMessage.includes('tunnel') ||
+      lowerMessage.includes('tailscale') ||
+      lowerMessage.includes('ts.net') ||
       errorString.includes('err_ngrok') ||
       errorString.includes('tunnel offline')) {
     code = ERROR_CODES.CONNECTION_TUNNEL_OFFLINE;

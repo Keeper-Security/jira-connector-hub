@@ -177,7 +177,7 @@ E2E testing for Forge apps requires a real Jira Cloud environment.
 1. Atlassian developer account
 2. Test Jira Cloud instance (free tier available)
 3. Keeper Commander CLI installed and configured
-4. ngrok or Cloudflare tunnel for webhook testing
+4. ngrok, Cloudflare, or Tailscale Funnel tunnel for webhook testing
 
 ### Manual E2E Test Scenarios
 

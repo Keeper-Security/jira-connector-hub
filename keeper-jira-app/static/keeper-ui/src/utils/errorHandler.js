@@ -131,7 +131,7 @@ export const getConnectionErrorContext = (errorMessage, error) => {
   if (!error.status && !error.statusCode) {
     // Only add detailed context if we don't have a status code (already handled by handleApiError)
     if (errorMessage.includes('ERR_NGROK_3200') || errorMessage.includes('ngrok') || errorMessage.includes('cloudflare') || errorMessage.includes('tunnel') || errorMessage.includes('offline')) {
-      return `Tunnel connection is offline: ${errorMessage}. Please start your tunnel (ngrok/Cloudflare) and ensure the Keeper Commander service is running.`;
+      return `Tunnel connection is offline: ${errorMessage}. Please start your tunnel (ngrok/Cloudflare/Tailscale) and ensure the Keeper Commander service is running.`;
     } else if (errorMessage.includes('fetch')) {
       return `Network error: ${errorMessage}. Please check your API URL and ensure the Keeper Commander service is running.`;
     } else if (errorMessage.includes('404')) {

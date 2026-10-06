@@ -45,6 +45,8 @@ permissions:
         - address: https://*.trycloudflare.com
         - address: https://*.cloudflareaccess.com
         - address: https://*.cfargotunnel.com
+        # Tailscale Funnel
+        - address: https://*.ts.net
 app:
   runtime:
     name: nodejs22.x
