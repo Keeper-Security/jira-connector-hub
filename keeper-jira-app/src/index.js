@@ -95,10 +95,20 @@ const KNOWN_TUNNEL_PATTERNS = [
     isFree: false,
     isDefaultManifest: true
   },
-  { 
+  {
     pattern: /^https:\/\/[a-z0-9-]+\.cfargotunnel\.com$/i,
     name: 'cfargotunnel.com',
     isFree: false,
+    isDefaultManifest: true
+  },
+  // Tailscale Funnel (default in manifest). Hostname is always
+  // <device>.<tailnet>.ts.net - both labels vary per customer/device
+  // (e.g. metron-mohsin-m5.taildb15b0.ts.net, kedqy2mxpgj7.taildb15b0.ts.net),
+  // and Funnel allows an optional non-default port (8443/10000; 443 has no suffix).
+  {
+    pattern: /^https:\/\/[a-z0-9]([a-z0-9-]*[a-z0-9])?\.[a-z0-9]([a-z0-9-]*[a-z0-9])?\.ts\.net(:\d+)?$/i,
+    name: 'ts.net',
+    isFree: true,
     isDefaultManifest: true
   },
   // Localhost for development (only http, not https)
@@ -229,8 +239,12 @@ async function testApiUrlReachability(apiUrl, apiKey) {
     const result = await testKeeperConnection(apiUrl, apiKey);
     
     // Check if the response indicates a valid Keeper Commander API
-    const serviceMessage = result.data?.message || '';
-    const isValidKeeperApi = serviceMessage.toLowerCase().includes('running') || 
+    // The service-status response's `message` field is not guaranteed to be a
+    // string (some Commander versions return an object/array), so coerce it
+    // before calling string methods on it.
+    const rawServiceMessage = result.data?.message;
+    const serviceMessage = typeof rawServiceMessage === 'string' ? rawServiceMessage : '';
+    const isValidKeeperApi = serviceMessage.toLowerCase().includes('running') ||
                             serviceMessage.toLowerCase().includes('keeper') ||
                             result.success === true;
     
@@ -477,7 +491,9 @@ resolver.define('testConnection', async (req) => {
     const result = await testKeeperConnection(apiUrl, effectiveApiKey);
 
     // Extract service status information from the response
-    const serviceMessage = result.data?.message || 'Service status unknown';
+    // See testApiUrlReachability() above: `message` is not guaranteed to be a string.
+    const rawServiceMessage = result.data?.message;
+    const serviceMessage = typeof rawServiceMessage === 'string' ? rawServiceMessage : 'Service status unknown';
     const isRunning = serviceMessage.toLowerCase().includes('running');
 
     return successResponse({ 
