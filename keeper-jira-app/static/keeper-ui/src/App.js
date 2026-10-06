@@ -244,16 +244,14 @@ const App = () => {
                     With Tailscale Funnel:
                   </p>
                   <code className="setup-docker-code">
-                    {`docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down' -f json -rm foreground -q y --user your@email.com --password yourpassword
-# Then, on the host (not a Commander flag):
-tailscale funnel 9009`}
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down' -f json -rm foreground -q y --user your@email.com --password yourpassword
                   </code>
 
                   <p className="setup-docker-note">
                     <strong>Parameters:</strong> <code className="setup-code-tiny">-ng</code> Ngrok auth token,
                     <code className="setup-code-tiny">-cd</code> Ngrok custom domain (subdomain portion only),
                     <code className="setup-code-tiny">-cf</code> Cloudflare tunnel token,
-                    <code className="setup-code-tiny">-cfd</code> Cloudflare custom domain. Tailscale Funnel has no Commander flags — it wraps the port from the OS level.
+                    <code className="setup-code-tiny">-cfd</code> Cloudflare custom domain
                   </p>
                 </div>
 
@@ -299,9 +297,7 @@ this-device timeout 30d`}
                     With Tailscale Funnel:
                   </p>
                   <code className="setup-cli-code">
-                    {`keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -f=json
-# Then, on the host (not a Commander flag):
-tailscale funnel 9009`}
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -f=json
                   </code>
 
                   <p className="setup-cli-note">
