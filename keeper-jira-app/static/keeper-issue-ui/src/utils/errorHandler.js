@@ -118,7 +118,7 @@ export const handleApiError = (error, defaultMessage = "An error occurred") => {
                       'Gateway Timeout (504)';
                       
     return `${statusText} - Unable to connect to Keeper service. Please verify that:\n\n` +
-           `1. Your tunneling service (ngrok/Cloudflare) is running\n` +
+           `1. Your tunneling service (ngrok/Cloudflare/Tailscale) is running\n` +
            `2. The Keeper Commander service is active\n` +
            `3. The API URL in global settings is correct\n` +
            `4. Your tunnel authentication is valid`;

@@ -154,6 +154,9 @@ const App = () => {
                 <p className="setup-text">
                   <strong className="setup-strong">Cloudflare Tunnel</strong> is an enterprise-grade alternative that provides secure, reliable tunneling through Cloudflare's global network. It offers enhanced security features and is particularly well-suited for production deployments. Learn more at <span onClick={() => router.open("https://www.cloudflare.com/products/tunnel/")} className="setup-link">Cloudflare Tunnel documentation</span> to obtain your tunnel token.
                 </p>
+                <p className="setup-text">
+                  <strong className="setup-strong">Tailscale Funnel</strong> is a free option if you're already using Tailscale — it exposes your Commander service through your existing tailnet with no separate signup or auth token. After starting Commander, run <code className="setup-code">tailscale funnel &lt;port&gt;</code> to get a public HTTPS URL. Learn more at <span onClick={() => router.open("https://tailscale.com/kb/1223/funnel")} className="setup-link">Tailscale Funnel documentation</span>.
+                </p>
                 <p className="setup-text-last">
                   Once your tunnel is established, you'll receive a public URL. Enter the <strong>complete API v2 URL</strong> in the Configuration tab including the <code className="setup-code">/api/v2</code> path (e.g., <code className="setup-code">https://your-tunnel-domain.ngrok.io/api/v2</code>). This integration uses API v2 async queue mode which requires Commander 17.1.7 or later.
                 </p>
@@ -236,12 +239,21 @@ const App = () => {
                   <code className="setup-docker-code">
                     docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down' -f json -rm foreground -q y -cf &lt;cloudflare-tunnel-token&gt; -cfd &lt;cloudflare-custom-domain&gt; --user your@email.com --password yourpassword
                   </code>
-                  
+
+                  <p className="setup-docker-subtitle-spacing">
+                    With Tailscale Funnel:
+                  </p>
+                  <code className="setup-docker-code">
+                    {`docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down' -f json -rm foreground -q y --user your@email.com --password yourpassword
+# Then, on the host (not a Commander flag):
+tailscale funnel 9009`}
+                  </code>
+
                   <p className="setup-docker-note">
-                    <strong>Parameters:</strong> <code className="setup-code-tiny">-ng</code> Ngrok auth token, 
-                    <code className="setup-code-tiny">-cd</code> Ngrok custom domain (subdomain portion only), 
-                    <code className="setup-code-tiny">-cf</code> Cloudflare tunnel token, 
-                    <code className="setup-code-tiny">-cfd</code> Cloudflare custom domain
+                    <strong>Parameters:</strong> <code className="setup-code-tiny">-ng</code> Ngrok auth token,
+                    <code className="setup-code-tiny">-cd</code> Ngrok custom domain (subdomain portion only),
+                    <code className="setup-code-tiny">-cf</code> Cloudflare tunnel token,
+                    <code className="setup-code-tiny">-cfd</code> Cloudflare custom domain. Tailscale Funnel has no Commander flags — it wraps the port from the OS level.
                   </p>
                 </div>
 
@@ -282,7 +294,16 @@ this-device timeout 30d`}
                   <code className="setup-cli-code">
                     keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -cf="&lt;cloudflare-tunnel-token&gt;" -cfd="&lt;cloudflare-custom-domain&gt;" -f=json
                   </code>
-                  
+
+                  <p className="setup-cli-subtitle-bold">
+                    With Tailscale Funnel:
+                  </p>
+                  <code className="setup-cli-code">
+                    {`keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -f=json
+# Then, on the host (not a Commander flag):
+tailscale funnel 9009`}
+                  </code>
+
                   <p className="setup-cli-note">
                     <strong>Note:</strong> After service creation, the API key will be displayed in the console output. Make sure to copy and store it securely.
                   </p>
@@ -362,7 +383,7 @@ this-device timeout 30d`}
                 </h3>
                 
                 <p className="setup-text-spacing">
-                  The integration operates through a three-tier architecture: Jira Cloud hosts the Forge app frontend, Keeper Commander CLI runs in Service Mode to provide REST API access to vault operations, and a tunneling solution (Ngrok or Cloudflare Tunnel) bridges the local service with cloud-hosted Jira. This architecture ensures secure communication while maintaining the flexibility of on-premises credential storage.
+                  The integration operates through a three-tier architecture: Jira Cloud hosts the Forge app frontend, Keeper Commander CLI runs in Service Mode to provide REST API access to vault operations, and a tunneling solution (Ngrok, Cloudflare Tunnel, or Tailscale Funnel) bridges the local service with cloud-hosted Jira. This architecture ensures secure communication while maintaining the flexibility of on-premises credential storage.
                 </p>
 
                 <p className="setup-text-spacing">

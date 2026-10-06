@@ -56,7 +56,7 @@ const ConfigForm = ({
                 />
                 <div className="config-form-helper-text">
                   Enter the base URL of your Keeper Commander Service (e.g., <code>https://your-tunnel.ngrok-free.app</code> or your custom domain). 
-                  <strong>Built-in support:</strong> ngrok, Cloudflare tunnels. <strong>Custom domains</strong> are supported for per-customer deployments (ensure added to manifest.yml).
+                  <strong>Built-in support:</strong> ngrok, Cloudflare, or Tailscale Funnel tunnels. <strong>Custom domains</strong> are supported for per-customer deployments (ensure added to manifest.yml).
                   Requires Commander 17.1.7+ with queue enabled (<code>-q y</code>).{' '}
                   <span 
                     onClick={() => router.open("https://docs.keeper.io/en/keeperpam/commander-cli/service-mode-rest-api/api-usage")} 
