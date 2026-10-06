@@ -155,7 +155,7 @@ const App = () => {
                   <strong className="setup-strong">Cloudflare Tunnel</strong> is an enterprise-grade alternative that provides secure, reliable tunneling through Cloudflare's global network. It offers enhanced security features and is particularly well-suited for production deployments. Learn more at <span onClick={() => router.open("https://www.cloudflare.com/products/tunnel/")} className="setup-link">Cloudflare Tunnel documentation</span> to obtain your tunnel token.
                 </p>
                 <p className="setup-text">
-                  <strong className="setup-strong">Tailscale Funnel</strong> is a free option if you're already using Tailscale — it exposes your Commander service through your existing tailnet with no separate signup or auth token. After starting Commander, run <code className="setup-code">tailscale funnel &lt;port&gt;</code> to get a public HTTPS URL. Learn more at <span onClick={() => router.open("https://tailscale.com/kb/1223/funnel")} className="setup-link">Tailscale Funnel documentation</span>.
+                  <strong className="setup-strong">Tailscale Funnel</strong> is a free option if you're already using Tailscale. Generate a reusable auth key from your Tailscale admin console (Settings → Keys) — Commander re-authenticates on every start, so a single-use key only works once. Visit <span onClick={() => router.open("https://tailscale.com/kb/1223/funnel")} className="setup-link">Tailscale Funnel documentation</span> to learn more.
                 </p>
                 <p className="setup-text-last">
                   Once your tunnel is established, you'll receive a public URL. Enter the <strong>complete API v2 URL</strong> in the Configuration tab including the <code className="setup-code">/api/v2</code> path (e.g., <code className="setup-code">https://your-tunnel-domain.ngrok.io/api/v2</code>). This integration uses API v2 async queue mode which requires Commander 17.1.7 or later.
@@ -244,14 +244,16 @@ const App = () => {
                     With Tailscale Funnel:
                   </p>
                   <code className="setup-docker-code">
-                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down' -f json -rm foreground -q y --user your@email.com --password yourpassword
+                    docker run -d -p 9009:9009 keeper-commander service-create -p 9009 -c 'record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down' -f json -rm foreground -q y -ts &lt;tailscale-auth-key&gt; --user your@email.com --password yourpassword
                   </code>
 
                   <p className="setup-docker-note">
                     <strong>Parameters:</strong> <code className="setup-code-tiny">-ng</code> Ngrok auth token,
                     <code className="setup-code-tiny">-cd</code> Ngrok custom domain (subdomain portion only),
                     <code className="setup-code-tiny">-cf</code> Cloudflare tunnel token,
-                    <code className="setup-code-tiny">-cfd</code> Cloudflare custom domain
+                    <code className="setup-code-tiny">-cfd</code> Cloudflare custom domain,
+                    <code className="setup-code-tiny">-ts</code> Tailscale auth key,
+                    <code className="setup-code-tiny">-tst</code> Tailscale ACL tags (OAuth-issued keys only)
                   </p>
                 </div>
 
@@ -297,7 +299,7 @@ this-device timeout 30d`}
                     With Tailscale Funnel:
                   </p>
                   <code className="setup-cli-code">
-                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -f=json
+                    keeper service-create -p=9009 -c="record-add,list,ls,get,record-type-info,record-update,share-record,share-folder,rti,record-permission,nsf-list,nsf-get,nsf-record-add,nsf-record-update,nsf-share-folder,nsf-share-record,nsf-record-permission,epm,service-status,sync-down" -rm="foreground" -q=y -ts="&lt;tailscale-auth-key&gt;" -f=json
                   </code>
 
                   <p className="setup-cli-note">
